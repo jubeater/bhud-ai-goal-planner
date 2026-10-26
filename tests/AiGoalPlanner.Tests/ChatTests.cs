@@ -520,6 +520,54 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_cut_off_reply_that_tries_a_Lookup_shows_its_notice_and_runs_nothing() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+
+            model.WillCallTool("list_installed_modules", "call_1", finishReason: ChatFinishReason.Length);
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("What modules do I have?");
+
+            // The reply was cut off mid-thought, so its tool call is not run, and no further
+            // Request goes out to the model. The Notice is the one a plain cut-off reply gets.
+            Assert.Equal(1, model.Requests.Count);
+            Assert.Equal(0, world.ListCalls);
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("cut off", notice.Text);
+                              });
+        }
+
+        [Fact]
+        public async Task A_refused_reply_that_tries_a_Lookup_shows_its_notice_and_runs_nothing() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+
+            model.WillCallTool("list_installed_modules", "call_1", finishReason: ChatFinishReason.ContentFilter);
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("What modules do I have?");
+
+            Assert.Equal(1, model.Requests.Count);
+            Assert.Equal(0, world.ListCalls);
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("refused", notice.Text);
+                              });
+        }
+
+        [Fact]
         public async Task A_secret_Setting_never_reaches_the_model_even_when_it_is_asked_for_by_name() {
             var model = new ScriptedChatClient();
             var world = new FakeWorld();

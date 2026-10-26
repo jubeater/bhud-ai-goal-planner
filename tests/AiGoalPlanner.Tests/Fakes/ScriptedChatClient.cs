@@ -40,9 +40,11 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 
         /// <summary>
         /// Makes the next reply a call to <paramref name="toolName"/>, the way a model asks to run a
-        /// tool before it gives its answer.
+        /// tool before it gives its answer. <paramref name="finishReason"/> forces the reason the
+        /// reply ends with, the way a Provider that cut the reply off would report it.
         /// </summary>
-        public void WillCallTool(string toolName = "test_tool", string callId = "call_0", IDictionary<string, object> arguments = null, string text = "") {
+        public void WillCallTool(string toolName = "test_tool", string callId = "call_0", IDictionary<string, object> arguments = null, string text = "",
+                                 ChatFinishReason? finishReason = null) {
             var contents = new List<AIContent>();
 
             if (text.Length > 0) contents.Add(new TextContent(text));
@@ -50,7 +52,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             contents.Add(new FunctionCallContent(callId, toolName, arguments));
 
             _script.Enqueue(new ChatResponse(new Microsoft.Extensions.AI.ChatMessage(ChatRole.Assistant, contents)) {
-                FinishReason = ChatFinishReason.ToolCalls
+                FinishReason = finishReason ?? ChatFinishReason.ToolCalls
             });
         }
 

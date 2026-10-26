@@ -212,6 +212,20 @@ namespace jubeater.aigoalplanner.Core
                     return;
                 }
 
+                // Only a reply that finished normally gets its calls run: a reply that was cut off
+                // or refused stopped mid-thought, so its tool calls are the remains of an idea, not
+                // a request to check something. They are not added to the history either — the
+                // model never made them — and the same Notice a plain reply gets explains why
+                // there is no answer.
+                ChatFinishReason? finishReason = response.FinishReason;
+
+                if (finishReason.HasValue
+                 && (finishReason.Value.Equals(ChatFinishReason.Length) || finishReason.Value.Equals(ChatFinishReason.ContentFilter))) {
+                    TryAppendNotice(generation, DescribeFinishReason(finishReason.Value, response.Text));
+
+                    return;
+                }
+
                 if (_tools != null && calls.Any(call => _tools.IsProposal(call.Name))) {
                     // A proposal is delivered to the Player, not run: per ADR-0003 nothing changes
                     // until the Player applies it. The Review flow that takes a proposal from here
