@@ -22,32 +22,55 @@ namespace jubeater.aigoalplanner.UI
 
         private const string WindowId = "jubeater.aigoalplanner.chat";
 
+        private const int WindowWidth       = 560;
+        private const int WindowHeight      = 680;
         private const int MessageListWidth  = 500;
-        private const int MessageListHeight = 540;
+        private const int MessageListHeight = 470;
         private const int MessageSpacing    = 6;
-        private const int InputRowTop       = 550;
+        private const int InputRowTop       = 480;
+        private const int ProviderRowTop    = 514;
         private const int RequestBoxWidth   = 300;
 
         private static readonly Color PlayerColor = new Color(235, 200, 130);
         private static readonly Color AiColor     = Color.White;
+
+        /// <summary>
+        /// Notices are what the Chat says itself, and they are usually bad news, so they are kept
+        /// apart from what the Player and the AI said.
+        /// </summary>
+        private static readonly Color NoticeColor = new Color(240, 165, 150);
         private static readonly Color HintColor   = new Color(170, 170, 170);
 
-        private readonly Chat           _chat;
+        private readonly Chat         _chat;
+        private readonly Action       _openProviderSettings;
+        private readonly Func<string> _describeProvider;
+
         private readonly StandardWindow _window;
         private readonly Panel          _messageList;
         private readonly Scrollbar      _scrollbar;
         private readonly Label          _emptyHint;
+        private readonly Label          _providerLabel;
         private readonly TextBox        _requestBox;
         private readonly StandardButton _sendButton;
         private readonly StandardButton _newChatButton;
+        private readonly StandardButton _providerButton;
         private readonly List<Control>  _messageControls = new List<Control>();
 
-        public ChatWindow(Chat chat, AsyncTexture2D windowBackground, Texture2D emblem) {
-            _chat = chat ?? throw new ArgumentNullException(nameof(chat));
+        private bool _renderQueued;
+        private bool _disposed;
+
+        public ChatWindow(Chat          chat,
+                          AsyncTexture2D windowBackground,
+                          Texture2D     emblem,
+                          Action        openProviderSettings,
+                          Func<string>  describeProvider) {
+            _chat                 = chat ?? throw new ArgumentNullException(nameof(chat));
+            _openProviderSettings = openProviderSettings ?? throw new ArgumentNullException(nameof(openProviderSettings));
+            _describeProvider     = describeProvider ?? throw new ArgumentNullException(nameof(describeProvider));
 
             _window = new StandardWindow(
                 windowBackground,
-                new Rectangle(25, 26, 560, 640),
+                new Rectangle(25, 26, WindowWidth, WindowHeight),
                 new Rectangle(40, 50, 540, 590)) {
                 Parent        = GameService.Graphics.SpriteScreen,
                 Title         = "AI Goal Planner",
@@ -59,15 +82,23 @@ namespace jubeater.aigoalplanner.UI
                 CanResize     = false
             };
 
-            _messageList = new Panel {
+            // A Blish HUD window already shifts its children by its ContentRegion, so the panel only
+            // has to fill that region: its own top-left corner is where the content starts.
+            var content = new Panel {
                 Parent          = _window,
+                Size            = _window.ContentRegion.Size,
+                BackgroundColor = Color.Transparent
+            };
+
+            _messageList = new Panel {
+                Parent          = content,
                 Location        = new Point(0, 0),
                 Size            = new Point(MessageListWidth, MessageListHeight),
                 BackgroundColor = Color.Transparent
             };
 
             _scrollbar = new Scrollbar(_messageList) {
-                Parent   = _window,
+                Parent   = content,
                 Location = new Point(MessageListWidth + 4, 0),
                 Height   = MessageListHeight
             };
@@ -84,7 +115,7 @@ namespace jubeater.aigoalplanner.UI
             };
 
             _requestBox = new TextBox {
-                Parent          = _window,
+                Parent          = content,
                 Location        = new Point(0, InputRowTop),
                 Size            = new Point(RequestBoxWidth, 27),
                 PlaceholderText = "What do you want to do?"
@@ -92,7 +123,7 @@ namespace jubeater.aigoalplanner.UI
             _requestBox.EnterPressed += OnRequestBoxEnterPressed;
 
             _sendButton = new StandardButton {
-                Parent   = _window,
+                Parent   = content,
                 Location = new Point(RequestBoxWidth + 6, InputRowTop),
                 Size     = new Point(90, StandardButton.STANDARD_CONTROL_HEIGHT),
                 Text     = "Send"
@@ -100,17 +131,37 @@ namespace jubeater.aigoalplanner.UI
             _sendButton.Click += OnSendClicked;
 
             _newChatButton = new StandardButton {
-                Parent   = _window,
+                Parent   = content,
                 Location = new Point(RequestBoxWidth + 102, InputRowTop),
                 Size     = new Point(112, StandardButton.STANDARD_CONTROL_HEIGHT),
                 Text     = "New chat"
             };
             _newChatButton.Click += OnNewChatClicked;
 
+            _providerButton = new StandardButton {
+                Parent   = content,
+                Location = new Point(0, ProviderRowTop),
+                Size     = new Point(150, StandardButton.STANDARD_CONTROL_HEIGHT),
+                Text     = "Provider settings"
+            };
+            _providerButton.Click += OnProviderButtonClicked;
+
+            // A reminder of which Provider the Chat will talk to, so a wrong endpoint or model name
+            // is visible before the Player gets an error back.
+            _providerLabel = new Label {
+                Parent    = content,
+                Location  = new Point(156, ProviderRowTop + 6),
+                Size      = new Point(384, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
+                Text      = string.Empty
+            };
+
             _chat.MessagesChanged += OnMessagesChanged;
 
             // The Player opens the Chat from the corner icon, so it starts out hidden.
             _window.Visible = false;
+            RefreshProvider();
             RenderMessages();
         }
 
@@ -120,17 +171,33 @@ namespace jubeater.aigoalplanner.UI
         public void Toggle() {
             if (_window.Visible) {
                 _window.Hide();
-            } else {
-                _window.Show();
+                return;
             }
+
+            // Settings may have changed while the window was closed.
+            RefreshProvider();
+            _window.Show();
+            _requestBox.Focused = true;
+        }
+
+        /// <summary>
+        /// Rewrites the line that says which Provider the Chat will use.
+        /// </summary>
+        public void RefreshProvider() {
+            if (_disposed) return;
+
+            _providerLabel.Text = _describeProvider();
         }
 
         public void Dispose() {
+            _disposed = true;
+
             _chat.MessagesChanged -= OnMessagesChanged;
 
             _requestBox.EnterPressed -= OnRequestBoxEnterPressed;
             _sendButton.Click        -= OnSendClicked;
             _newChatButton.Click     -= OnNewChatClicked;
+            _providerButton.Click    -= OnProviderButtonClicked;
 
             _window.Dispose();
         }
@@ -148,25 +215,51 @@ namespace jubeater.aigoalplanner.UI
             _chat.StartNewChat();
         }
 
+        private void OnProviderButtonClicked(object sender, MouseEventArgs e) {
+            _openProviderSettings();
+        }
+
         private void SendRequest() {
             string request = _requestBox.Text;
 
             if (string.IsNullOrWhiteSpace(request)) return;
 
+            // The Player's Request is shown by the Chat, so the box is cleared straight away
+            // instead of waiting for the Provider to answer.
             _requestBox.Text = string.Empty;
 
             SendRequestAsync(request);
         }
 
+        /// <summary>
+        /// Asks the Chat for a reply. Failures end up in the Chat as a Notice, so the only thing
+        /// left to do here is to keep the game from crashing on an unexpected error.
+        /// </summary>
         private async void SendRequestAsync(string request) {
             try {
                 await _chat.SendAsync(request);
             } catch (Exception exception) {
-                Logger.Warn(exception, "Sending the Request failed.");
+                Logger.Warn(exception, "Sending the Request to the Provider failed.");
             }
         }
 
+        /// <summary>
+        /// The Chat raises this on whatever thread the Provider answered on, and Blish HUD controls
+        /// may only be touched from the game's update thread, so painting is queued there.
+        /// </summary>
         private void OnMessagesChanged(object sender, EventArgs e) {
+            if (_disposed || _renderQueued) return;
+
+            _renderQueued = true;
+
+            GameService.Overlay.QueueMainThreadUpdate(OnMainThreadUpdate);
+        }
+
+        private void OnMainThreadUpdate(GameTime gameTime) {
+            _renderQueued = false;
+
+            if (_disposed) return;
+
             RenderMessages();
         }
 
@@ -189,9 +282,9 @@ namespace jubeater.aigoalplanner.UI
             foreach (ChatMessage message in messages) {
                 var label = new Label {
                     Parent         = _messageList,
-                    Text           = GetAuthorName(message.Author) + ": " + message.Text,
+                    Text           = Format(message),
                     Font           = GameService.Content.DefaultFont16,
-                    TextColor      = message.Author == ChatMessageAuthor.Player ? PlayerColor : AiColor,
+                    TextColor      = ColorFor(message.Author),
                     WrapText       = true,
                     Width          = MessageListWidth,
                     AutoSizeHeight = true
@@ -205,12 +298,32 @@ namespace jubeater.aigoalplanner.UI
                 top = label.Bottom + MessageSpacing;
             }
 
+            // The scrollbar scrolls the panel, so it has to be told about the new content before it
+            // is pushed to the bottom to show the reply that just arrived.
             _scrollbar.RecalculateLayout();
             _scrollbar.ScrollDistance = 1f;
         }
 
-        private static string GetAuthorName(ChatMessageAuthor author) {
-            return author == ChatMessageAuthor.Player ? "Player" : "AI";
+        private static string Format(ChatMessage message) {
+            switch (message.Author) {
+                case ChatMessageAuthor.Player:
+                    return "Player: " + message.Text;
+                case ChatMessageAuthor.Ai:
+                    return "AI: " + message.Text;
+                default:
+                    return message.Text;
+            }
+        }
+
+        private static Color ColorFor(ChatMessageAuthor author) {
+            switch (author) {
+                case ChatMessageAuthor.Player:
+                    return PlayerColor;
+                case ChatMessageAuthor.Ai:
+                    return AiColor;
+                default:
+                    return NoticeColor;
+            }
         }
     }
 }

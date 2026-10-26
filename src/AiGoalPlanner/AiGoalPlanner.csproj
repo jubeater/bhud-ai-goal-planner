@@ -10,17 +10,62 @@
     <DebugType>embedded</DebugType>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!--
-      Blish HUD already has these assemblies loaded; shipping them in the .bhm would make
-      the module enormous and can cause duplicate-assembly problems inside its process.
+      The module now has libraries Blish HUD does not ship (Microsoft.Extensions.AI.Abstractions
+      and its System.Text.Json tree), so its dependencies have to travel in the .bhm. Blish HUD's
+      own assemblies are filtered out again before packaging; see the target below.
     -->
-    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ProviderKeyStore uses ProtectedData (DPAPI), which lives in System.Security on net48. -->
+    <Reference Include="System.Security" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="BlishHUD" Version="1.3.0">
       <!-- Our own content lives in ref/; Blish HUD's own content is never bundled into a module. -->
       <ExcludeAssets>contentFiles</ExcludeAssets>
+      <!-- Blish HUD already loads these; the module only compiles against them. -->
+      <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.11.0" />
   </ItemGroup>
+
+  <!--
+    CopyLocalLockFileAssemblies brings in Blish HUD's whole dependency tree as well as the
+    libraries this module actually needs. Blish HUD already has its own assemblies loaded, so
+    they are removed again before the .bhm is zipped; only what Blish HUD does not provide is
+    packaged. Keep this list in step with Blish HUD's own package dependencies.
+  -->
+  <Target Name="TrimBlishHudAssembliesFromModule" BeforeTargets="BuildBlishHUDModule">
+    <ItemGroup>
+      <BlishHudProvidedFile Include="$(OutDir)Blish HUD.exe" />
+      <BlishHudProvidedFile Include="$(OutDir)AsyncClipboardService.dll" />
+      <BlishHudProvidedFile Include="$(OutDir)Gw2Sharp.dll" />
+      <BlishHudProvidedFile Include="$(OutDir)MonoGame.Extended.dll" />
+      <BlishHudProvidedFile Include="$(OutDir)MonoGame.Framework.dll" />
+      <BlishHudProvidedFile Include="$(OutDir)NAudio.Core.dll" />
+      <BlishHudProvidedFile Include="$(OutDir)NAudio.Wasapi.dll" />
+      <BlishHudProvidedFile Include="$(OutDir)Newtonsoft.Json.dll" />
+      <BlishHudProvidedFile Include="$(OutDir)SharpDX*.dll" />
+      <BlishHudProvidedFile Include="$(OutDir)System.Resources.Extensions.dll" />
+      <BlishHudProvidedFile Include="$(OutDir)System.ServiceModel.Primitives.dll" />
+    </ItemGroup>
+    <Delete Files="@(BlishHudProvidedFile)" />
+    <RemoveDir Directories="$(OutDir)de;$(OutDir)es;$(OutDir)fr" />
+    <!--
+      The packaging target stages the whole output directory, so a .bhm left there by an earlier
+      build would be packed into the next one — doubling its size, or growing it on every build
+      that sends the zip elsewhere with -p:BlishHUDModuleOutputDir=... . The module file itself is
+      left to the packaging target, which knows best when it can be replaced.
+    -->
+    <ItemGroup>
+      <StaleModuleFile Include="$(OutDir)*.bhm" Exclude="$(BlishHUDModuleFilePath)" />
+    </ItemGroup>
+    <!-- Best effort: the leftover is inert if it stays, and a warning beats failing a build that
+         Blish HUD is running beside. -->
+    <Delete Files="@(StaleModuleFile)" ContinueOnError="WarnAndContinue" />
+  </Target>
 
 </Project>

@@ -15,5 +15,6 @@
       "name": "jubeater"
     }
   ],
+  "directories": [ "aigoalplanner" ],
   "enabled_without_gw2": false
 }

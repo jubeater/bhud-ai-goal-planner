@@ -17,3 +17,4 @@ The maintainer and many Players want to use whatever model they already pay for,
 - Models differ a lot in how well they call tools. The tool-calling test on first use, the strict `submit_plan` schema and the validator matter more, because no single tested Provider anchors quality.
 - Tokens remain the usage unit, with cached tokens shown only when the Provider reports them.
 - Optional settings are passed through only if the endpoint accepts them.
+- The Client stays small enough to ship inside a Blish HUD module: the wire format is plain HTTP with the `Newtonsoft.Json` Blish HUD already loads, and `Microsoft.Extensions.AI.Abstractions` is the only library the `.bhm` adds. A Provider SDK would bring a second JSON stack and another `System.Text.Json` to fight over in Blish HUD's process, where one version per assembly name gets loaded ([blish-hud/Blish-HUD#740](https://github.com/blish-hud/Blish-HUD/issues/740)).

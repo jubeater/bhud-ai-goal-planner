@@ -18,6 +18,11 @@ _Avoid_: Session, thread, conversation
 A message the Player sends in a Chat, describing what they want.
 _Avoid_: Prompt, query, command
 
+**Notice**:
+A line the Chat shows instead of an AI reply when there is no usable answer: a reply the model cut
+off or refused, or a Provider that could not be reached. The AI never sees Notices.
+_Avoid_: Error, warning, system message
+
 **Preset**:
 A ready-made Request for a common goal, such as hero points, mastery points or XP, that the Player can edit before sending.
 _Avoid_: Mode, template, profile

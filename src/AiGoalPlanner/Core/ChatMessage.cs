@@ -8,7 +8,13 @@ namespace jubeater.aigoalplanner.Core
     public enum ChatMessageAuthor
     {
         Player,
-        Ai
+        Ai,
+
+        /// <summary>
+        /// The module itself, explaining something the Player needs to know such as a cut-off
+        /// reply or a Provider error. Notices are never sent to the model.
+        /// </summary>
+        Notice
     }
 
     /// <summary>
