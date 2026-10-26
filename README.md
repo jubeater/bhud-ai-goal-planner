@@ -38,7 +38,7 @@ so Ollama, DeepSeek, OpenAI and the rest work with only the endpoint, the model 
 1. Open the Chat window from the corner icon, then click **Provider settings**.
 2. Enter the **endpoint URL**: `https://ollama.com/v1`, `https://api.deepseek.com` or, for a local
    Ollama, `http://localhost:11434/v1`. A base URL is enough; `/chat/completions` is appended.
-3. Enter the **model name**: `deepseek-chat`, `beam:cloud`, `qwen3.5:9b`.
+3. Enter the **model name**: `deepseek-flash`, `beam:cloud`, `qwen3.5:9b`.
 4. Paste the **API key** if the Provider needs one: put the key on the clipboard and click
    **Paste key**. A local Ollama needs no key at all.
 5. Click **Save**. The next Request uses these settings; the line under the input row says which
