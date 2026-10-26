@@ -24,6 +24,12 @@ namespace jubeater.aigoalplanner.Core
         private readonly object            _messagesLock = new object();
         private readonly SemaphoreSlim     _sendLock     = new SemaphoreSlim(1, 1);
 
+        /// <summary>
+        /// Which Chat this is, so work started in one Chat can tell that the Player has moved on. It
+        /// moves on under <c>_messagesLock</c>, together with emptying the Chat, which is what makes
+        /// "still the same Chat?" and "add to it" one step. A read outside that lock only decides
+        /// whether it is worth starting; whether a message lands is decided under the lock.
+        /// </summary>
         private int _generation;
 
         /// <summary>
@@ -63,7 +69,9 @@ namespace jubeater.aigoalplanner.Core
         /// Player and the AI said goes back to the model, behind the identity message that says which
         /// product the model is part of; notices stay in the Chat. Sends are serialized, and a Request
         /// that is still waiting its turn when the Player starts a new Chat is dropped instead of
-        /// being sent into the new one.
+        /// being sent into the new one. So is whatever else the old Chat still had coming: a reply or a
+        /// Notice joins the Chat only while it is still the current one, so it can neither appear in
+        /// the new Chat nor be sent to the model with it.
         /// </remarks>
         public async Task SendAsync(string request, CancellationToken cancellationToken = default) {
             if (string.IsNullOrWhiteSpace(request)) return;
@@ -77,9 +85,7 @@ namespace jubeater.aigoalplanner.Core
             try {
                 // The Player started a new Chat while this Request was queued: it is dropped
                 // before it is shown and before the model sees it.
-                if (generation != Volatile.Read(ref _generation)) return;
-
-                Append(new ChatMessage(ChatMessageAuthor.Player, request.Trim()));
+                if (!TryAppend(generation, new ChatMessage(ChatMessageAuthor.Player, request.Trim()))) return;
 
                 ChatResponse response;
 
@@ -90,22 +96,21 @@ namespace jubeater.aigoalplanner.Core
                                       .GetResponseAsync(BuildHistory(), cancellationToken: cancellationToken)
                                       .ConfigureAwait(false);
                 } catch (ProviderException exception) {
-                    if (generation == Volatile.Read(ref _generation)) AppendNotice(Describe(exception.Failure));
+                    TryAppendNotice(generation, Describe(exception.Failure));
 
                     return;
                 } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
                     throw;
                 } catch (Exception) {
-                    if (generation == Volatile.Read(ref _generation)) AppendNotice(Describe(ProviderFailure.Unexpected));
+                    TryAppendNotice(generation, Describe(ProviderFailure.Unexpected));
 
                     return;
                 }
 
-                // The Player started a new Chat while the Provider was thinking: the reply belongs
-                // to the old Chat, so it is dropped rather than shown out of context.
-                if (generation != Volatile.Read(ref _generation)) return;
-
-                ShowResponse(response);
+                // The Player may have started a new Chat while the Provider was thinking. The reply
+                // then belongs to the old Chat, so it is dropped rather than shown out of context:
+                // ShowResponse appends only while the Chat it answers is still the current one.
+                ShowResponse(generation, response);
             } finally {
                 _sendLock.Release();
             }
@@ -114,19 +119,24 @@ namespace jubeater.aigoalplanner.Core
         /// <summary>
         /// Starts a new Chat: what the Player said before is cleared, and the next Request starts from scratch.
         /// </summary>
+        /// <remarks>
+        /// Emptying the Chat and moving on to the next generation happen together, under the lock
+        /// that guards the messages, so nothing that is happening in the old Chat at that moment can
+        /// land in the new one: a reply, or a Notice about a Request that failed, either gets there
+        /// first and is cleared with the old Chat, or does not get there at all.
+        /// </remarks>
         public void StartNewChat() {
             lock (_messagesLock) {
                 _messages.Clear();
+                Interlocked.Increment(ref _generation);
             }
-
-            Interlocked.Increment(ref _generation);
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        private void ShowResponse(ChatResponse response) {
+        private void ShowResponse(int generation, ChatResponse response) {
             if (response == null) {
-                AppendNotice(Describe(ProviderFailure.Unexpected));
+                TryAppendNotice(generation, Describe(ProviderFailure.Unexpected));
                 return;
             }
 
@@ -134,16 +144,16 @@ namespace jubeater.aigoalplanner.Core
             string            text         = response.Text;
 
             if (finishReason.HasValue && !string.IsNullOrEmpty(finishReason.Value.Value) && !finishReason.Value.Equals(ChatFinishReason.Stop)) {
-                AppendNotice(DescribeFinishReason(finishReason.Value, text));
+                TryAppendNotice(generation, DescribeFinishReason(finishReason.Value, text));
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(text)) {
-                AppendNotice("The Provider returned an empty reply. Try again.");
+                TryAppendNotice(generation, "The Provider returned an empty reply. Try again.");
                 return;
             }
 
-            Append(new ChatMessage(ChatMessageAuthor.Ai, text));
+            TryAppend(generation, new ChatMessage(ChatMessageAuthor.Ai, text));
         }
 
         /// <summary>
@@ -206,16 +216,30 @@ namespace jubeater.aigoalplanner.Core
             }
         }
 
-        private void AppendNotice(string text) {
-            Append(new ChatMessage(ChatMessageAuthor.Notice, text));
-        }
-
-        private void Append(ChatMessage message) {
+        /// <summary>
+        /// Adds <paramref name="message"/> to the Chat only while <paramref name="generation"/> is
+        /// still the Chat the Player is looking at, and says whether it landed.
+        /// </summary>
+        /// <remarks>
+        /// Asking whether it is still the same Chat and adding to it happen under one lock, the same
+        /// lock New chat empties the Chat under. That is what keeps a reply from slipping into a Chat
+        /// it does not belong to: it either lands first and goes with the old Chat, or it does not
+        /// land at all. The Chat window is told outside the lock, so it can read the Chat back.
+        /// </remarks>
+        private bool TryAppend(int generation, ChatMessage message) {
             lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return false;
+
                 _messages.Add(message);
             }
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
+
+            return true;
+        }
+
+        private bool TryAppendNotice(int generation, string text) {
+            return TryAppend(generation, new ChatMessage(ChatMessageAuthor.Notice, text));
         }
     }
 }

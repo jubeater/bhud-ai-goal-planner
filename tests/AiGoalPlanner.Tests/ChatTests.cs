@@ -190,6 +190,48 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_reply_that_is_ready_when_the_Player_starts_over_lands_nowhere() {
+            var model = new ScriptedChatClient();
+            model.WillReply("An answer for the old Chat.");
+            model.WillReply("An answer for the new Chat.");
+
+            var chat = NewChat(model);
+
+            // The model has its reply in hand, and the Player starts over before the Chat is given
+            // it: the reply belongs to the old Chat, and joining the new one would put it in front
+            // of the model on the next Request.
+            model.WillRunWhenTheReplyIsReady(chat.StartNewChat);
+
+            await chat.SendAsync("Finish the hero points on this map");
+
+            Assert.Empty(chat.Messages);
+
+            await chat.SendAsync("Level an alt");
+
+            // The new Chat is what it looks like: the Request the Player just sent and its answer.
+            Assert.Equal(2, chat.Messages.Count);
+            Assert.Equal("Level an alt", chat.Messages[0].Text);
+            Assert.Equal("An answer for the new Chat.", chat.Messages[1].Text);
+
+            // And the old reply was not sent to the model with it.
+            Assert.Equal(new[] { "Level an alt" }, WithoutTheIdentityMessage(model.Requests[1]));
+        }
+
+        [Fact]
+        public async Task A_failure_that_is_ready_when_the_Player_starts_over_leaves_no_Notice() {
+            var model = new ScriptedChatClient();
+            model.WillFail(ProviderFailure.Network);
+
+            var chat = NewChat(model);
+            model.WillRunWhenTheReplyIsReady(chat.StartNewChat);
+
+            await chat.SendAsync("Finish the hero points on this map");
+
+            // The Request and the Notice about it both belong to the Chat the Player left.
+            Assert.Empty(chat.Messages);
+        }
+
+        [Fact]
         public async Task Sending_nothing_adds_nothing_to_the_Chat() {
             var model = new ScriptedChatClient();
             var chat  = NewChat(model);

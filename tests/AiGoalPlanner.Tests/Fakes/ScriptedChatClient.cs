@@ -18,6 +18,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
         private readonly Queue<object> _script = new Queue<object>();
 
         private TaskCompletionSource<bool> _hold;
+        private Action                   _afterReply;
 
         public List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>> Requests { get; } =
             new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
@@ -50,6 +51,14 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             _hold?.TrySetResult(true);
         }
 
+        /// <summary>
+        /// Runs <paramref name="action"/> once, as soon as the next reply is ready and before the
+        /// Chat is given it, so a test can land something in between without depending on timing.
+        /// </summary>
+        public void WillRunWhenTheReplyIsReady(Action action) {
+            _afterReply = action;
+        }
+
         public async Task<ChatResponse> GetResponseAsync(IEnumerable<Microsoft.Extensions.AI.ChatMessage> messages,
                                                          ChatOptions                                  options           = null,
                                                          CancellationToken                            cancellationToken = default) {
@@ -62,6 +71,11 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             if (_script.Count == 0) throw new InvalidOperationException("The scripted model has no reply left.");
 
             object next = _script.Dequeue();
+
+            Action afterReply = _afterReply;
+            _afterReply = null;
+
+            afterReply?.Invoke();
 
             if (next is ProviderException failure) throw failure;
 
