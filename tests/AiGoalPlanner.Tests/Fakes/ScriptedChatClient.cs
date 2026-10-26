@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,6 +24,8 @@ namespace jubeater.aigoalplanner.Tests.Fakes
         public List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>> Requests { get; } =
             new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
 
+        public List<ChatOptions> RequestOptions { get; } = new List<ChatOptions>();
+
         public void WillReply(string text) {
             _script.Enqueue(new ChatResponse(new Microsoft.Extensions.AI.ChatMessage(ChatRole.Assistant, text)) {
                 FinishReason = ChatFinishReason.Stop
@@ -37,6 +40,14 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 
         public void WillFail(ProviderFailure failure) {
             _script.Enqueue(new ProviderException(failure));
+        }
+
+        public void WillFail(ProviderFailure failure, HttpStatusCode statusCode) {
+            _script.Enqueue(new ProviderException(failure, statusCode));
+        }
+
+        public void WillFail(Exception exception) {
+            _script.Enqueue(exception);
         }
 
         public void WillCallTool(string toolName = "test_tool") {
@@ -71,6 +82,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
                                                          ChatOptions                                  options           = null,
                                                          CancellationToken                            cancellationToken = default) {
             Requests.Add(messages.ToList());
+            RequestOptions.Add(options);
 
             TaskCompletionSource<bool> hold = _hold;
 
@@ -85,7 +97,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 
             afterReply?.Invoke();
 
-            if (next is ProviderException failure) throw failure;
+            if (next is Exception exception) throw exception;
 
             return (ChatResponse)next;
         }

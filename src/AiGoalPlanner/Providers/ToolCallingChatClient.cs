@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,12 +27,11 @@ namespace jubeater.aigoalplanner.Providers
         private readonly string                      _endpoint;
         private readonly string                      _model;
         private readonly ToolCallingCapabilityStore  _capabilityStore;
-        private readonly SemaphoreSlim               _probeLock = new SemaphoreSlim(1, 1);
 
         public ToolCallingChatClient(IChatClient                innerClient,
-                                    string                     endpoint,
-                                    string                     model,
-                                    ToolCallingCapabilityStore capabilityStore) {
+                                     string                     endpoint,
+                                     string                     model,
+                                     ToolCallingCapabilityStore capabilityStore) {
             _innerClient      = innerClient      ?? throw new ArgumentNullException(nameof(innerClient));
             _endpoint         = endpoint         ?? throw new ArgumentNullException(nameof(endpoint));
             _model            = model            ?? throw new ArgumentNullException(nameof(model));
@@ -58,7 +58,6 @@ namespace jubeater.aigoalplanner.Providers
 
         public void Dispose() {
             _innerClient.Dispose();
-            _probeLock.Dispose();
         }
 
         private async Task EnsureToolCallingCapabilityAsync(CancellationToken cancellationToken) {
@@ -72,24 +71,7 @@ namespace jubeater.aigoalplanner.Providers
                 return;
             }
 
-            await _probeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-            try {
-                // Re-check under the lock in case another request ran the probe while waiting.
-                capable = _capabilityStore.GetCapability(_endpoint, _model);
-
-                if (capable == false) {
-                    throw new ProviderException(ProviderFailure.ToolCallingNotSupported);
-                }
-
-                if (capable == true) {
-                    return;
-                }
-
-                await RunProbeAsync(cancellationToken).ConfigureAwait(false);
-            } finally {
-                _probeLock.Release();
-            }
+            await RunProbeAsync(cancellationToken).ConfigureAwait(false);
         }
 
         private async Task RunProbeAsync(CancellationToken cancellationToken) {
@@ -108,16 +90,7 @@ namespace jubeater.aigoalplanner.Providers
                 probeResponse = await _innerClient
                                       .GetResponseAsync(probeMessages, probeOptions, cancellationToken)
                                       .ConfigureAwait(false);
-            } catch (ProviderException exception) when (exception.Failure == ProviderFailure.Network
-                                                     || exception.Failure == ProviderFailure.InvalidKey
-                                                     || exception.Failure == ProviderFailure.RateLimited
-                                                     || exception.Failure == ProviderFailure.UnknownModel
-                                                     || exception.Failure == ProviderFailure.NotConfigured) {
-                // Network, API key and rate-limit failures do not mean the model cannot call tools.
-                throw;
-            } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
-                throw;
-            } catch (Exception exception) {
+            } catch (ProviderException exception) when (exception.StatusCode == HttpStatusCode.BadRequest && exception.Failure != ProviderFailure.UnknownModel) {
                 _capabilityStore.Record(_endpoint, _model, canCallTools: false);
                 throw new ProviderException(ProviderFailure.ToolCallingNotSupported, "The model does not support tool calling.", exception);
             }

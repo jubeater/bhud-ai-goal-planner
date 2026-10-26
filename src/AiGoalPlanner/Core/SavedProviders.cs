@@ -13,6 +13,8 @@ namespace jubeater.aigoalplanner.Core
         private readonly Dictionary<string, string> _modelsByEndpoint =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        public IEnumerable<string> Endpoints => _modelsByEndpoint.Keys;
+
         public void SetModel(string endpoint, string model) {
             if (string.IsNullOrWhiteSpace(endpoint)) return;
 

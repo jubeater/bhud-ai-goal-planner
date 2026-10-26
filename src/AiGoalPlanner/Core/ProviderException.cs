@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 
 namespace jubeater.aigoalplanner.Core
 {
@@ -39,19 +40,24 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     public sealed class ProviderException : Exception
     {
-        public ProviderException(ProviderFailure failure) : base(DefaultMessage(failure)) {
-            Failure = failure;
+        public ProviderException(ProviderFailure failure, HttpStatusCode? statusCode = null) : base(DefaultMessage(failure)) {
+            Failure    = failure;
+            StatusCode = statusCode;
         }
 
-        public ProviderException(ProviderFailure failure, string message) : base(message) {
-            Failure = failure;
+        public ProviderException(ProviderFailure failure, string message, HttpStatusCode? statusCode = null) : base(message) {
+            Failure    = failure;
+            StatusCode = statusCode;
         }
 
-        public ProviderException(ProviderFailure failure, string message, Exception innerException) : base(message, innerException) {
-            Failure = failure;
+        public ProviderException(ProviderFailure failure, string message, Exception innerException, HttpStatusCode? statusCode = null) : base(message, innerException) {
+            Failure    = failure;
+            StatusCode = statusCode;
         }
 
         public ProviderFailure Failure { get; }
+
+        public HttpStatusCode? StatusCode { get; }
 
         private static string DefaultMessage(ProviderFailure failure) {
             switch (failure) {

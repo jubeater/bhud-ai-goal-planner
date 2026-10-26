@@ -45,6 +45,17 @@ namespace jubeater.aigoalplanner.Core
             }
         }
 
+        public void Clear(string endpoint, string model) {
+            string key = KeyFor(endpoint, model);
+            if (key == null) return;
+
+            lock (_lock) {
+                if (_capabilities.Remove(key)) {
+                    Save();
+                }
+            }
+        }
+
         private static string KeyFor(string endpoint, string model) {
             if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(model)) return null;
 

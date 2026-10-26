@@ -58,5 +58,27 @@ namespace jubeater.aigoalplanner.Tests
             Assert.True(second.GetCapability("https://ollama.com/v1", "beam:cloud"));
             Assert.False(second.GetCapability("http://localhost:11434/v1", "tiny-model"));
         }
+
+        [Fact]
+        public void Clearing_capability_removes_the_stored_result() {
+            var store = new ToolCallingCapabilityStore(_directory);
+            store.Record("https://ollama.com/v1", "beam:cloud", canCallTools: false);
+            Assert.False(store.GetCapability("https://ollama.com/v1", "beam:cloud"));
+
+            store.Clear("https://ollama.com/v1", "beam:cloud");
+            Assert.Null(store.GetCapability("https://ollama.com/v1", "beam:cloud"));
+        }
+
+        [Fact]
+        public void Clearing_capability_persists_across_store_instances() {
+            var first = new ToolCallingCapabilityStore(_directory);
+            first.Record("https://ollama.com/v1", "beam:cloud", canCallTools: false);
+
+            var second = new ToolCallingCapabilityStore(_directory);
+            second.Clear("https://ollama.com/v1", "beam:cloud");
+
+            var third = new ToolCallingCapabilityStore(_directory);
+            Assert.Null(third.GetCapability("https://ollama.com/v1", "beam:cloud"));
+        }
     }
 }

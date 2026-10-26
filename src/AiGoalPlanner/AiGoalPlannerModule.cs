@@ -210,7 +210,8 @@ namespace jubeater.aigoalplanner
                     SaveProviderSettings,
                     SaveProviderKey,
                     NotifyProviderChanged,
-                    endpoint => _savedProviders.GetModel(endpoint));
+                    endpoint => _savedProviders.GetModel(endpoint),
+                    () => _savedProviders.Endpoints);
             }
 
             _providerWindow.Show();
@@ -228,6 +229,8 @@ namespace jubeater.aigoalplanner
 
             _savedProviders.SetModel(settings.Endpoint, settings.Model);
             _savedProvidersSetting.Value = _savedProviders.ToJson();
+
+            _capabilityStore?.Clear(settings.Endpoint, settings.Model);
         }
 
         /// <summary>

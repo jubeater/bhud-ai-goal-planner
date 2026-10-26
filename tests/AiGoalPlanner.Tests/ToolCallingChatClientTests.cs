@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Threading.Tasks;
 using jubeater.aigoalplanner.Core;
 using jubeater.aigoalplanner.Providers;
@@ -29,9 +30,12 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("I can help with hero points.", response.Text);
             Assert.Equal(2, inner.Requests.Count);
 
-            // The probe offered the test tool
-            IReadOnlyList<AiChatMessage> probeRequest = inner.Requests[0];
-            Assert.Contains(probeRequest, m => m.Role == ChatRole.User && m.Text.Contains("test"));
+            // The probe offered exactly one tool and required it
+            ChatOptions probeOptions = inner.RequestOptions[0];
+            Assert.NotNull(probeOptions);
+            Assert.NotNull(probeOptions.Tools);
+            Assert.Single(probeOptions.Tools);
+            Assert.IsType<RequiredChatToolMode>(probeOptions.ToolMode);
 
             // Capability is remembered as true
             Assert.True(store.GetCapability(Endpoint, Model));
@@ -96,6 +100,53 @@ namespace jubeater.aigoalplanner.Tests
 
             Assert.Equal(ProviderFailure.Network, exception.Failure);
             Assert.Null(store.GetCapability(Endpoint, Model));
+        }
+
+        [Fact]
+        public async Task A_503_during_probe_leaves_capability_unknown_and_a_later_request_probes_again() {
+            var inner = new ScriptedChatClient();
+            inner.WillFail(ProviderFailure.Unexpected, HttpStatusCode.ServiceUnavailable);
+
+            var store = new ToolCallingCapabilityStore();
+            var client = new ToolCallingChatClient(inner, Endpoint, Model, store);
+
+            ProviderException exception = await Assert.ThrowsAsync<ProviderException>(
+                () => client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") }));
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, exception.StatusCode);
+            Assert.Null(store.GetCapability(Endpoint, Model));
+
+            // Next request runs probe again
+            inner.WillCallTool("test_tool");
+            inner.WillReply("Second reply");
+
+            ChatResponse response = await client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello again") });
+
+            Assert.Equal("Second reply", response.Text);
+            Assert.True(store.GetCapability(Endpoint, Model));
+            Assert.Equal(3, inner.Requests.Count);
+        }
+
+        [Fact]
+        public async Task A_400_during_probe_records_cannot_call_tools() {
+            var inner = new ScriptedChatClient();
+            inner.WillFail(ProviderFailure.Unexpected, HttpStatusCode.BadRequest);
+
+            var store = new ToolCallingCapabilityStore();
+            var client = new ToolCallingChatClient(inner, Endpoint, Model, store);
+
+            ProviderException exception = await Assert.ThrowsAsync<ProviderException>(
+                () => client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") }));
+
+            Assert.Equal(ProviderFailure.ToolCallingNotSupported, exception.Failure);
+            Assert.False(store.GetCapability(Endpoint, Model));
+
+            // Immediate rejection on next request without calling inner client
+            ProviderException secondException = await Assert.ThrowsAsync<ProviderException>(
+                () => client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") }));
+
+            Assert.Equal(ProviderFailure.ToolCallingNotSupported, secondException.Failure);
+            Assert.Single(inner.Requests);
         }
     }
 }

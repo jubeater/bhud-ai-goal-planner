@@ -90,6 +90,7 @@ namespace jubeater.aigoalplanner.Tests
                 () => client.GetResponseAsync(new[] { Request("Hello") }));
 
             Assert.Equal(expected, exception.Failure);
+            Assert.Equal(statusCode, exception.StatusCode);
         }
 
         [Fact]

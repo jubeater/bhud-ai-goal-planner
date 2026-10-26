@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Blish_HUD;
 using Blish_HUD.Content;
 using Blish_HUD.Controls;
@@ -39,13 +40,17 @@ namespace jubeater.aigoalplanner.UI
         private static readonly Color ErrorColor = new Color(240, 165, 150);
         private static readonly Color SavedColor = new Color(190, 230, 170);
 
-        private readonly Func<string>           _readEndpoint;
-        private readonly Func<string>           _readModel;
-        private readonly Func<string, string>   _describeKey;
-        private readonly Action<string, string> _save;
-        private readonly Action<string, string> _saveKey;
-        private readonly Action                 _providerChanged;
-        private readonly Func<string, string>   _getSavedModel;
+        private readonly Func<string>              _readEndpoint;
+        private readonly Func<string>              _readModel;
+        private readonly Func<string, string>      _describeKey;
+        private readonly Action<string, string>    _save;
+        private readonly Action<string, string>    _saveKey;
+        private readonly Action                    _providerChanged;
+        private readonly Func<string, string>      _getSavedModel;
+        private readonly Func<IEnumerable<string>> _getSavedEndpoints;
+
+        private readonly Dictionary<string, string> _customEndpointsByLabel =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         private readonly StandardWindow _window;
         private readonly Dropdown       _providerDropdown;
@@ -60,22 +65,24 @@ namespace jubeater.aigoalplanner.UI
         private bool _disposed;
         private bool _updatingUI;
 
-        public ProviderSettingsWindow(AsyncTexture2D         windowBackground,
-                                      Texture2D              emblem,
-                                      Func<string>           readEndpoint,
-                                      Func<string>           readModel,
-                                      Func<string, string>   describeKey,
-                                      Action<string, string> save,
-                                      Action<string, string> saveKey,
-                                      Action                 providerChanged,
-                                      Func<string, string>   getSavedModel = null) {
-            _readEndpoint    = readEndpoint    ?? throw new ArgumentNullException(nameof(readEndpoint));
-            _readModel       = readModel       ?? throw new ArgumentNullException(nameof(readModel));
-            _describeKey     = describeKey     ?? throw new ArgumentNullException(nameof(describeKey));
-            _save            = save            ?? throw new ArgumentNullException(nameof(save));
-            _saveKey         = saveKey         ?? throw new ArgumentNullException(nameof(saveKey));
-            _providerChanged = providerChanged ?? throw new ArgumentNullException(nameof(providerChanged));
-            _getSavedModel   = getSavedModel;
+        public ProviderSettingsWindow(AsyncTexture2D            windowBackground,
+                                      Texture2D                 emblem,
+                                      Func<string>              readEndpoint,
+                                      Func<string>              readModel,
+                                      Func<string, string>      describeKey,
+                                      Action<string, string>    save,
+                                      Action<string, string>    saveKey,
+                                      Action                    providerChanged,
+                                      Func<string, string>      getSavedModel     = null,
+                                      Func<IEnumerable<string>> getSavedEndpoints = null) {
+            _readEndpoint      = readEndpoint      ?? throw new ArgumentNullException(nameof(readEndpoint));
+            _readModel         = readModel         ?? throw new ArgumentNullException(nameof(readModel));
+            _describeKey       = describeKey       ?? throw new ArgumentNullException(nameof(describeKey));
+            _save              = save              ?? throw new ArgumentNullException(nameof(save));
+            _saveKey           = saveKey           ?? throw new ArgumentNullException(nameof(saveKey));
+            _providerChanged   = providerChanged   ?? throw new ArgumentNullException(nameof(providerChanged));
+            _getSavedModel     = getSavedModel;
+            _getSavedEndpoints = getSavedEndpoints;
 
             _window = new StandardWindow(
                 windowBackground,
@@ -114,10 +121,7 @@ namespace jubeater.aigoalplanner.UI
                 Size     = new Point(ContentWidth, 27)
             };
 
-            foreach (ProviderEndpointSuggestion suggestion in ProviderEndpointSuggestions.All) {
-                _providerDropdown.Items.Add(suggestion.Name);
-            }
-            _providerDropdown.Items.Add("Custom");
+            PopulateDropdown(string.Empty);
             _providerDropdown.ValueChanged += OnProviderDropdownChanged;
 
             new Label {
@@ -227,8 +231,7 @@ namespace jubeater.aigoalplanner.UI
 
             _updatingUI = true;
             try {
-                ProviderEndpointSuggestion match = ProviderEndpointSuggestions.Match(endpoint);
-                _providerDropdown.SelectedItem = match != null ? match.Name : "Custom";
+                PopulateDropdown(endpoint);
 
                 _endpointBox.Text = endpoint;
                 _modelBox.Text    = model;
@@ -255,6 +258,63 @@ namespace jubeater.aigoalplanner.UI
             _window.Dispose();
         }
 
+        private static string HostFor(string endpoint) {
+            if (Uri.TryCreate(endpoint, UriKind.Absolute, out Uri uri) && !string.IsNullOrWhiteSpace(uri.Host)) {
+                return uri.Host;
+            }
+
+            return (endpoint ?? string.Empty).Trim();
+        }
+
+        private void PopulateDropdown(string selectedEndpoint) {
+            _providerDropdown.Items.Clear();
+            _customEndpointsByLabel.Clear();
+
+            foreach (ProviderEndpointSuggestion suggestion in ProviderEndpointSuggestions.All) {
+                _providerDropdown.Items.Add(suggestion.Name);
+            }
+
+            if (_getSavedEndpoints != null) {
+                foreach (string endpoint in _getSavedEndpoints()) {
+                    if (string.IsNullOrWhiteSpace(endpoint)) continue;
+                    if (ProviderEndpointSuggestions.Match(endpoint) != null) continue;
+
+                    string label = HostFor(endpoint);
+                    string uniqueLabel = label;
+                    int counter = 2;
+                    while (_providerDropdown.Items.Contains(uniqueLabel) || uniqueLabel == "Custom") {
+                        uniqueLabel = label + " (" + counter++ + ")";
+                    }
+
+                    _customEndpointsByLabel[uniqueLabel] = endpoint;
+                    _providerDropdown.Items.Add(uniqueLabel);
+                }
+            }
+
+            _providerDropdown.Items.Add("Custom");
+
+            SelectDropdownItemForEndpoint(selectedEndpoint);
+        }
+
+        private void SelectDropdownItemForEndpoint(string endpoint) {
+            ProviderEndpointSuggestion match = ProviderEndpointSuggestions.Match(endpoint);
+            if (match != null) {
+                _providerDropdown.SelectedItem = match.Name;
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(endpoint)) {
+                foreach (KeyValuePair<string, string> entry in _customEndpointsByLabel) {
+                    if (ProviderEndpointSuggestions.Normalize(entry.Value).Equals(ProviderEndpointSuggestions.Normalize(endpoint), StringComparison.OrdinalIgnoreCase)) {
+                        _providerDropdown.SelectedItem = entry.Key;
+                        return;
+                    }
+                }
+            }
+
+            _providerDropdown.SelectedItem = "Custom";
+        }
+
         private void OnProviderDropdownChanged(object sender, ValueChangedEventArgs e) {
             if (_updatingUI || _disposed) return;
 
@@ -262,18 +322,33 @@ namespace jubeater.aigoalplanner.UI
             if (string.IsNullOrEmpty(selected) || selected == "Custom") return;
 
             ProviderEndpointSuggestion match = ProviderEndpointSuggestions.FindByName(selected);
-            if (match == null) return;
+            if (match != null) {
+                _updatingUI = true;
+                try {
+                    _endpointBox.Text = match.Endpoint;
 
-            _updatingUI = true;
-            try {
-                _endpointBox.Text = match.Endpoint;
+                    string savedModel = _getSavedModel?.Invoke(match.Endpoint);
+                    _modelBox.Text = savedModel ?? string.Empty;
 
-                string savedModel = _getSavedModel?.Invoke(match.Endpoint);
-                _modelBox.Text = savedModel ?? string.Empty;
+                    RefreshKeyStatus(match.Endpoint);
+                } finally {
+                    _updatingUI = false;
+                }
+                return;
+            }
 
-                RefreshKeyStatus(match.Endpoint);
-            } finally {
-                _updatingUI = false;
+            if (_customEndpointsByLabel.TryGetValue(selected, out string customEndpoint)) {
+                _updatingUI = true;
+                try {
+                    _endpointBox.Text = customEndpoint;
+
+                    string savedModel = _getSavedModel?.Invoke(customEndpoint);
+                    _modelBox.Text = savedModel ?? string.Empty;
+
+                    RefreshKeyStatus(customEndpoint);
+                } finally {
+                    _updatingUI = false;
+                }
             }
         }
 
@@ -281,11 +356,18 @@ namespace jubeater.aigoalplanner.UI
             if (_updatingUI || _disposed) return;
 
             string endpoint = ReadEndpoint();
-            ProviderEndpointSuggestion match = ProviderEndpointSuggestions.Match(endpoint);
 
             _updatingUI = true;
             try {
-                _providerDropdown.SelectedItem = match?.Name ?? "Custom";
+                SelectDropdownItemForEndpoint(endpoint);
+
+                if (string.IsNullOrWhiteSpace(_modelBox.Text) && !string.IsNullOrWhiteSpace(endpoint)) {
+                    string savedModel = _getSavedModel?.Invoke(endpoint);
+                    if (!string.IsNullOrWhiteSpace(savedModel)) {
+                        _modelBox.Text = savedModel;
+                    }
+                }
+
                 RefreshKeyStatus(endpoint);
             } finally {
                 _updatingUI = false;
@@ -311,6 +393,13 @@ namespace jubeater.aigoalplanner.UI
 
             _endpointBox.Text = endpoint;
             _modelBox.Text    = (_modelBox.Text ?? string.Empty).Trim();
+
+            _updatingUI = true;
+            try {
+                PopulateDropdown(endpoint);
+            } finally {
+                _updatingUI = false;
+            }
 
             RefreshKeyStatus(endpoint);
             ShowStatus("Saved. Your next message uses this.", SavedColor);

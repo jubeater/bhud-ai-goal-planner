@@ -1,3 +1,4 @@
+using System.Linq;
 using jubeater.aigoalplanner.Core;
 using Xunit;
 
@@ -42,6 +43,17 @@ namespace jubeater.aigoalplanner.Tests
             Assert.NotNull(SavedProviders.FromJson(null));
             Assert.NotNull(SavedProviders.FromJson(string.Empty));
             Assert.NotNull(SavedProviders.FromJson("not json"));
+        }
+
+        [Fact]
+        public void Endpoints_enumerates_all_saved_endpoints() {
+            var saved = new SavedProviders();
+            saved.SetModel("https://ollama.com/v1", "beam:cloud");
+            saved.SetModel("https://api.deepseek.com", "deepseek-flash");
+
+            Assert.Equal(2, saved.Endpoints.Count());
+            Assert.Contains("https://ollama.com/v1", saved.Endpoints);
+            Assert.Contains("https://api.deepseek.com", saved.Endpoints);
         }
     }
 }
