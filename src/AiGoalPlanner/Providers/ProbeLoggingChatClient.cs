@@ -59,3 +59,4 @@ namespace jubeater.aigoalplanner.Providers
         }
     }
 }
+

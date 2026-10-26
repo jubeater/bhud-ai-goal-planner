@@ -125,6 +125,10 @@ namespace jubeater.aigoalplanner.Providers
                         body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
                         if (!response.IsSuccessStatusCode) {
+                            if (_apiKey.Length > 0) {
+                                body = KeyRedaction.Redact(body, _apiKey);
+                            }
+
                             throw FailureFor(response.StatusCode, body);
                         }
                     }
