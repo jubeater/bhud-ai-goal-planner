@@ -121,6 +121,22 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal(ChatFinishReason.Length, response.FinishReason);
         }
 
+        [Fact]
+        public async Task The_identity_message_reaches_the_Provider_as_a_system_message() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            await client.GetResponseAsync(new[] {
+                new ChatMessage(ChatRole.System, "You are AI Goal Planner."),
+                Request("Hello")
+            });
+
+            string body = Assert.Single(endpoint.RequestBodies);
+
+            Assert.Contains("\"role\":\"system\"",       body);
+            Assert.Contains("You are AI Goal Planner.",  body);
+        }
+
         private static OpenAiCompatibleChatClient ClientFor(StubHttpMessageHandler endpoint,
                                                             string               url = "https://api.deepseek.com",
                                                             string               key = "sk-the-key") {

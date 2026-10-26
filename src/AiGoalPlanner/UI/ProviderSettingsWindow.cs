@@ -24,8 +24,16 @@ namespace jubeater.aigoalplanner.UI
     {
         private static readonly Logger Logger = Logger.GetLogger<ProviderSettingsWindow>();
 
-        private const int WindowWidth  = 470;
-        private const int WindowHeight = 300;
+        /// <summary>
+        /// As wide as the Chat window, so the subtitle has room to the left of the close button:
+        /// Blish HUD's title bar spends 80 px on the emblem and then the title itself, and the close
+        /// button sits 16 px in from the right edge.
+        /// </summary>
+        private const int WindowWidth  = 560;
+        private const int WindowHeight = 340;
+
+        private const int ContentWidth  = 540;
+        private const int ContentHeight = 260;
 
         private static readonly Color HintColor  = new Color(170, 170, 170);
         private static readonly Color ErrorColor = new Color(240, 165, 150);
@@ -67,10 +75,10 @@ namespace jubeater.aigoalplanner.UI
             _window = new StandardWindow(
                 windowBackground,
                 new Rectangle(25, 26, WindowWidth, WindowHeight),
-                new Rectangle(40, 50, 440, 220)) {
+                new Rectangle(40, 50, ContentWidth, ContentHeight)) {
                 Parent        = GameService.Graphics.SpriteScreen,
                 Title         = "Provider settings",
-                Subtitle      = "Any OpenAI-compatible endpoint",
+                Subtitle      = "Connect a Provider",
                 Emblem        = emblem,
                 Id            = "jubeater.aigoalplanner.provider",
                 Location      = new Point(340, 140),
@@ -85,27 +93,28 @@ namespace jubeater.aigoalplanner.UI
                 BackgroundColor = Color.Transparent
             };
 
-
             new Label {
                 Parent    = content,
                 Location  = new Point(0, 0),
-                Size      = new Point(440, 20),
+                Size      = new Point(ContentWidth, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
-                Text      = "Endpoint URL (OpenAI-compatible, for example https://ollama.com/v1)"
+                Text      = "Endpoint URL (OpenAI-compatible)"
             };
 
+            // Both fields start empty: a placeholder is a hint, and a placeholder that looks like a
+            // value (or names one Provider's model) is read as something already filled in.
             _endpointBox = new TextBox {
                 Parent          = content,
                 Location        = new Point(0, 22),
-                Size            = new Point(440, 27),
-                PlaceholderText = "https://api.deepseek.com"
+                Size            = new Point(ContentWidth, 27),
+                PlaceholderText = "e.g. https://your-provider.example/v1"
             };
 
             new Label {
                 Parent    = content,
                 Location  = new Point(0, 57),
-                Size      = new Point(440, 20),
+                Size      = new Point(ContentWidth, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
                 Text      = "Model"
@@ -114,17 +123,17 @@ namespace jubeater.aigoalplanner.UI
             _modelBox = new TextBox {
                 Parent          = content,
                 Location        = new Point(0, 79),
-                Size            = new Point(440, 27),
-                PlaceholderText = "deepseek-chat"
+                Size            = new Point(ContentWidth, 27),
+                PlaceholderText = "Model name from your Provider"
             };
 
             new Label {
                 Parent    = content,
                 Location  = new Point(0, 114),
-                Size      = new Point(440, 20),
+                Size      = new Point(ContentWidth, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
-                Text      = "API key (optional: copy it, then paste it here)"
+                Text      = "API key (optional: copy it, then click Paste key)"
             };
 
             // The key is pasted rather than typed, so it is never drawn: the window is told only
@@ -148,7 +157,7 @@ namespace jubeater.aigoalplanner.UI
             _keyStatusLabel = new Label {
                 Parent    = content,
                 Location  = new Point(232, 141),
-                Size      = new Point(208, 20),
+                Size      = new Point(ContentWidth - 232, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
                 Text      = ProviderKeySummary.NoKey
@@ -162,13 +171,17 @@ namespace jubeater.aigoalplanner.UI
             };
             _saveButton.Click += OnSaveClicked;
 
+            // The status gets its own row, the full width and a wrap: the longest message is two
+            // lines, and a status that is cut off says nothing.
             _statusLabel = new Label {
-                Parent    = content,
-                Location  = new Point(96, 177),
-                Size      = new Point(344, 20),
-                Font      = GameService.Content.DefaultFont14,
-                TextColor = HintColor,
-                Text      = string.Empty
+                Parent         = content,
+                Location       = new Point(0, 206),
+                Width          = ContentWidth,
+                Font           = GameService.Content.DefaultFont14,
+                TextColor      = HintColor,
+                Text           = string.Empty,
+                WrapText       = true,
+                AutoSizeHeight = true
             };
 
             _window.Visible = false;

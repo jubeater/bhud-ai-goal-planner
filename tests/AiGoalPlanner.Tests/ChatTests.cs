@@ -1,9 +1,11 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using jubeater.aigoalplanner.Core;
 using jubeater.aigoalplanner.Tests.Fakes;
 using Microsoft.Extensions.AI;
 using Xunit;
+using AiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using ChatMessage = jubeater.aigoalplanner.Core.ChatMessage;
 
 namespace jubeater.aigoalplanner.Tests
@@ -19,7 +21,7 @@ namespace jubeater.aigoalplanner.Tests
             var model = new ScriptedChatClient();
             model.WillReply("Try the Pathing module for hero point trails.");
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
 
             await chat.SendAsync("I want to finish the hero points on this map");
 
@@ -40,7 +42,7 @@ namespace jubeater.aigoalplanner.Tests
             model.WillReply("First answer.");
             model.WillReply("Second answer.");
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
 
             await chat.SendAsync("First request");
             await chat.SendAsync("Second request");
@@ -52,10 +54,10 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("Second answer.", chat.Messages[3].Text);
 
             Assert.Equal(new[] { "First request" },
-                         model.Requests[0].Select(message => message.Text));
+                         WithoutTheIdentityMessage(model.Requests[0]));
 
             Assert.Equal(new[] { "First request", "First answer.", "Second request" },
-                         model.Requests[1].Select(message => message.Text));
+                         WithoutTheIdentityMessage(model.Requests[1]));
         }
 
         [Fact]
@@ -63,7 +65,7 @@ namespace jubeater.aigoalplanner.Tests
             var model = new ScriptedChatClient();
             model.WillStop(ChatFinishReason.Length, "The reply was cut");
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
 
             await chat.SendAsync("Tell me everything");
 
@@ -80,7 +82,7 @@ namespace jubeater.aigoalplanner.Tests
             var model = new ScriptedChatClient();
             model.WillStop(ChatFinishReason.ContentFilter, "I can't help with that.");
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
 
             await chat.SendAsync("Something the model refuses");
 
@@ -97,7 +99,7 @@ namespace jubeater.aigoalplanner.Tests
             var model = new ScriptedChatClient();
             model.WillFail(ProviderFailure.RateLimited);
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
 
             await chat.SendAsync("Hello");
 
@@ -112,7 +114,7 @@ namespace jubeater.aigoalplanner.Tests
             model.WillFail(ProviderFailure.RateLimited);
             model.WillReply("Answered now.");
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
 
             await chat.SendAsync("First request");
             await chat.SendAsync("Second request");
@@ -122,7 +124,7 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("Answered now.", last.Text);
 
             Assert.Equal(new[] { "First request", "Second request" },
-                         model.Requests[1].Select(message => message.Text));
+                         WithoutTheIdentityMessage(model.Requests[1]));
         }
 
         [Fact]
@@ -130,7 +132,7 @@ namespace jubeater.aigoalplanner.Tests
             var model = new ScriptedChatClient();
             model.WillReply("An answer.");
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
             await chat.SendAsync("Show only world bosses in the event table");
 
             chat.StartNewChat();
@@ -144,7 +146,7 @@ namespace jubeater.aigoalplanner.Tests
             model.WillReply("Old answer.");
             model.WillReply("New answer.");
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
             await chat.SendAsync("Finish the hero points on this map");
 
             chat.StartNewChat();
@@ -153,7 +155,7 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal(2, chat.Messages.Count);
             Assert.Equal(ChatMessageAuthor.Player, chat.Messages[0].Author);
             Assert.Equal("Level an alt",           chat.Messages[0].Text);
-            Assert.Single(model.Requests[1]);
+            Assert.Single(WithoutTheIdentityMessage(model.Requests[1]));
         }
 
         [Fact]
@@ -163,7 +165,7 @@ namespace jubeater.aigoalplanner.Tests
             model.WillReply("An answer for the new Chat.");
             model.WillHold();
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
 
             // The Player sends, and the model takes its time with this Request.
             Task first = chat.SendAsync("Finish the hero points on this map");
@@ -190,7 +192,7 @@ namespace jubeater.aigoalplanner.Tests
         [Fact]
         public async Task Sending_nothing_adds_nothing_to_the_Chat() {
             var model = new ScriptedChatClient();
-            var chat  = new Chat(() => model);
+            var chat  = NewChat(model);
 
             await chat.SendAsync(string.Empty);
             await chat.SendAsync("   ");
@@ -211,7 +213,7 @@ namespace jubeater.aigoalplanner.Tests
             var model = new ScriptedChatClient();
             model.WillFail(failure);
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
 
             await chat.SendAsync("Hello");
 
@@ -224,7 +226,7 @@ namespace jubeater.aigoalplanner.Tests
             var model = new ScriptedChatClient();
             model.WillReply("An answer.");
 
-            var chat = new Chat(() => model);
+            var chat = NewChat(model);
 
             await chat.SendAsync("  Get mastery points  ");
 
@@ -236,13 +238,76 @@ namespace jubeater.aigoalplanner.Tests
             var model = new ScriptedChatClient();
             model.WillReply("An answer.");
 
-            var chat  = new Chat(() => model);
+            var chat  = NewChat(model);
             int raised = 0;
             chat.MessagesChanged += (sender, args) => raised++;
 
             await chat.SendAsync("Hello");
 
             Assert.Equal(2, raised);
+        }
+
+        [Fact]
+        public async Task The_model_is_told_what_it_is_before_it_is_told_what_the_Player_wants() {
+            var model = new ScriptedChatClient();
+            model.WillReply("An answer.");
+
+            string identity = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
+            var chat = new Chat(() => model, () => identity);
+
+            await chat.SendAsync("Hello");
+
+            AiChatMessage first = model.Requests[0][0];
+
+            Assert.Equal(ChatRole.System, first.Role);
+            Assert.Equal(identity,        first.Text);
+        }
+
+        [Fact]
+        public async Task The_model_is_told_what_it_is_once_and_first_on_every_Request() {
+            var model = new ScriptedChatClient();
+            model.WillReply("First answer.");
+            model.WillReply("Second answer.");
+
+            var chat = NewChat(model);
+
+            await chat.SendAsync("First request");
+            await chat.SendAsync("Second request");
+
+            foreach (IReadOnlyList<AiChatMessage> request in model.Requests) {
+                Assert.Equal(ChatRole.System, request[0].Role);
+                Assert.Single(request, message => message.Role.Equals(ChatRole.System));
+            }
+        }
+
+        [Fact]
+        public async Task The_identity_message_is_not_part_of_what_the_Player_reads() {
+            var model = new ScriptedChatClient();
+            model.WillReply("An answer.");
+
+            string identity = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
+            var chat = new Chat(() => model, () => identity);
+
+            await chat.SendAsync("Hello");
+
+            Assert.Equal(2, chat.Messages.Count);
+            Assert.DoesNotContain(chat.Messages, message => message.Text.Contains("AI Goal Planner"));
+        }
+
+        /// <summary>
+        /// The Chat the way the module builds it: a scripted model, and the identity message that
+        /// says which product the model is part of.
+        /// </summary>
+        private static Chat NewChat(ScriptedChatClient model) {
+            return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"));
+        }
+
+        /// <summary>
+        /// What the model was told apart from the identity message it is always sent first.
+        /// </summary>
+        private static IEnumerable<string> WithoutTheIdentityMessage(IReadOnlyList<AiChatMessage> request) {
+            return request.Where(message => !message.Role.Equals(ChatRole.System))
+                          .Select(message => message.Text);
         }
 
         /// <summary>

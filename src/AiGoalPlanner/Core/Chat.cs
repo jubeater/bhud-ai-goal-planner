@@ -19,14 +19,21 @@ namespace jubeater.aigoalplanner.Core
     public sealed class Chat
     {
         private readonly Func<IChatClient> _chatClient;
+        private readonly Func<string>       _systemPrompt;
         private readonly List<ChatMessage> _messages     = new List<ChatMessage>();
         private readonly object            _messagesLock = new object();
         private readonly SemaphoreSlim     _sendLock     = new SemaphoreSlim(1, 1);
 
         private int _generation;
 
-        public Chat(Func<IChatClient> chatClient) {
-            _chatClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
+        /// <summary>
+        /// A Chat talks to the model <paramref name="chatClient"/> builds and is told what it is by
+        /// <paramref name="systemPrompt"/>. Both are asked again for every Request, so a change of
+        /// Settings takes effect without losing the conversation.
+        /// </summary>
+        public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt) {
+            _chatClient   = chatClient   ?? throw new ArgumentNullException(nameof(chatClient));
+            _systemPrompt = systemPrompt ?? throw new ArgumentNullException(nameof(systemPrompt));
         }
 
         /// <summary>
@@ -36,7 +43,8 @@ namespace jubeater.aigoalplanner.Core
         public event EventHandler<EventArgs> MessagesChanged;
 
         /// <summary>
-        /// Everything said in this Chat so far, oldest first.
+        /// Everything said in this Chat so far, oldest first. The identity message the Chat puts
+        /// ahead of the Player's words is not one of them: it is instruction, not conversation.
         /// </summary>
         public IReadOnlyList<ChatMessage> Messages {
             get {
@@ -52,9 +60,10 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         /// <remarks>
         /// History is append-only: earlier messages are never edited or replaced. Only what the
-        /// Player and the AI said goes back to the model; notices stay in the Chat. Sends are
-        /// serialized, and a Request that is still waiting its turn when the Player starts a new
-        /// Chat is dropped instead of being sent into the new one.
+        /// Player and the AI said goes back to the model, behind the identity message that says which
+        /// product the model is part of; notices stay in the Chat. Sends are serialized, and a Request
+        /// that is still waiting its turn when the Player starts a new Chat is dropped instead of
+        /// being sent into the new one.
         /// </remarks>
         public async Task SendAsync(string request, CancellationToken cancellationToken = default) {
             if (string.IsNullOrWhiteSpace(request)) return;
@@ -137,13 +146,23 @@ namespace jubeater.aigoalplanner.Core
             Append(new ChatMessage(ChatMessageAuthor.Ai, text));
         }
 
+        /// <summary>
+        /// What the model is sent: the identity message first, then everything the Player and the AI
+        /// said. The identity message is not one of the Chat's messages, so the Player never reads it
+        /// and New chat leaves it in place.
+        /// </summary>
         private IReadOnlyList<AiChatMessage> BuildHistory() {
+            var history = new List<AiChatMessage> {
+                new AiChatMessage(ChatRole.System, _systemPrompt())
+            };
+
             lock (_messagesLock) {
-                return _messages
-                      .Where(message => message.Author == ChatMessageAuthor.Player || message.Author == ChatMessageAuthor.Ai)
-                      .Select(message => new AiChatMessage(ToRole(message.Author), message.Text))
-                      .ToList();
+                history.AddRange(_messages
+                                .Where(message => message.Author == ChatMessageAuthor.Player || message.Author == ChatMessageAuthor.Ai)
+                                .Select(message => new AiChatMessage(ToRole(message.Author), message.Text)));
             }
+
+            return history;
         }
 
         private static ChatRole ToRole(ChatMessageAuthor author) {

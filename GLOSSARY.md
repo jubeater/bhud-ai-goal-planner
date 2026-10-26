@@ -23,6 +23,13 @@ A line the Chat shows instead of an AI reply when there is no usable answer: a r
 off or refused, or a Provider that could not be reached. The AI never sees Notices.
 _Avoid_: Error, warning, system message
 
+**Identity message**:
+The system message the Chat sends ahead of the Player's words on every Request: it says the model is
+AI Goal Planner inside this Blish HUD module, which model it runs on and which Provider host serves
+it, and that it must not claim to be ChatGPT or another product. The Player never sees it, and it is
+not a Notice.
+_Avoid_: System prompt (the full one arrives with #5), preamble, personality
+
 **Preset**:
 A ready-made Request for a common goal, such as hero points, mastery points or XP, that the Player can edit before sending.
 _Avoid_: Mode, template, profile

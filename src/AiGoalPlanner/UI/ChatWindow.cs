@@ -74,7 +74,7 @@ namespace jubeater.aigoalplanner.UI
                 new Rectangle(40, 50, 540, 590)) {
                 Parent        = GameService.Graphics.SpriteScreen,
                 Title         = "AI Goal Planner",
-                Subtitle      = "Describe what you want to set up",
+                Subtitle      = "Describe a goal",
                 Emblem        = emblem,
                 Id            = WindowId,
                 Location      = new Point(300, 80),

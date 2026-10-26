@@ -54,6 +54,20 @@ clipboard and stores the key directly. The view only ever shows what is stored a
 `Key saved (...abcd)` — the last four characters — or `No key`, so a key is never drawn on screen,
 never appears in a Notice and never reaches the log.
 
+Both fields start empty, and what they show until the Player types is a hint rather than a value:
+`e.g. https://your-provider.example/v1` and `Model name from your Provider`. Neither names a Provider,
+because a placeholder that reads like one looks pre-filled.
+
+Every Request carries one system message ahead of the Player's words, so a model does not introduce
+itself as whatever product it was trained to be:
+
+> You are AI Goal Planner, an assistant inside the Blish HUD module of the same name. You are running
+> on model {model} via {endpoint host}. Don't claim to be ChatGPT or any other product.
+
+It is built from the same Settings as the Provider client, so it names the model and the host the
+next Request really uses, and it is not one of the Chat's messages: the Player never reads it, and New
+chat leaves it in place. This is the identity message only — #5 grows it into the full system prompt.
+
 ## The Provider client and what the module ships
 
 `OpenAiCompatibleChatClient` is the one Client for every Provider (ADR-0007): it speaks the OpenAI
@@ -110,7 +124,10 @@ the built `.bhm` to a GitHub release. Tags are maintainer-only: a `v*` tag publi
 ## Testing
 
 Tests drive the Chat — the planning core — the way a Player would, and check what a Player would see.
-They never assert on prompt wording or internal calls. The model is faked through `IChatClient`
+They do not assert on prompt wording or internal calls, with one exception: the identity message has
+to name the module, the model and the Provider host and has to forbid claiming to be another product
+(`SystemPromptTests`), because a model that is told nothing does exactly that. #5's full system prompt
+owns the rest of its wording. The model is faked through `IChatClient`
 (`ScriptedChatClient`) and the Provider's HTTP side through a stub message handler
 (`StubHttpMessageHandler`), so the tests need no network. Blish HUD itself is replaced by an in-memory
 fake world from the tickets that add Lookups.

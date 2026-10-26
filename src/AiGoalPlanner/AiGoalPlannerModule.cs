@@ -72,7 +72,7 @@ namespace jubeater.aigoalplanner
             _keyStore  = new ProviderKeyStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
 
-            _chat = new Chat(CreateChatClient);
+            _chat = new Chat(CreateChatClient, BuildSystemPrompt);
         }
 
         private void DefineProviderSettings() {
@@ -236,6 +236,15 @@ namespace jubeater.aigoalplanner
             string endpoint = _endpointSetting.Value;
 
             return ProviderSummary.Describe(endpoint, _modelSetting.Value, _keyStore.HasKey(endpoint));
+        }
+
+        /// <summary>
+        /// The identity message the Chat puts ahead of the Player's words. It is built from the same
+        /// Settings as the Provider client, so the model and the host it names are the ones the next
+        /// Request really uses.
+        /// </summary>
+        private string BuildSystemPrompt() {
+            return SystemPrompt.For(_modelSetting.Value, _endpointSetting.Value);
         }
     }
 }
