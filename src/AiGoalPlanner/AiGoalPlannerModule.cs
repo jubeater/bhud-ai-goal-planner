@@ -86,7 +86,11 @@ namespace jubeater.aigoalplanner
             // Nothing draws the icon any more, so the module releases it. Nulling it out means a
             // re-enabled module loads a fresh texture instead of reusing a disposed one.
             if (_iconTexture != null) {
-                _iconTexture.Dispose();
+                // GetTexture falls back to Blish HUD's shared error texture, which is not ours to dispose.
+                if (!ReferenceEquals(_iconTexture, ContentService.Textures.Error)) {
+                    _iconTexture.Dispose();
+                }
+
                 _iconTexture = null;
             }
 
