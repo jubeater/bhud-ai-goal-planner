@@ -92,10 +92,14 @@ namespace jubeater.aigoalplanner.Core
 
     /// <summary>
     /// One Setting of a Module, as the AI may see it: what it is called, what it is now, and how far
-    /// it may go. Everything is text, the way the module would show it in its settings view.
+    /// it may go. Everything is text, the way the module would show it in its settings view. A
+    /// Module's settings can nest (a subcollection of Settings inside another), so a node carries
+    /// either a value or child nodes.
     /// </summary>
     public sealed class ModuleSettingInfo
     {
+        private static readonly IReadOnlyList<ModuleSettingInfo> NoChildren = new ModuleSettingInfo[0];
+
         public ModuleSettingInfo(string key, string displayName, string description, string typeName, string value,
                                  string min, string max) {
             if (key == null) throw new ArgumentNullException(nameof(key));
@@ -107,6 +111,30 @@ namespace jubeater.aigoalplanner.Core
             Value       = value ?? string.Empty;
             Min         = min;
             Max         = max;
+            Children    = NoChildren;
+        }
+
+        private ModuleSettingInfo(string key, string displayName, string description, IReadOnlyList<ModuleSettingInfo> children) {
+            if (key == null) throw new ArgumentNullException(nameof(key));
+
+            Key            = key;
+            DisplayName    = displayName ?? string.Empty;
+            Description    = description ?? string.Empty;
+            TypeName       = "SettingCollection";
+            Value          = string.Empty;
+            Min            = null;
+            Max            = null;
+            Children       = children ?? NoChildren;
+            IsSubcollection = true;
+        }
+
+        /// <summary>
+        /// A subcollection of Settings, the way a module groups them in its settings view. It holds
+        /// no value of its own; the walk reads its children under a qualified key.
+        /// </summary>
+        public static ModuleSettingInfo Subcollection(string key, string displayName, string description,
+                                                      IReadOnlyList<ModuleSettingInfo> children) {
+            return new ModuleSettingInfo(key, displayName, description, children);
         }
 
         public string Key         { get; }
@@ -114,7 +142,7 @@ namespace jubeater.aigoalplanner.Core
         public string Description { get; }
         public string TypeName    { get; }
 
-        /// <summary>The Setting's current value, as text. Numbers are invariant-culture.</summary>
+        /// <summary>The Setting's current value, as text. Numbers are invariant-culture. Empty for a subcollection.</summary>
         public string Value { get; }
 
         /// <summary>The smallest value a range Setting accepts, or null when it has no range.</summary>
@@ -122,5 +150,11 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>The largest value a range Setting accepts, or null when it has no range.</summary>
         public string Max { get; }
+
+        /// <summary>The Settings inside a subcollection, empty for a Setting.</summary>
+        public IReadOnlyList<ModuleSettingInfo> Children { get; }
+
+        /// <summary>Whether this node is a subcollection that holds other Settings.</summary>
+        public bool IsSubcollection { get; }
     }
 }

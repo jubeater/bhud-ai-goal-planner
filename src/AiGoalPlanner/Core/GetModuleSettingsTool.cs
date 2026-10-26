@@ -11,8 +11,9 @@ namespace jubeater.aigoalplanner.Core
 {
     /// <summary>
     /// The <c>get_module_settings</c> Lookup: one Module's Settings, with their labels, values and
-    /// ranges. Settings that look like secrets are removed here, before the answer becomes a tool
-    /// result the model can read, and the Settings of AI Goal Planner itself are never shared.
+    /// ranges, nested ones included, under their qualified keys. What may reach the model is decided
+    /// by <see cref="SettingWalk"/>: Settings that look like secrets are removed there, and the
+    /// Settings of AI Goal Planner itself are never shared.
     /// </summary>
     public static class GetModuleSettingsTool
     {
@@ -68,7 +69,7 @@ namespace jubeater.aigoalplanner.Core
                                                      .ConfigureAwait(false);
 
             IReadOnlyList<ModuleSettingInfo> settings = result.Status == ModuleSettingsStatus.Ok
-                                                            ? WithoutSecrets(result.Settings)
+                                                            ? SettingWalk.Flatten(result.Settings)
                                                             : Array.Empty<ModuleSettingInfo>();
 
             return Answer(result.Status, result.ModuleName, settings).ToString(Formatting.None);
@@ -127,15 +128,6 @@ namespace jubeater.aigoalplanner.Core
             if (setting.Max != null) json["max"] = setting.Max;
 
             return json;
-        }
-
-        /// <summary>
-        /// A Setting whose key or display name reads as a key, token or password never becomes part
-        /// of the answer. It is dropped whole: a value that is never read cannot leak.
-        /// </summary>
-        private static IReadOnlyList<ModuleSettingInfo> WithoutSecrets(IReadOnlyList<ModuleSettingInfo> settings) {
-            return settings.Where(setting => !SecretFilter.LooksLikeSecret(setting.Key, setting.DisplayName))
-                           .ToList();
         }
     }
 }

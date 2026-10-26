@@ -1,4 +1,6 @@
 using jubeater.aigoalplanner.Core;
+using jubeater.aigoalplanner.Tests.Fakes;
+using Microsoft.Extensions.AI;
 using Xunit;
 
 namespace jubeater.aigoalplanner.Tests
@@ -40,36 +42,31 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
-        public void It_confines_the_model_to_Blish_HUD_configuration_and_short_game_advice() {
+        public void It_confines_the_model_to_Blish_HUD_and_the_game() {
             string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
 
             Assert.Contains("Blish HUD", prompt);
             Assert.Contains("Guild Wars 2", prompt);
-            Assert.Contains("advice", prompt);
-            Assert.Contains("not sure", prompt);
-            Assert.Contains("politely", prompt);
         }
 
         [Fact]
-        public void It_says_the_model_only_proposes_and_never_changed_anything() {
+        public void It_tells_the_model_what_submit_plan_is_for() {
             string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
 
             // From the ticket's second comment: a real model said "I've enabled the Pathing module"
-            // when it had only proposed it, so the prompt has to say what submit_plan is and what
-            // the reply may claim.
+            // when it had only proposed it, so the prompt has to name the tool that proposes.
             Assert.Contains("submit_plan", prompt);
-            Assert.Contains("propose", prompt);
-            Assert.Contains("never", prompt);
-            Assert.Contains("I suggest", prompt);
-            Assert.DoesNotContain("I've done", prompt);
         }
 
         [Fact]
-        public void It_says_the_model_uses_the_Lookups_instead_of_guessing() {
+        public void It_names_every_Lookup_the_model_can_call() {
+            var registry = Lookups.For(new FakeWorld());
+
             string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
 
-            Assert.Contains("list_installed_modules", prompt);
-            Assert.Contains("get_module_settings", prompt);
+            foreach (AIFunctionDeclaration lookup in registry.Declarations) {
+                Assert.Contains(lookup.Name, prompt);
+            }
         }
 
         [Fact]

@@ -114,11 +114,17 @@ namespace jubeater.aigoalplanner.World
         }
 
         /// <summary>
-        /// One setting as the AI may see it. A setting that cannot be read is left out rather than
-        /// breaking the whole answer; one Setting missing is better than the Lookup failing.
+        /// One setting as the AI may see it. A subcollection becomes a node that holds its children,
+        /// which <see cref="SettingWalk"/> reads under a qualified key; a setting that cannot be
+        /// read is left out rather than breaking the whole answer.
         /// </summary>
         private static ModuleSettingInfo ToSettingInfo(SettingEntry entry) {
             try {
+                if (ValueOf(entry) is SettingCollection nested) {
+                    return ModuleSettingInfo.Subcollection(entry.EntryKey, entry.DisplayName, entry.Description,
+                                                           ChildrenOf(nested));
+                }
+
                 return new ModuleSettingInfo(entry.EntryKey,
                                              entry.DisplayName,
                                              entry.Description,
@@ -129,6 +135,18 @@ namespace jubeater.aigoalplanner.World
             } catch (Exception) {
                 return null;
             }
+        }
+
+        private static List<ModuleSettingInfo> ChildrenOf(SettingCollection nested) {
+            var children = new List<ModuleSettingInfo>();
+
+            foreach (SettingEntry child in nested.Entries) {
+                ModuleSettingInfo info = ToSettingInfo(child);
+
+                if (info != null) children.Add(info);
+            }
+
+            return children;
         }
 
         private static string TypeNameOf(SettingEntry entry) {

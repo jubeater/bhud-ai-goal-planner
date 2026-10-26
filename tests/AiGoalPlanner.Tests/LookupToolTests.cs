@@ -147,6 +147,44 @@ namespace jubeater.aigoalplanner.Tests
         /// The tool's JSON. Microsoft.Extensions.AI hands the result back as a JsonElement wrapper
         /// around the string the tool returned, the same way the Chat receives it.
         /// </summary>
+        [Fact]
+        public async Task A_nested_Setting_comes_back_by_its_qualified_key_and_a_nested_secret_does_not_come_back() {
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+            world.SettingsByNamespace["bh.pathing"] = FakeWorld.Ok(
+                "Pathing",
+                ModuleSettingInfo.Subcollection(
+                    "markers", "Markers", "Everything about markers.",
+                    new[] {
+                        new ModuleSettingInfo("api_key", "API key", "", "String", "sk-nested-9", null, null),
+                        new ModuleSettingInfo("trail.size", "Trail size", "How wide trails are.", "Int32", "3", "1", "10"),
+                    }),
+                ModuleSettingInfo.Subcollection(
+                    "credentials", "Credentials", "Accounts for map services.",
+                    new[] {
+                        new ModuleSettingInfo("show.grid", "Show grid", "", "Boolean", "true", null, null),
+                    }));
+
+            AIFunction tool = GetModuleSettingsTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["namespace"] = "bh.pathing" }));
+
+            JObject trailSize = (JObject)((JArray)result["settings"]).First(setting => ((string)((JObject)setting)["key"]) == "markers.trail.size");
+
+            Assert.Equal("Trail size", trailSize["label"]);
+            Assert.Equal("3",          trailSize["value"]);
+            Assert.Equal("1",          trailSize["min"]);
+            Assert.Equal("10",         trailSize["max"]);
+
+            string resultText = result.ToString();
+
+            // The nested secret is dropped, and so is the whole subcollection whose own name reads
+            // as one, innocent children included.
+            Assert.DoesNotContain("sk-nested-9", resultText);
+            Assert.DoesNotContain("credentials", resultText);
+            Assert.DoesNotContain("show.grid",   resultText);
+        }
+
         private static JObject Parse(object toolResult) {
             return JObject.Parse(Assert.IsType<JsonElement>(toolResult).GetString());
         }

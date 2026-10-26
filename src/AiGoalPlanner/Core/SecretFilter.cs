@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace jubeater.aigoalplanner.Core
@@ -40,20 +41,23 @@ namespace jubeater.aigoalplanner.Core
             }
 
             // api_key and ApiKey split into words that match, but APIKey or apikey2 come out as one
-            // word each, so the name joined back together is checked as well.
-            return SecretNames.Contains(string.Concat(words));
+            // word each, so the name joined back together is checked as well. Only the letter words
+            // are joined: the digits mark a numbered secret, not a different word.
+            return SecretNames.Contains(string.Concat(words.Where(word => !char.IsDigit(word[0]))));
         }
 
         /// <summary>
-        /// Splits a Setting name into its words: separators of any kind and the boundaries inside
-        /// camelCase names. "api_key", "ApiKey" and "api key" all come out as [api, key].
+        /// Splits a Setting name into its words: separators of any kind, the boundaries inside
+        /// camelCase names, and the boundaries between letters and digits. "api_key", "ApiKey" and
+        /// "api key" all come out as [api, key]; "API_KEY2" comes out as [API, KEY, 2], so a
+        /// numbered key is still seen as a key.
         /// </summary>
         private static List<string> SplitWords(string name) {
             string withCamelBoundaries = Regex.Replace(name.Trim(), "(?<=[a-z0-9])(?=[A-Z])", " ");
 
             var words = new List<string>();
 
-            foreach (Match match in Regex.Matches(withCamelBoundaries, "[A-Za-z0-9]+")) {
+            foreach (Match match in Regex.Matches(withCamelBoundaries, "[A-Za-z]+|[0-9]+")) {
                 words.Add(match.Value);
             }
 
