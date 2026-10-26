@@ -1,0 +1,19 @@
+{
+  "name": "AI Goal Planner",
+  "version": "0.1.0",
+  "namespace": "jubeater.aigoalplanner",
+  "package": "AiGoalPlanner.dll",
+  "manifest_version": 1,
+
+  "description": "An in-game Chat in which the AI sets up and configures your other Blish HUD modules to reach a goal you describe.",
+  "dependencies": {
+    "bh.blishhud": ">=1.3.0"
+  },
+  "url": "https://github.com/jubeater/bhud-ai-goal-planner",
+  "contributors": [
+    {
+      "name": "jubeater"
+    }
+  ],
+  "enabled_without_gw2": false
+}

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>jubeater.aigoalplanner</RootNamespace>
+    <AssemblyName>AiGoalPlanner</AssemblyName>
+    <PlatformTarget>x64</PlatformTarget>
+    <DebugType>full</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!--
+      Blish HUD already has these assemblies loaded; shipping them in the .bhm would make
+      the module enormous and can cause duplicate-assembly problems inside its process.
+    -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BlishHUD" Version="1.3.0">
+      <!-- Our own content lives in ref/; Blish HUD's own content is never bundled into a module. -->
+      <ExcludeAssets>contentFiles</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

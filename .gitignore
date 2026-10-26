@@ -15,6 +15,9 @@ obj/
 # Test results
 TestResults/
 
+# Scratch / reference material consulted while working (never committed)
+.scratch/
+
 # Secrets — never commit API keys or local dumps
 *apikey*
 *.secret

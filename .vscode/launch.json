@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Blish HUD + AI Goal Planner",
+      "type": "clr",
+      "request": "launch",
+      "preLaunchTask": "build module (Debug)",
+      "program": "C:\\Users\\Tianlin\\Desktop\\Blish.HUD\\Blish HUD.exe",
+      "args": [
+        "--debug",
+        "--module",
+        "${workspaceFolder}\\src\\AiGoalPlanner\\bin\\Debug\\net48\\AiGoalPlanner.bhm"
+      ],
+      "cwd": "C:\\Users\\Tianlin\\Desktop\\Blish.HUD",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    }
+  ]
+}
