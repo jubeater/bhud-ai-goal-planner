@@ -36,7 +36,7 @@ namespace jubeater.aigoalplanner.Core
             }
 
             string oldPath = OldPathFor(endpoint);
-            if (File.Exists(oldPath)) {
+            if (!string.Equals(oldPath, path, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath)) {
                 string key = ReadKey(oldPath);
                 if (key != null) {
                     try {
@@ -70,10 +70,11 @@ namespace jubeater.aigoalplanner.Core
             byte[] plain     = Encoding.UTF8.GetBytes(key);
             byte[] encrypted = ProtectedData.Protect(plain, Entropy, DataProtectionScope.CurrentUser);
 
-            File.WriteAllBytes(PathFor(endpoint), encrypted);
+            string path = PathFor(endpoint);
+            File.WriteAllBytes(path, encrypted);
 
             string oldPath = OldPathFor(endpoint);
-            if (File.Exists(oldPath)) {
+            if (!string.Equals(oldPath, path, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath)) {
                 try {
                     File.Delete(oldPath);
                 } catch {
@@ -89,22 +90,30 @@ namespace jubeater.aigoalplanner.Core
         public void Remove(string endpoint) {
             if (string.IsNullOrWhiteSpace(endpoint)) return;
 
+            Exception deleteException = null;
+
             string path = PathFor(endpoint);
             if (File.Exists(path)) {
                 try {
                     File.Delete(path);
-                } catch {
-                    // Ignore deletion failure
+                } catch (Exception exception) {
+                    deleteException = exception;
                 }
             }
 
             string oldPath = OldPathFor(endpoint);
-            if (File.Exists(oldPath)) {
+            if (!string.Equals(oldPath, path, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath)) {
                 try {
                     File.Delete(oldPath);
-                } catch {
-                    // Ignore deletion failure
+                } catch (Exception exception) {
+                    if (deleteException == null) {
+                        deleteException = exception;
+                    }
                 }
+            }
+
+            if (deleteException != null) {
+                throw deleteException;
             }
         }
 

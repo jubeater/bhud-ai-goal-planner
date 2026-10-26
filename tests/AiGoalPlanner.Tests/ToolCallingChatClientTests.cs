@@ -150,17 +150,12 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
-        public async Task Clearing_stored_failure_on_save_allows_the_player_to_retry() {
+        public async Task ForgetFailure_clears_stored_failure_allowing_the_player_to_retry_with_a_probe() {
             var inner = new ScriptedChatClient();
             var store = new ToolCallingCapabilityStore();
             store.Record(Endpoint, Model, canCallTools: false);
 
-            // Saving settings clears failure
-            if (store.GetCapability(Endpoint, Model) == false) {
-                store.Clear(Endpoint, Model);
-            }
-
-            Assert.Null(store.GetCapability(Endpoint, Model));
+            store.ForgetFailure(Endpoint, Model);
 
             inner.WillCallTool("test_tool");
             inner.WillReply("Now it works.");
@@ -170,22 +165,18 @@ namespace jubeater.aigoalplanner.Tests
 
             Assert.Equal("Now it works.", response.Text);
             Assert.True(store.GetCapability(Endpoint, Model));
+            Assert.Equal(2, inner.Requests.Count); // Probe request + actual request
         }
 
         [Fact]
-        public async Task A_recorded_true_stays_intact_on_save_and_does_not_probe_again() {
+        public async Task ForgetFailure_keeps_a_recorded_true_intact_so_the_next_request_does_not_probe() {
             var inner = new ScriptedChatClient();
             inner.WillReply("Direct answer.");
 
             var store = new ToolCallingCapabilityStore();
             store.Record(Endpoint, Model, canCallTools: true);
 
-            // Saving unchanged or tested settings does not clear a recorded true
-            if (store.GetCapability(Endpoint, Model) == false) {
-                store.Clear(Endpoint, Model);
-            }
-
-            Assert.True(store.GetCapability(Endpoint, Model));
+            store.ForgetFailure(Endpoint, Model);
 
             var client = new ToolCallingChatClient(inner, Endpoint, Model, store);
             ChatResponse response = await client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") });

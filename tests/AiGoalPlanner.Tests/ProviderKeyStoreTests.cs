@@ -147,5 +147,30 @@ namespace jubeater.aigoalplanner.Tests
             store.Save(endpoint, string.Empty);
             Assert.False(File.Exists(oldPath));
         }
+
+        [Fact]
+        public void A_key_file_that_cannot_be_deleted_causes_Remove_to_throw_and_retains_HasKey() {
+            var store = new ProviderKeyStore(_directory);
+            string endpoint = "https://api.openai.com/v1/";
+            store.Save(endpoint, "sk-the-key");
+
+            string path = store.PathFor(endpoint);
+            string oldPath = store.OldPathFor(endpoint);
+            Assert.True(File.Exists(path));
+            Assert.NotEqual(path, oldPath);
+
+            // Re-create old file to verify Remove attempts deleting it even when path deletion fails
+            File.WriteAllBytes(oldPath, new byte[] { 1, 2, 3 });
+            Assert.True(File.Exists(oldPath));
+
+            File.SetAttributes(path, FileAttributes.ReadOnly);
+            try {
+                Assert.Throws<UnauthorizedAccessException>(() => store.Remove(endpoint));
+                Assert.True(store.HasKey(endpoint));
+                Assert.False(File.Exists(oldPath));
+            } finally {
+                File.SetAttributes(path, FileAttributes.Normal);
+            }
+        }
     }
 }

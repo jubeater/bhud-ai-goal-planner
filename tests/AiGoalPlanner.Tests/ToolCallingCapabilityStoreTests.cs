@@ -1,7 +1,12 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using jubeater.aigoalplanner.Core;
+using jubeater.aigoalplanner.Providers;
+using jubeater.aigoalplanner.Tests.Fakes;
+using Microsoft.Extensions.AI;
 using Xunit;
+using AiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 namespace jubeater.aigoalplanner.Tests
 {
@@ -82,27 +87,38 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
-        public void Saving_clears_stored_failure_allowing_a_retry() {
+        public async Task ForgetFailure_clears_stored_failure_so_the_next_request_probes_again() {
             var store = new ToolCallingCapabilityStore(_directory);
             store.Record("https://ollama.com/v1", "beam:cloud", canCallTools: false);
 
-            if (store.GetCapability("https://ollama.com/v1", "beam:cloud") == false) {
-                store.Clear("https://ollama.com/v1", "beam:cloud");
-            }
+            store.ForgetFailure("https://ollama.com/v1", "beam:cloud");
 
-            Assert.Null(store.GetCapability("https://ollama.com/v1", "beam:cloud"));
+            var inner = new ScriptedChatClient();
+            inner.WillCallTool("test_tool");
+            inner.WillReply("Now it works.");
+            var client = new ToolCallingChatClient(inner, "https://ollama.com/v1", "beam:cloud", store);
+
+            ChatResponse response = await client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") });
+
+            Assert.Equal("Now it works.", response.Text);
+            Assert.Equal(2, inner.Requests.Count); // Probe request + actual request
         }
 
         [Fact]
-        public void Saving_leaves_a_recorded_true_intact_without_clearing() {
+        public async Task ForgetFailure_leaves_a_recorded_true_intact_so_the_next_request_does_not_probe() {
             var store = new ToolCallingCapabilityStore(_directory);
             store.Record("https://ollama.com/v1", "beam:cloud", canCallTools: true);
 
-            if (store.GetCapability("https://ollama.com/v1", "beam:cloud") == false) {
-                store.Clear("https://ollama.com/v1", "beam:cloud");
-            }
+            store.ForgetFailure("https://ollama.com/v1", "beam:cloud");
 
-            Assert.True(store.GetCapability("https://ollama.com/v1", "beam:cloud"));
+            var inner = new ScriptedChatClient();
+            inner.WillReply("Direct answer.");
+            var client = new ToolCallingChatClient(inner, "https://ollama.com/v1", "beam:cloud", store);
+
+            ChatResponse response = await client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") });
+
+            Assert.Equal("Direct answer.", response.Text);
+            Assert.Single(inner.Requests); // Only the actual request, no probe
         }
     }
 }

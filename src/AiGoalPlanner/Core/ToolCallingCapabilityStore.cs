@@ -56,6 +56,23 @@ namespace jubeater.aigoalplanner.Core
             }
         }
 
+        /// <summary>
+        /// Clears the capability only when it was recorded as false, so saving provider settings allows
+        /// the player to retry a refused model while keeping a recorded pass.
+        /// </summary>
+        public void ForgetFailure(string endpoint, string model) {
+            string key = KeyFor(endpoint, model);
+            if (key == null) return;
+
+            lock (_lock) {
+                if (_capabilities.TryGetValue(key, out bool capable) && !capable) {
+                    if (_capabilities.Remove(key)) {
+                        Save();
+                    }
+                }
+            }
+        }
+
         private static string KeyFor(string endpoint, string model) {
             if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(model)) return null;
 
