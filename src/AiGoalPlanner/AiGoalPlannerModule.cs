@@ -14,6 +14,7 @@ using Blish_HUD.Settings;
 using jubeater.aigoalplanner.Core;
 using jubeater.aigoalplanner.Providers;
 using jubeater.aigoalplanner.UI;
+using jubeater.aigoalplanner.World;
 using Microsoft.Extensions.AI;
 using Microsoft.Xna.Framework.Graphics;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -79,7 +80,15 @@ namespace jubeater.aigoalplanner
             _capabilityStore = new ToolCallingCapabilityStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
 
-            _chat = new Chat(CreateChatClient, BuildSystemPrompt);
+            _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools());
+        }
+
+        /// <summary>
+        /// The Lookups the model may call, against the real Blish HUD host. The world reads live
+        /// state on every Lookup, so a module enabled mid-session is seen from its next Lookup on.
+        /// </summary>
+        private ToolRegistry BuildTools() {
+            return Lookups.For(new BlishHudWorld());
         }
 
         private void DefineProviderSettings() {

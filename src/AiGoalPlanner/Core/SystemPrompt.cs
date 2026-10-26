@@ -3,15 +3,16 @@ using System;
 namespace jubeater.aigoalplanner.Core
 {
     /// <summary>
-    /// The message the Chat sends ahead of the Player's words, so the model knows which product it is
-    /// part of instead of introducing itself as some other assistant.
+    /// The fixed system prompt the Chat sends ahead of the Player's words: which product the model
+    /// is part of, what it may talk about, that it only proposes changes and never makes them, and
+    /// that it answers from the Player's real setup in the Player's language.
     /// </summary>
     /// <remarks>
-    /// This is the identity message, not the whole system prompt: the planning instructions and the
-    /// Lookups arrive with the ticket that adds them. It is built from the same Settings the Provider
-    /// client uses, so it names the model and the host the Chat actually talks to, and a change of
-    /// endpoint or model is named correctly from the next Request on. It is kept out of
-    /// <see cref="Chat.Messages"/>: the Player reads the conversation, not the instructions.
+    /// The prompt is fixed text so the Lookups and the rules stay the same for every Provider and
+    /// every model; only the identity paragraph names the model and the host, built from the same
+    /// Settings the Provider client uses, so a change of endpoint or model is named correctly from
+    /// the next Request on. It is kept out of <see cref="Chat.Messages"/>: the Player reads the
+    /// conversation, not the instructions.
     /// </remarks>
     public static class SystemPrompt
     {
@@ -19,10 +20,52 @@ namespace jubeater.aigoalplanner.Core
         /// The one message the Chat puts first on every Request.
         /// </summary>
         public static string For(string model, string endpoint) {
+            return Identity(model, endpoint) + "\n\n"
+                 + Scope + "\n\n"
+                 + AdvisoryOnly + "\n\n"
+                 + LookupsAndLanguage;
+        }
+
+        /// <summary>
+        /// Who the model is and where it runs, so it does not introduce itself as some other
+        /// assistant the Player has heard of.
+        /// </summary>
+        private static string Identity(string model, string endpoint) {
             return "You are AI Goal Planner, an assistant inside the Blish HUD module of the same name. "
                  + WhereItRuns(model, endpoint)
                  + " Don't claim to be ChatGPT or any other product.";
         }
+
+        /// <summary>
+        /// What the model may talk about: Blish HUD configuration first, Guild Wars 2 and Blish HUD
+        /// questions as short advice, everything else declined.
+        /// </summary>
+        private const string Scope =
+            "You help the Player configure Blish HUD: the modules they have installed and their settings. "
+          + "Questions about Guild Wars 2 or Blish HUD itself get a short answer as advice; say when you "
+          + "are not sure. Anything that is not about configuring Blish HUD or playing Guild Wars 2: "
+          + "politely decline and say what you can help with instead.";
+
+        /// <summary>
+        /// The one rule the model must not get wrong: proposing is all it can do. A model that
+        /// claims it has enabled a module sends the Player away believing something happened that
+        /// did not.
+        /// </summary>
+        private const string AdvisoryOnly =
+            "You never change anything yourself. You can only propose changes, and you deliver them "
+          + "with the submit_plan tool, which proposes a plan for the Player to review and apply. "
+          + "Nothing has happened until the Player applies it. Never say that you installed, enabled, "
+          + "disabled or changed anything: say \"I suggest…\", \"You could…\", or \"Review the changes "
+          + "below…\" instead.";
+
+        /// <summary>
+        /// How the model answers: from the Player's real setup, in the language the Player used.
+        /// </summary>
+        private const string LookupsAndLanguage =
+            "Look things up before you answer. Call list_installed_modules to see which modules the "
+          + "Player really has, and get_module_settings to read one module's settings; prefer what "
+          + "the tools say over guessing. If a module is disabled, tell the Player to enable it "
+          + "first. Reply in the language the Player wrote in.";
 
         private static string WhereItRuns(string model, string endpoint) {
             string modelName = (model ?? string.Empty).Trim();

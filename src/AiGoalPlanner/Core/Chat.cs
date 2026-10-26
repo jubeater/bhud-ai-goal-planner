@@ -14,15 +14,40 @@ namespace jubeater.aigoalplanner.Core
     /// <remarks>
     /// This is the planning core's public seam. The Chat window and the Provider layer talk to a
     /// Chat only through this class, which keeps it free of Blish HUD types. The model is reached
-    /// through <see cref="IChatClient"/>, so tests can drive the Chat with a scripted model.
+    /// through <see cref="IChatClient"/>, so tests can drive the Chat with a scripted model, and the
+    /// Lookups the model calls run against an <see cref="IBlishHudWorld"/> through the
+    /// <see cref="ToolRegistry"/>. When a Request needs Lookups, the Chat runs them and returns all
+    /// of a round's results to the model before it is asked again, until the model answers, stops
+    /// calling tools, or the tool-call limit ends the loop.
     /// </remarks>
     public sealed class Chat
     {
+        /// <summary>
+        /// How many tool calls one Request may run before the Chat stops the model. The limit is
+        /// checked per round: a round that would go past it ends the loop instead of running.
+        /// </summary>
+        private const int ToolCallLimit = 15;
+
         private readonly Func<IChatClient> _chatClient;
         private readonly Func<string>       _systemPrompt;
+        private readonly ToolRegistry       _tools;
+
         private readonly List<ChatMessage> _messages     = new List<ChatMessage>();
         private readonly object            _messagesLock = new object();
         private readonly SemaphoreSlim     _sendLock     = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// What the model is told, oldest first: the Player's and the AI's words, and the tool
+        /// exchanges of the Requests that needed Lookups. It is not what the Player reads — Notices
+        /// and progress never reach the model, and tool exchanges are not shown in the Chat.
+        /// </summary>
+        private readonly List<AiChatMessage> _modelHistory = new List<AiChatMessage>();
+
+        /// <summary>
+        /// What the Chat is doing right now, e.g. "Checking installed modules…", for the Player to
+        /// read while the Lookups of the current Request run.
+        /// </summary>
+        private readonly List<string> _progressLines = new List<string>();
 
         /// <summary>
         /// Which Chat this is, so work started in one Chat can tell that the Player has moved on. It
@@ -35,11 +60,13 @@ namespace jubeater.aigoalplanner.Core
         /// <summary>
         /// A Chat talks to the model <paramref name="chatClient"/> builds and is told what it is by
         /// <paramref name="systemPrompt"/>. Both are asked again for every Request, so a change of
-        /// Settings takes effect without losing the conversation.
+        /// Settings takes effect without losing the conversation. <paramref name="tools"/> holds the
+        /// Lookups the model may call; without it the Chat simply has none to offer.
         /// </summary>
-        public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt) {
+        public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools = null) {
             _chatClient   = chatClient   ?? throw new ArgumentNullException(nameof(chatClient));
             _systemPrompt = systemPrompt ?? throw new ArgumentNullException(nameof(systemPrompt));
+            _tools        = tools;
         }
 
         /// <summary>
@@ -47,6 +74,13 @@ namespace jubeater.aigoalplanner.Core
         /// It may be raised on a background thread; the Chat window marshals it to the game thread.
         /// </summary>
         public event EventHandler<EventArgs> MessagesChanged;
+
+        /// <summary>
+        /// Raised whenever the progress lines change, so the Chat window can show what the AI is
+        /// checking right now. Like <see cref="MessagesChanged"/>, it may be raised on a background
+        /// thread.
+        /// </summary>
+        public event EventHandler<EventArgs> ProgressChanged;
 
         /// <summary>
         /// Everything said in this Chat so far, oldest first. The identity message the Chat puts
@@ -61,17 +95,31 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
+        /// What the current Request is doing, oldest line first, e.g. "Checking installed modules…".
+        /// The lines are gone once the Request is done, whatever its end: a reply, a Notice or a
+        /// cancellation.
+        /// </summary>
+        public IReadOnlyList<string> ProgressLines {
+            get {
+                lock (_messagesLock) {
+                    return _progressLines.ToArray();
+                }
+            }
+        }
+
+        /// <summary>
         /// Sends a Request in this Chat: the Player's words are added to the Chat and the AI answers.
         /// An empty Request (a Send with nothing typed) is ignored.
         /// </summary>
         /// <remarks>
         /// History is append-only: earlier messages are never edited or replaced. Only what the
-        /// Player and the AI said goes back to the model, behind the identity message that says which
-        /// product the model is part of; notices stay in the Chat. Sends are serialized, and a Request
-        /// that is still waiting its turn when the Player starts a new Chat is dropped instead of
-        /// being sent into the new one. So is whatever else the old Chat still had coming: a reply or a
-        /// Notice joins the Chat only while it is still the current one, so it can neither appear in
-        /// the new Chat nor be sent to the model with it.
+        /// Player and the AI said, and the tool exchanges the model itself asked for, go back to the
+        /// model, behind the identity message that says which product the model is part of; notices
+        /// and progress stay in the Chat. Sends are serialized, and a Request that is still waiting
+        /// its turn when the Player starts a new Chat is dropped instead of being sent into the new
+        /// one. So is whatever else the old Chat still had coming: a reply or a Notice joins the
+        /// Chat only while it is still the current one, so it can neither appear in the new Chat nor
+        /// be sent to the model with it.
         /// </remarks>
         public async Task SendAsync(string request, CancellationToken cancellationToken = default) {
             if (string.IsNullOrWhiteSpace(request)) return;
@@ -85,15 +133,56 @@ namespace jubeater.aigoalplanner.Core
             try {
                 // The Player started a new Chat while this Request was queued: it is dropped
                 // before it is shown and before the model sees it.
-                if (!TryAppend(generation, new ChatMessage(ChatMessageAuthor.Player, request.Trim()))) return;
+                if (!TryBeginRequest(generation, request.Trim())) return;
 
+                try {
+                    await RunRequest(generation, cancellationToken).ConfigureAwait(false);
+                } finally {
+                    ClearProgress(generation);
+                }
+            } finally {
+                _sendLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Starts a new Chat: what the Player said before is cleared, and the next Request starts from scratch.
+        /// </summary>
+        /// <remarks>
+        /// Emptying the Chat and moving on to the next generation happen together, under the lock
+        /// that guards the messages, so nothing that is happening in the old Chat at that moment can
+        /// land in the new one: a reply, a Notice about a Request that failed, or a leftover
+        /// progress line either gets there first and is cleared with the old Chat, or does not get
+        /// there at all.
+        /// </remarks>
+        public void StartNewChat() {
+            lock (_messagesLock) {
+                _messages.Clear();
+                _modelHistory.Clear();
+                _progressLines.Clear();
+                Interlocked.Increment(ref _generation);
+            }
+
+            MessagesChanged?.Invoke(this, EventArgs.Empty);
+            ProgressChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// One Request, from the model's first answer to the Chat's last word: tool rounds as long as
+        /// the model calls read-only tools, then the reply. Everything it shows or tells the model is
+        /// gated on <paramref name="generation"/>, so nothing lands in a Chat the Player has left.
+        /// </summary>
+        private async Task RunRequest(int generation, CancellationToken cancellationToken) {
+            int executedToolCalls = 0;
+
+            while (true) {
                 ChatResponse response;
 
                 try {
                     IChatClient chatClient = _chatClient();
 
                     response = await chatClient
-                                      .GetResponseAsync(BuildHistory(), cancellationToken: cancellationToken)
+                                      .GetResponseAsync(BuildHistory(), BuildOptions(), cancellationToken)
                                       .ConfigureAwait(false);
                 } catch (ProviderException exception) {
                     TryAppendNotice(generation, Describe(exception.Failure));
@@ -107,39 +196,139 @@ namespace jubeater.aigoalplanner.Core
                     return;
                 }
 
-                // The Player may have started a new Chat while the Provider was thinking. The reply
-                // then belongs to the old Chat, so it is dropped rather than shown out of context:
-                // ShowResponse appends only while the Chat it answers is still the current one.
-                ShowResponse(generation, response);
-            } finally {
-                _sendLock.Release();
+                if (response == null) {
+                    TryAppendNotice(generation, Describe(ProviderFailure.Unexpected));
+
+                    return;
+                }
+
+                List<FunctionCallContent> calls = response.Messages.SelectMany(message => message.Contents)
+                                                                   .OfType<FunctionCallContent>()
+                                                                   .ToList();
+
+                if (calls.Count == 0) {
+                    ShowResponse(generation, response);
+
+                    return;
+                }
+
+                if (_tools != null && calls.Any(call => _tools.IsProposal(call.Name))) {
+                    // A proposal is delivered to the Player, not run: per ADR-0003 nothing changes
+                    // until the Player applies it. The Review flow that takes a proposal from here
+                    // arrives with its own ticket; until then the Chat can only repeat what the
+                    // model said about it.
+                    ShowUndeliverableProposal(generation, response);
+
+                    return;
+                }
+
+                if (executedToolCalls + calls.Count > ToolCallLimit) {
+                    TryAppendNotice(generation,
+                                    "The AI kept checking things without giving an answer: " + executedToolCalls + " Lookups in, the Chat stopped it. "
+                                  + "Try a shorter request or start a New chat.");
+
+                    return;
+                }
+
+                List<FunctionResultContent> results = await RunToolCalls(generation, calls, cancellationToken)
+                                                          .ConfigureAwait(false);
+
+                executedToolCalls += calls.Count;
+
+                // The exchange is added to what the model is told as one step: a tool call without
+                // its result is a hole in the conversation the next Request could not explain. If
+                // the Player has started a new Chat meanwhile, none of it lands anywhere.
+                if (!TryAppendToolExchange(generation, response, results)) return;
             }
         }
 
         /// <summary>
-        /// Starts a new Chat: what the Player said before is cleared, and the next Request starts from scratch.
+        /// Runs the tool calls of one round, in the order the model asked for them, and gathers
+        /// their results. A call for a tool that does not exist, or one that fails, becomes a result
+        /// that says so — the model gets an answer for every call it made, so it can carry on.
         /// </summary>
-        /// <remarks>
-        /// Emptying the Chat and moving on to the next generation happen together, under the lock
-        /// that guards the messages, so nothing that is happening in the old Chat at that moment can
-        /// land in the new one: a reply, or a Notice about a Request that failed, either gets there
-        /// first and is cleared with the old Chat, or does not get there at all.
-        /// </remarks>
-        public void StartNewChat() {
+        private async Task<List<FunctionResultContent>> RunToolCalls(int generation, List<FunctionCallContent> calls,
+                                                                     CancellationToken cancellationToken) {
+            var results = new List<FunctionResultContent>(calls.Count);
+
+            foreach (FunctionCallContent call in calls) {
+                if (_tools == null || !_tools.TryGet(call.Name, out RegisteredTool tool)) {
+                    results.Add(new FunctionResultContent(call.CallId, null) {
+                        Exception = new InvalidOperationException("There is no tool named " + call.Name + ".")
+                    });
+
+                    continue;
+                }
+
+                AddProgress(generation, tool.ProgressText(call.Arguments));
+
+                try {
+                    object result = await tool.Function
+                                              .InvokeAsync(new AIFunctionArguments(call.Arguments), cancellationToken)
+                                              .ConfigureAwait(false);
+
+                    results.Add(new FunctionResultContent(call.CallId, result));
+                } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                    throw;
+                } catch (Exception exception) {
+                    results.Add(new FunctionResultContent(call.CallId, null) {
+                        Exception = exception
+                    });
+                }
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// What the model is offered besides the conversation: the Lookups it may call. Without a
+        /// registry there is nothing to offer, and the Request goes out as it always did.
+        /// </summary>
+        private ChatOptions BuildOptions() {
+            if (_tools == null) return null;
+
+            List<AIFunctionDeclaration> declarations = _tools.Declarations.ToList();
+
+            return declarations.Count == 0
+                       ? null
+                       : new ChatOptions { Tools = declarations.Cast<AITool>().ToList() };
+        }
+
+        /// <summary>
+        /// What the model is sent: the identity message first, then everything the Player and the AI
+        /// said and the tool exchanges of this Chat. The identity message is not one of the Chat's
+        /// messages, so the Player never reads it and New chat leaves it in place.
+        /// </summary>
+        private IReadOnlyList<AiChatMessage> BuildHistory() {
+            var history = new List<AiChatMessage> {
+                new AiChatMessage(ChatRole.System, _systemPrompt())
+            };
+
             lock (_messagesLock) {
-                _messages.Clear();
-                Interlocked.Increment(ref _generation);
+                history.AddRange(_modelHistory);
+            }
+
+            return history;
+        }
+
+        /// <summary>
+        /// Adds the Player's words to the Chat and to what the model will be told, only while
+        /// <paramref name="generation"/> is still the Chat the Player is looking at.
+        /// </summary>
+        private bool TryBeginRequest(int generation, string request) {
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return false;
+
+                _messages.Add(new ChatMessage(ChatMessageAuthor.Player, request));
+                _modelHistory.Add(new AiChatMessage(ChatRole.User, request));
             }
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
+
+            return true;
         }
 
         private void ShowResponse(int generation, ChatResponse response) {
-            if (response == null) {
-                TryAppendNotice(generation, Describe(ProviderFailure.Unexpected));
-                return;
-            }
-
             ChatFinishReason? finishReason = response.FinishReason;
             string            text         = response.Text;
 
@@ -153,48 +342,75 @@ namespace jubeater.aigoalplanner.Core
                 return;
             }
 
-            TryAppend(generation, new ChatMessage(ChatMessageAuthor.Ai, text));
+            TryAppendAiReply(generation, text);
         }
 
         /// <summary>
-        /// What the model is sent: the identity message first, then everything the Player and the AI
-        /// said. The identity message is not one of the Chat's messages, so the Player never reads it
-        /// and New chat leaves it in place.
+        /// The model called a proposal tool. Until the Review flow can take a proposal, all the Chat
+        /// can do is repeat what the model said about it, so the Player is never left with the
+        /// impression that something has been done — it has not.
         /// </summary>
-        private IReadOnlyList<AiChatMessage> BuildHistory() {
-            var history = new List<AiChatMessage> {
-                new AiChatMessage(ChatRole.System, _systemPrompt())
-            };
+        private void ShowUndeliverableProposal(int generation, ChatResponse response) {
+            string text = response.Text;
 
+            if (!string.IsNullOrWhiteSpace(text)) {
+                TryAppendAiReply(generation, text);
+                return;
+            }
+
+            TryAppendNotice(generation, "The model proposed changes but did not say which. This version of AI Goal Planner cannot show proposals yet.");
+        }
+
+        /// <summary>
+        /// Adds the model's reply to the Chat and to what the model will be told, only while
+        /// <paramref name="generation"/> is still current, as one step.
+        /// </summary>
+        private bool TryAppendAiReply(int generation, string text) {
             lock (_messagesLock) {
-                history.AddRange(_messages
-                                .Where(message => message.Author == ChatMessageAuthor.Player || message.Author == ChatMessageAuthor.Ai)
-                                .Select(message => new AiChatMessage(ToRole(message.Author), message.Text)));
+                if (generation != Volatile.Read(ref _generation)) return false;
+
+                _messages.Add(new ChatMessage(ChatMessageAuthor.Ai, text));
+                _modelHistory.Add(new AiChatMessage(ChatRole.Assistant, text));
             }
 
-            return history;
+            MessagesChanged?.Invoke(this, EventArgs.Empty);
+
+            return true;
         }
 
-        private static ChatRole ToRole(ChatMessageAuthor author) {
-            return author == ChatMessageAuthor.Player ? ChatRole.User : ChatRole.Assistant;
+        /// <summary>
+        /// Adds one tool round to what the model will be told: its own calls first, then the results
+        /// it asked for, as one step under the lock.
+        /// </summary>
+        private bool TryAppendToolExchange(int generation, ChatResponse response, List<FunctionResultContent> results) {
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return false;
+
+                _modelHistory.Add(AssistantMessageOf(response));
+                _modelHistory.Add(new AiChatMessage(ChatRole.Tool, results.Cast<AIContent>().ToList()));
+            }
+
+            return true;
         }
 
-        private static string DescribeFinishReason(ChatFinishReason finishReason, string text) {
-            if (finishReason.Equals(ChatFinishReason.ContentFilter)) {
-                return string.IsNullOrWhiteSpace(text)
-                           ? "The model refused to answer this request."
-                           : "The model refused to answer this request. It said: " + text;
+        /// <summary>
+        /// The message to replay for what the model said this round: its tool calls, and any words
+        /// it said along with them.
+        /// </summary>
+        private static AiChatMessage AssistantMessageOf(ChatResponse response) {
+            if (response.Messages.Count == 1) return response.Messages[0];
+
+            var contents = new List<AIContent>();
+
+            foreach (AiChatMessage message in response.Messages) {
+                contents.AddRange(message.Contents);
             }
 
-            if (finishReason.Equals(ChatFinishReason.Length)) {
-                return "The reply was cut off because the model reached its length limit. Try a shorter request.";
-            }
+            return new AiChatMessage(ChatRole.Assistant, contents);
+        }
 
-            if (finishReason.Equals(ChatFinishReason.ToolCalls)) {
-                return "The model tried to use a tool, which this Chat does not support yet.";
-            }
-
-            return "The model stopped before finishing (" + finishReason.Value + ").";
+        private bool TryAppendNotice(int generation, string text) {
+            return TryAppend(generation, new ChatMessage(ChatMessageAuthor.Notice, text));
         }
 
         private static string Describe(ProviderFailure failure) {
@@ -240,8 +456,51 @@ namespace jubeater.aigoalplanner.Core
             return true;
         }
 
-        private bool TryAppendNotice(int generation, string text) {
-            return TryAppend(generation, new ChatMessage(ChatMessageAuthor.Notice, text));
+        /// <summary>
+        /// Shows a line in the Chat for what the AI is checking now, only while
+        /// <paramref name="generation"/> is still current.
+        /// </summary>
+        private void AddProgress(int generation, string line) {
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return;
+
+                _progressLines.Add(line);
+            }
+
+            ProgressChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Ends the progress of a Request, whatever way it ended. A Request that belongs to a Chat
+        /// the Player has left leaves no lines behind in the new one.
+        /// </summary>
+        private void ClearProgress(int generation) {
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return;
+                if (_progressLines.Count == 0) return;
+
+                _progressLines.Clear();
+            }
+
+            ProgressChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private static string DescribeFinishReason(ChatFinishReason finishReason, string text) {
+            if (finishReason.Equals(ChatFinishReason.ContentFilter)) {
+                return string.IsNullOrWhiteSpace(text)
+                           ? "The model refused to answer this request."
+                           : "The model refused to answer this request. It said: " + text;
+            }
+
+            if (finishReason.Equals(ChatFinishReason.Length)) {
+                return "The reply was cut off because the model reached its length limit. Try a shorter request.";
+            }
+
+            if (finishReason.Equals(ChatFinishReason.ToolCalls)) {
+                return "The model stopped mid-thought to check something, but the check never arrived. Try again.";
+            }
+
+            return "The model stopped before finishing (" + finishReason.Value + ").";
         }
     }
 }

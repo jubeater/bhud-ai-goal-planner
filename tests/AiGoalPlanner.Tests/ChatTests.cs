@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using jubeater.aigoalplanner.Core;
 using jubeater.aigoalplanner.Providers;
@@ -418,12 +421,229 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("Second answer.", chat.Messages.Last().Text);
         }
 
+        [Fact]
+        public async Task A_Lookup_runs_and_its_result_goes_back_to_the_model_before_the_reply() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "Shows markers and trails.", enabled: true));
+
+            model.WillCallTool("list_installed_modules", "call_1");
+            model.WillReply("You have Pathing installed.");
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("What modules do I have?");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              answer => Assert.Equal("You have Pathing installed.", answer.Text));
+
+            // The model saw its own tool call and the Lookup's answer before it was asked again.
+            Assert.Equal(4, model.Requests[1].Count);
+            Assert.True(model.Requests[1][2].Contents.OfType<FunctionCallContent>()
+                            .Any(call => call.Name == "list_installed_modules"));
+
+            AiChatMessage toolAnswer = model.Requests[1][3];
+
+            Assert.True(toolAnswer.Role.Equals(ChatRole.Tool));
+
+            FunctionResultContent result = Assert.Single(toolAnswer.Contents.OfType<FunctionResultContent>());
+
+            Assert.Contains("bh.pathing", ((JsonElement)result.Result).GetString());
+        }
+
+        [Fact]
+        public async Task All_the_results_of_one_round_go_back_to_the_model_together() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+
+            model.WillCallTools(new FunctionCallContent("call_1", "list_installed_modules"),
+                                new FunctionCallContent("call_2", "list_installed_modules"));
+            model.WillReply("Checked twice, one module.");
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("What modules do I have?");
+
+            Assert.Equal("Checked twice, one module.", chat.Messages.Last().Text);
+
+            AiChatMessage toolAnswer = model.Requests[1].Single(message => message.Role.Equals(ChatRole.Tool));
+            List<FunctionResultContent> results = toolAnswer.Contents.OfType<FunctionResultContent>().ToList();
+
+            Assert.Equal(new[] { "call_1", "call_2" }, results.Select(result => result.CallId).ToArray());
+            Assert.Equal(2, world.ListCalls);
+        }
+
+        [Fact]
+        public async Task A_call_to_an_unknown_tool_tells_the_model_so_instead_of_crashing_the_Chat() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillCallTool("search_module_catalog", "call_1");
+            model.WillReply("I cannot search the catalog in this version.");
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("Search the catalog for markers");
+
+            Assert.Equal("I cannot search the catalog in this version.", chat.Messages.Last().Text);
+
+            FunctionResultContent result = Assert.Single(
+                model.Requests[1].Single(message => message.Role.Equals(ChatRole.Tool)).Contents.OfType<FunctionResultContent>());
+
+            Assert.Null(result.Result);
+            Assert.Contains("search_module_catalog", result.Exception.Message);
+        }
+
+        [Fact]
+        public async Task A_runaway_tool_loop_stops_at_the_limit_with_a_clear_message() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            for (int round = 0; round < 20; round++) {
+                model.WillCallTool("list_installed_modules", "call_" + round);
+            }
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("What modules do I have?");
+
+            // 15 Lookups ran; the model was asked once more, saw that the next one would be the
+            // 16th, and the Chat stopped it there instead of answering again.
+            Assert.Equal(16, model.Requests.Count);
+
+            ChatMessage notice = Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Notice);
+
+            Assert.Contains("15", notice.Text);
+            Assert.Contains("Lookup", notice.Text);
+        }
+
+        [Fact]
+        public async Task A_secret_Setting_never_reaches_the_model_even_when_it_is_asked_for_by_name() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.maps", "Maps", "1.0.0", "", enabled: true));
+            world.SettingsByNamespace["bh.maps"] = FakeWorld.Ok(
+                "Maps",
+                new ModuleSettingInfo("api_key",   "API key",   "", "String",  "sk-live-123", null, null),
+                new ModuleSettingInfo("show.grid", "Show grid", "", "Boolean", "true",       null, null));
+
+            model.WillCallTool("get_module_settings", "call_1",
+                               new Dictionary<string, object> { ["namespace"] = "bh.maps" });
+            model.WillReply("The Maps module shows a grid.");
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("What is in the Maps module settings?");
+
+            FunctionResultContent result = Assert.Single(
+                model.Requests[1].Single(message => message.Role.Equals(ChatRole.Tool)).Contents.OfType<FunctionResultContent>());
+
+            string answer = ((JsonElement)result.Result).GetString();
+
+            Assert.DoesNotContain("sk-live-123", answer);
+            Assert.Contains("show.grid", answer);
+        }
+
+        [Fact]
+        public async Task Progress_lines_show_while_a_Lookup_runs_and_are_gone_when_the_reply_lands() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+            world.SettingsByNamespace["bh.pathing"] = FakeWorld.Ok(
+                "Pathing",
+                new ModuleSettingInfo("show.trails", "Show trails", "", "Boolean", "true", null, null));
+
+            model.WillCallTool("get_module_settings", "call_1",
+                               new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
+            model.WillReply("Pathing shows trails by default.");
+
+            var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            world.AnswerGetModuleSettings = (@namespace, cancellationToken) => HoldUntil(release.Task, world, @namespace, cancellationToken);
+
+            var chat = NewChat(model, world);
+
+            Task send = chat.SendAsync("What does Pathing's trail setting do?");
+
+            await WaitUntil(() => world.SettingsCalls == 1);
+
+            Assert.Contains(chat.ProgressLines, line => line.Contains("bh.pathing"));
+
+            release.TrySetResult(true);
+            await send;
+
+            Assert.Equal("Pathing shows trails by default.", chat.Messages.Last().Text);
+            Assert.Empty(chat.ProgressLines);
+        }
+
+        [Fact]
+        public async Task Cancelling_stops_the_Request_while_a_Lookup_runs() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+            world.SettingsByNamespace["bh.pathing"] = FakeWorld.Ok(
+                "Pathing",
+                new ModuleSettingInfo("show.trails", "Show trails", "", "Boolean", "true", null, null));
+
+            model.WillCallTool("get_module_settings", "call_1",
+                               new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
+            model.WillReply("Never reached.");
+
+            var neverReleased = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            world.AnswerGetModuleSettings = (@namespace, cancellationToken) => HoldUntil(neverReleased.Task, world, @namespace, cancellationToken);
+
+            var chat = NewChat(model, world);
+
+            using (var cancellation = new CancellationTokenSource()) {
+                Task send = chat.SendAsync("What does Pathing's trail setting do?", cancellation.Token);
+
+                await WaitUntil(() => world.SettingsCalls == 1);
+
+                cancellation.Cancel();
+
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => send);
+
+                // The Player's Request stays in the Chat, nothing answered it, and no further round
+                // was asked of the model. The progress is gone with it.
+                Assert.Equal(1, chat.Messages.Count);
+                Assert.Equal(ChatMessageAuthor.Player, chat.Messages[0].Author);
+                Assert.Equal(1, model.Requests.Count);
+                Assert.Empty(chat.ProgressLines);
+            }
+        }
+
+        /// <summary>
+        /// A settings Lookup that waits for <paramref name="release"/> and is cut short by
+        /// cancellation, so a test holds the Chat in the middle of a Lookup.
+        /// </summary>
+        private static async Task<ModuleSettingsResult> HoldUntil(Task<bool> release, FakeWorld world, string @namespace,
+                                                                  CancellationToken cancellationToken) {
+            // The task that is awaited is the one the token cancels: cancelling must end the Lookup
+            // the Chat is waiting for, not a side task nobody watches.
+            await Task.WhenAny(release, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            return world.SettingsByNamespace[@namespace];
+        }
+
         /// <summary>
         /// The Chat the way the module builds it: a scripted model, and the identity message that
         /// says which product the model is part of.
         /// </summary>
         private static Chat NewChat(ScriptedChatClient model) {
             return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"));
+        }
+
+        /// <summary>
+        /// The Chat with Lookups: the scripted model and this version's Lookups against an in-memory
+        /// world, wired the way the module wires them.
+        /// </summary>
+        private static Chat NewChat(ScriptedChatClient model, FakeWorld world) {
+            return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"), Lookups.For(world));
         }
 
         /// <summary>
@@ -444,6 +664,18 @@ namespace jubeater.aigoalplanner.Tests
             }
 
             Assert.Equal(times, model.Requests.Count);
+        }
+
+        /// <summary>
+        /// Waits for a condition somewhere else in the machinery, so a test can look at the Chat in
+        /// the middle of a Request without guessing how fast the threads get there.
+        /// </summary>
+        private static async Task WaitUntil(Func<bool> condition) {
+            for (int attempt = 0; attempt < 500 && !condition(); attempt++) {
+                await Task.Delay(10);
+            }
+
+            Assert.True(condition());
         }
     }
 }
