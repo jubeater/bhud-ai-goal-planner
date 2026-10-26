@@ -93,8 +93,8 @@ that failure mode is what the packaging above is there to prevent.
 
 `.vscode/launch.json` starts Blish HUD with this module loaded, so breakpoints hit:
 
-- Blish HUD is expected at `C:\Users\Tianlin\Desktop\Blish.HUD\Blish HUD.exe`; edit `program` in
-  `.vscode/launch.json` if yours is elsewhere.
+- Blish HUD is expected at `%USERPROFILE%\Desktop\Blish.HUD\Blish HUD.exe`; edit `program` and
+  `cwd` in `.vscode/launch.json` if yours is elsewhere.
 - The configuration builds the module first (`tasks.json`), then runs
   `Blish HUD.exe --debug --module <path to AiGoalPlanner.bhm>`. `--debug` makes Blish HUD rethrow
   module exceptions to the debugger.
