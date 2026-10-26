@@ -5,7 +5,9 @@
     <RootNamespace>jubeater.aigoalplanner</RootNamespace>
     <AssemblyName>AiGoalPlanner</AssemblyName>
     <PlatformTarget>x64</PlatformTarget>
-    <DebugType>full</DebugType>
+    <!-- Portable PDB embedded in the DLL: VS Code's debugger only reads portable PDBs, and
+         Blish HUD loads the module from memory, so embedded symbols always travel with it. -->
+    <DebugType>embedded</DebugType>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!--
       Blish HUD already has these assemblies loaded; shipping them in the .bhm would make
