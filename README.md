@@ -36,13 +36,15 @@ The Chat talks to any Provider that speaks the OpenAI-compatible **Chat Completi
 so Ollama, DeepSeek, OpenAI and the rest work with only the endpoint, the model and the key changed:
 
 1. Open the Chat window from the corner icon, then click **Provider settings**.
-2. Enter the **endpoint URL**: `https://ollama.com/v1`, `https://api.deepseek.com` or, for a local
-   Ollama, `http://localhost:11434/v1`. A base URL is enough; `/chat/completions` is appended.
-3. Enter the **model name**: `deepseek-flash`, `beam:cloud`, `qwen3.5:9b`.
+2. Pick a **Provider** from the suggestions (Ollama Cloud, local Ollama, LM Studio, DeepSeek, OpenAI,
+   OpenRouter, Claude) or choose **Custom** to enter any endpoint URL. A base URL is enough;
+   `/chat/completions` is appended.
+3. Enter the **model name**: `deepseek-flash`, `beam:cloud`, `qwen3.5:9b`. The module remembers each
+   Provider's model so you can switch between them easily.
 4. Paste the **API key** if the Provider needs one: put the key on the clipboard and click
    **Paste key**. A local Ollama needs no key at all.
-5. Click **Save**. The next Request uses these settings; the line under the input row says which
-   Provider the Chat will talk to.
+5. Click **Save**. The next Request uses these settings; on first use of a Provider and model, a quick
+   tool-calling test runs. Models that cannot call tools are refused with a clear Notice.
 
 The key never goes into Blish HUD's `settings.json`, and it is never logged. It is encrypted with
 Windows DPAPI for the current Windows user and written to the module's data folder as one

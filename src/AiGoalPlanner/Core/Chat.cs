@@ -211,6 +211,8 @@ namespace jubeater.aigoalplanner.Core
                     return "The Provider is rate limiting requests. Wait a moment, then try again.";
                 case ProviderFailure.Network:
                     return "Could not reach the Provider. Check the endpoint URL and your internet connection, then try again.";
+                case ProviderFailure.ToolCallingNotSupported:
+                    return "That model cannot call tools, which AI Goal Planner needs. Choose a different model in Provider settings.";
                 default:
                     return "Something went wrong while asking the Provider. Try again.";
             }

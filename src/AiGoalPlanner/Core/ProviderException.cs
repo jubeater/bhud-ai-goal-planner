@@ -26,6 +26,9 @@ namespace jubeater.aigoalplanner.Core
         /// <summary>The Provider could not be reached over the network.</summary>
         Network,
 
+        /// <summary>The Provider or model does not support tool calling.</summary>
+        ToolCallingNotSupported,
+
         /// <summary>The Provider failed in a way the Chat has no specific explanation for.</summary>
         Unexpected
     }
@@ -58,6 +61,7 @@ namespace jubeater.aigoalplanner.Core
                 case ProviderFailure.UnknownModel:    return "The Provider does not have that model.";
                 case ProviderFailure.RateLimited:     return "The Provider is rate limiting requests.";
                 case ProviderFailure.Network:         return "The Provider could not be reached.";
+                case ProviderFailure.ToolCallingNotSupported: return "That model cannot call tools.";
                 default:                              return "The Provider request failed.";
             }
         }

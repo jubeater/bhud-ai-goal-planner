@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using jubeater.aigoalplanner.Core;
+using jubeater.aigoalplanner.Providers;
 using jubeater.aigoalplanner.Tests.Fakes;
 using Microsoft.Extensions.AI;
 using Xunit;
@@ -250,6 +251,7 @@ namespace jubeater.aigoalplanner.Tests
         [InlineData(ProviderFailure.UnknownModel,    "model")]
         [InlineData(ProviderFailure.RateLimited,     "Wait a moment")]
         [InlineData(ProviderFailure.Network,         "internet connection")]
+        [InlineData(ProviderFailure.ToolCallingNotSupported, "cannot call tools")]
         [InlineData(ProviderFailure.Unexpected,      "went wrong")]
         public async Task Each_kind_of_Provider_failure_is_explained_in_the_Chat(ProviderFailure failure, string expected) {
             var model = new ScriptedChatClient();
@@ -334,6 +336,86 @@ namespace jubeater.aigoalplanner.Tests
 
             Assert.Equal(2, chat.Messages.Count);
             Assert.DoesNotContain(chat.Messages, message => message.Text.Contains("AI Goal Planner"));
+        }
+
+
+        [Fact]
+        public async Task A_fake_model_that_passes_the_tool_calling_test_is_accepted_in_the_Chat() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool("test_tool");
+            model.WillReply("I can help with hero points.");
+
+            var store = new ToolCallingCapabilityStore();
+            var chat = new Chat(() => new ToolCallingChatClient(model, "https://ollama.com/v1", "beam:cloud", store),
+                                () => SystemPrompt.For("beam:cloud", "https://ollama.com/v1"));
+
+            await chat.SendAsync("Hero points please");
+
+            Assert.Collection(chat.Messages,
+                              request => {
+                                  Assert.Equal(ChatMessageAuthor.Player, request.Author);
+                                  Assert.Equal("Hero points please", request.Text);
+                              },
+                              reply => {
+                                  Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
+                                  Assert.Equal("I can help with hero points.", reply.Text);
+                              });
+            Assert.Equal(2, model.Requests.Count);
+        }
+
+        [Fact]
+        public async Task A_fake_model_that_fails_the_tool_calling_test_is_refused_with_a_Notice() {
+            var model = new ScriptedChatClient();
+            model.WillReply("I cannot call tools.");
+
+            var store = new ToolCallingCapabilityStore();
+            var chat = new Chat(() => new ToolCallingChatClient(model, "https://ollama.com/v1", "beam:cloud", store),
+                                () => SystemPrompt.For("beam:cloud", "https://ollama.com/v1"));
+
+            await chat.SendAsync("Hero points please");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("cannot call tools", notice.Text);
+                              });
+        }
+
+        [Fact]
+        public async Task A_model_refused_for_tool_calling_is_refused_immediately_on_the_next_Request() {
+            var model = new ScriptedChatClient();
+            model.WillReply("I cannot call tools.");
+
+            var store = new ToolCallingCapabilityStore();
+            var chat = new Chat(() => new ToolCallingChatClient(model, "https://ollama.com/v1", "beam:cloud", store),
+                                () => SystemPrompt.For("beam:cloud", "https://ollama.com/v1"));
+
+            await chat.SendAsync("First request");
+            await chat.SendAsync("Second request");
+
+            Assert.Equal(4, chat.Messages.Count);
+            Assert.Equal(ChatMessageAuthor.Notice, chat.Messages[1].Author);
+            Assert.Equal(ChatMessageAuthor.Notice, chat.Messages[3].Author);
+            Assert.Single(model.Requests);
+        }
+
+        [Fact]
+        public async Task Subsequent_Requests_to_an_accepted_model_do_not_retest_tool_calling() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool("test_tool");
+            model.WillReply("First answer.");
+            model.WillReply("Second answer.");
+
+            var store = new ToolCallingCapabilityStore();
+            var chat = new Chat(() => new ToolCallingChatClient(model, "https://ollama.com/v1", "beam:cloud", store),
+                                () => SystemPrompt.For("beam:cloud", "https://ollama.com/v1"));
+
+            await chat.SendAsync("First request");
+            await chat.SendAsync("Second request");
+
+            Assert.Equal(3, model.Requests.Count);
+            Assert.Equal("Second answer.", chat.Messages.Last().Text);
         }
 
         /// <summary>

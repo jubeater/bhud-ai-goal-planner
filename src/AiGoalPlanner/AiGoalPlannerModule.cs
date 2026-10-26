@@ -53,7 +53,10 @@ namespace jubeater.aigoalplanner
 
         private SettingEntry<string> _endpointSetting;
         private SettingEntry<string> _modelSetting;
+        private SettingEntry<string> _savedProvidersSetting;
+        private SavedProviders       _savedProviders;
         private ProviderKeyStore     _keyStore;
+        private ToolCallingCapabilityStore _capabilityStore;
         private HttpClient           _httpClient;
 
         /// <summary>
@@ -69,7 +72,8 @@ namespace jubeater.aigoalplanner
         protected override void Initialize() {
             DefineProviderSettings();
 
-            _keyStore  = new ProviderKeyStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
+            _keyStore        = new ProviderKeyStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
+            _capabilityStore = new ToolCallingCapabilityStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
 
             _chat = new Chat(CreateChatClient, BuildSystemPrompt);
@@ -89,6 +93,14 @@ namespace jubeater.aigoalplanner
                 string.Empty,
                 () => "Model",
                 () => "The model to use, for example a model name from the Provider's settings page.");
+
+            _savedProvidersSetting = settings.DefineSetting(
+                "provider.saved",
+                string.Empty,
+                () => "Saved Providers",
+                () => "Remembers the models configured for each Provider.");
+
+            _savedProviders = SavedProviders.FromJson(_savedProvidersSetting.Value);
         }
 
         /// <summary>
@@ -98,9 +110,12 @@ namespace jubeater.aigoalplanner
         private IChatClient CreateChatClient() {
             string endpoint = _endpointSetting.Value;
 
-            ProviderSettings settings = ProviderSettings.Parse(endpoint, _modelSetting.Value, _keyStore?.Load(endpoint));
+            string model    = _modelSetting.Value;
 
-            return new OpenAiCompatibleChatClient(settings, _httpClient);
+            ProviderSettings settings = ProviderSettings.Parse(endpoint, model, _keyStore?.Load(endpoint));
+            var client = new OpenAiCompatibleChatClient(settings, _httpClient);
+
+            return new ToolCallingChatClient(client, endpoint, model, _capabilityStore);
         }
 
         protected override Task LoadAsync() {
@@ -148,6 +163,9 @@ namespace jubeater.aigoalplanner
             }
 
             _chat = null;
+            _capabilityStore = null;
+            _savedProviders  = null;
+            _keyStore        = null;
 
             if (_httpClient != null) {
                 _httpClient.Dispose();
@@ -191,7 +209,8 @@ namespace jubeater.aigoalplanner
                     DescribeProviderKey,
                     SaveProviderSettings,
                     SaveProviderKey,
-                    NotifyProviderChanged);
+                    NotifyProviderChanged,
+                    endpoint => _savedProviders.GetModel(endpoint));
             }
 
             _providerWindow.Show();
@@ -206,6 +225,9 @@ namespace jubeater.aigoalplanner
 
             _endpointSetting.Value = settings.Endpoint;
             _modelSetting.Value    = settings.Model;
+
+            _savedProviders.SetModel(settings.Endpoint, settings.Model);
+            _savedProvidersSetting.Value = _savedProviders.ToJson();
         }
 
         /// <summary>

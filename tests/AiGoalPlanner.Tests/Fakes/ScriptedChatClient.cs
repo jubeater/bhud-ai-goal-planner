@@ -39,6 +39,14 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             _script.Enqueue(new ProviderException(failure));
         }
 
+        public void WillCallTool(string toolName = "test_tool") {
+            _script.Enqueue(new ChatResponse(new Microsoft.Extensions.AI.ChatMessage(ChatRole.Assistant, new AIContent[] {
+                new FunctionCallContent("call_0", toolName)
+            })) {
+                FinishReason = ChatFinishReason.ToolCalls
+            });
+        }
+
         /// <summary>
         /// Makes the model take its time: every Request it is given is recorded and then waits
         /// until <see cref="Release"/>, so a test can send something else while one is in flight.
