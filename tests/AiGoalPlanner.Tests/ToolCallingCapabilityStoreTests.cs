@@ -80,5 +80,29 @@ namespace jubeater.aigoalplanner.Tests
             var third = new ToolCallingCapabilityStore(_directory);
             Assert.Null(third.GetCapability("https://ollama.com/v1", "beam:cloud"));
         }
+
+        [Fact]
+        public void Saving_clears_stored_failure_allowing_a_retry() {
+            var store = new ToolCallingCapabilityStore(_directory);
+            store.Record("https://ollama.com/v1", "beam:cloud", canCallTools: false);
+
+            if (store.GetCapability("https://ollama.com/v1", "beam:cloud") == false) {
+                store.Clear("https://ollama.com/v1", "beam:cloud");
+            }
+
+            Assert.Null(store.GetCapability("https://ollama.com/v1", "beam:cloud"));
+        }
+
+        [Fact]
+        public void Saving_leaves_a_recorded_true_intact_without_clearing() {
+            var store = new ToolCallingCapabilityStore(_directory);
+            store.Record("https://ollama.com/v1", "beam:cloud", canCallTools: true);
+
+            if (store.GetCapability("https://ollama.com/v1", "beam:cloud") == false) {
+                store.Clear("https://ollama.com/v1", "beam:cloud");
+            }
+
+            Assert.True(store.GetCapability("https://ollama.com/v1", "beam:cloud"));
+        }
     }
 }

@@ -20,6 +20,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="System.Security" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\AiGoalPlanner\AiGoalPlanner.csproj" />
   </ItemGroup>
 

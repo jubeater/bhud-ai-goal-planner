@@ -321,34 +321,21 @@ namespace jubeater.aigoalplanner.UI
             string selected = _providerDropdown.SelectedItem;
             if (string.IsNullOrEmpty(selected) || selected == "Custom") return;
 
-            ProviderEndpointSuggestion match = ProviderEndpointSuggestions.FindByName(selected);
-            if (match != null) {
-                _updatingUI = true;
-                try {
-                    _endpointBox.Text = match.Endpoint;
-
-                    string savedModel = _getSavedModel?.Invoke(match.Endpoint);
-                    _modelBox.Text = savedModel ?? string.Empty;
-
-                    RefreshKeyStatus(match.Endpoint);
-                } finally {
-                    _updatingUI = false;
-                }
+            string endpoint = ProviderEndpointSuggestions.FindByName(selected)?.Endpoint;
+            if (endpoint == null && !_customEndpointsByLabel.TryGetValue(selected, out endpoint)) {
                 return;
             }
 
-            if (_customEndpointsByLabel.TryGetValue(selected, out string customEndpoint)) {
-                _updatingUI = true;
-                try {
-                    _endpointBox.Text = customEndpoint;
+            _updatingUI = true;
+            try {
+                _endpointBox.Text = endpoint;
 
-                    string savedModel = _getSavedModel?.Invoke(customEndpoint);
-                    _modelBox.Text = savedModel ?? string.Empty;
+                string savedModel = _getSavedModel?.Invoke(endpoint);
+                _modelBox.Text = savedModel ?? string.Empty;
 
-                    RefreshKeyStatus(customEndpoint);
-                } finally {
-                    _updatingUI = false;
-                }
+                RefreshKeyStatus(endpoint);
+            } finally {
+                _updatingUI = false;
             }
         }
 

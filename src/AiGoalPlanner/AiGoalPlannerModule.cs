@@ -230,7 +230,9 @@ namespace jubeater.aigoalplanner
             _savedProviders.SetModel(settings.Endpoint, settings.Model);
             _savedProvidersSetting.Value = _savedProviders.ToJson();
 
-            _capabilityStore?.Clear(settings.Endpoint, settings.Model);
+            if (_capabilityStore?.GetCapability(settings.Endpoint, settings.Model) == false) {
+                _capabilityStore.Clear(settings.Endpoint, settings.Model);
+            }
         }
 
         /// <summary>
