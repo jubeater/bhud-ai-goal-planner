@@ -11,9 +11,11 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     /// <remarks>
     /// This is the last gate between the Player's Settings and the model, so the secret rules live
-    /// here: a Setting whose key or display name reads as a key, token or password is left out, and
-    /// a subcollection whose own name reads as one is left out with everything in it — a drawer of
-    /// credentials must not survive because each drawer item is innocently named.
+    /// here. Each Setting is judged by its own key and display name, never by the qualified key its
+    /// position gives it: a parent's name is not the child's accusation. A Setting that reads as a
+    /// key, token or password is left out, and a subcollection whose own name reads as one is left
+    /// out with everything in it — a drawer of credentials must not survive because each drawer
+    /// item is innocently named.
     /// </remarks>
     public static class SettingWalk
     {
@@ -30,19 +32,17 @@ namespace jubeater.aigoalplanner.Core
 
         private static void Walk(string prefix, IReadOnlyList<ModuleSettingInfo> settings, List<ModuleSettingInfo> into) {
             foreach (ModuleSettingInfo setting in settings) {
-                string key = Qualify(prefix, setting.Key);
-
                 if (setting.IsSubcollection) {
-                    if (!SecretFilter.LooksLikeSecret(key, setting.DisplayName)) {
-                        Walk(key, setting.Children, into);
+                    if (!SecretFilter.LooksLikeSecret(setting.Key, setting.DisplayName)) {
+                        Walk(Qualify(prefix, setting.Key), setting.Children, into);
                     }
 
                     continue;
                 }
 
-                if (SecretFilter.LooksLikeSecret(key, setting.DisplayName)) continue;
+                if (SecretFilter.LooksLikeSecret(setting.Key, setting.DisplayName)) continue;
 
-                into.Add(new ModuleSettingInfo(key, setting.DisplayName, setting.Description,
+                into.Add(new ModuleSettingInfo(Qualify(prefix, setting.Key), setting.DisplayName, setting.Description,
                                                setting.TypeName, setting.Value, setting.Min, setting.Max));
             }
         }

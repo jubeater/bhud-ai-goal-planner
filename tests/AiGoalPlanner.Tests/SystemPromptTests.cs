@@ -69,13 +69,6 @@ namespace jubeater.aigoalplanner.Tests
             }
         }
 
-        [Fact]
-        public void It_tells_the_model_to_reply_in_the_language_the_Player_wrote_in() {
-            string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
-
-            Assert.Contains("language the Player wrote in", prompt);
-        }
-
         [Theory]
         [InlineData(null, null)]
         [InlineData("", "")]

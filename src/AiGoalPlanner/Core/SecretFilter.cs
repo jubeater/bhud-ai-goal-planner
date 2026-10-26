@@ -42,22 +42,32 @@ namespace jubeater.aigoalplanner.Core
 
             // api_key and ApiKey split into words that match, but APIKey or apikey2 come out as one
             // word each, so the name joined back together is checked as well. Only the letter words
-            // are joined: the digits mark a numbered secret, not a different word.
-            return SecretNames.Contains(string.Concat(words.Where(word => !char.IsDigit(word[0]))));
+            // are joined: the digits mark a numbered secret, not a different word. The joined name
+            // only has to contain a secret name, not be one: myapikey and userauthtoken carry their
+            // secret in the middle.
+            string joinedLetters = string.Concat(words.Where(word => !char.IsDigit(word[0])));
+
+            foreach (string secretName in SecretNames) {
+                if (joinedLetters.IndexOf(secretName, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            }
+
+            return false;
         }
 
         /// <summary>
         /// Splits a Setting name into its words: separators of any kind, the boundaries inside
-        /// camelCase names, and the boundaries between letters and digits. "api_key", "ApiKey" and
-        /// "api key" all come out as [api, key]; "API_KEY2" comes out as [API, KEY, 2], so a
-        /// numbered key is still seen as a key.
+        /// camelCase names, the boundary where an uppercase run meets the capitalized word that
+        /// follows it (APIKey becomes [API, Key]), and the boundaries between letters and digits.
+        /// "API_KEY2" comes out as [API, KEY, 2], so a numbered key is still seen as a key.
         /// </summary>
         private static List<string> SplitWords(string name) {
-            string withCamelBoundaries = Regex.Replace(name.Trim(), "(?<=[a-z0-9])(?=[A-Z])", " ");
+            string withBoundaries = Regex.Replace(name.Trim(),
+                                                  "(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])",
+                                                  " ");
 
             var words = new List<string>();
 
-            foreach (Match match in Regex.Matches(withCamelBoundaries, "[A-Za-z]+|[0-9]+")) {
+            foreach (Match match in Regex.Matches(withBoundaries, "[A-Za-z]+|[0-9]+")) {
                 words.Add(match.Value);
             }
 
