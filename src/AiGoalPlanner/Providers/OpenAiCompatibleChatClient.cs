@@ -5,11 +5,15 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using jubeater.aigoalplanner.Core;
+using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using JsonException = Newtonsoft.Json.JsonException;
+using JsonSerializer = Newtonsoft.Json.JsonSerializer;
 using AiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using AiChatRole = Microsoft.Extensions.AI.ChatRole;
 using AiChatResponse = Microsoft.Extensions.AI.ChatResponse;
@@ -32,6 +36,9 @@ namespace jubeater.aigoalplanner.Providers
     /// process, where Gw2Sharp already loads System.Text.Json and no binding redirects exist. A raw
     /// request keeps the number of extra assemblies in the .bhm small; see the README.
     /// Requests are not streamed: a Chat reply arrives complete, which is all the Chat needs.
+    /// Tools offered in <see cref="AiChatOptions.Tools"/> are sent as functions, and the tools the
+    /// model asks to call come back as <see cref="FunctionCallContent"/>. Running them is the
+    /// caller's job; this client only speaks the wire format.
     /// </remarks>
     public sealed class OpenAiCompatibleChatClient : AiChatClient
     {
@@ -68,7 +75,7 @@ namespace jubeater.aigoalplanner.Providers
         public Task<AiChatResponse> GetResponseAsync(IEnumerable<AiChatMessage> messages,
                                                      AiChatOptions               options           = null,
                                                      CancellationToken           cancellationToken = default) {
-            return GetResponseCoreAsync(messages, cancellationToken);
+            return GetResponseCoreAsync(messages, options, cancellationToken);
         }
 
         /// <summary>
@@ -93,12 +100,14 @@ namespace jubeater.aigoalplanner.Providers
             if (_ownsHttpClient) _httpClient.Dispose();
         }
 
-        private async Task<AiChatResponse> GetResponseCoreAsync(IEnumerable<AiChatMessage> messages, CancellationToken cancellationToken) {
+        private async Task<AiChatResponse> GetResponseCoreAsync(IEnumerable<AiChatMessage> messages, AiChatOptions options, CancellationToken cancellationToken) {
             var payload = new JObject {
                 ["model"]    = _model,
-                ["messages"] = new JArray((messages ?? Enumerable.Empty<AiChatMessage>()).Select(ToJson)),
+                ["messages"] = new JArray((messages ?? Enumerable.Empty<AiChatMessage>()).SelectMany(ToJson)),
                 ["stream"]   = false
             };
+
+            AddTools(payload, options);
 
             using (var request = new HttpRequestMessage(HttpMethod.Post, _completionsUri)) {
                 request.Content = new StringContent(payload.ToString(Formatting.None), Encoding.UTF8, "application/json");
@@ -135,7 +144,7 @@ namespace jubeater.aigoalplanner.Providers
             JObject json;
 
             try {
-                json = JObject.Parse(body);
+                json = ParseJson(body) as JObject ?? throw new JsonReaderException("The response is not a JSON object.");
             } catch (JsonException exception) {
                 throw new ProviderException(ProviderFailure.Unexpected, "The Provider returned a response that is not JSON.", exception);
             }
@@ -146,8 +155,16 @@ namespace jubeater.aigoalplanner.Providers
                 throw new ProviderException(ProviderFailure.Unexpected, "The Provider returned no choices.");
             }
 
-            string text = ReadContent(choice["message"]?["content"]);
-            var    response = new AiChatResponse(new AiChatMessage(AiChatRole.Assistant, text)) {
+            JToken message = choice["message"];
+            string text    = ReadContent(message?["content"]);
+
+            var contents = new List<AIContent>();
+
+            if (text.Length > 0) contents.Add(new TextContent(text));
+
+            contents.AddRange(ReadToolCalls(message?["tool_calls"] as JArray));
+
+            var response = new AiChatResponse(new AiChatMessage(AiChatRole.Assistant, contents)) {
                 ModelId = json["model"]?.Value<string>() ?? _model
             };
 
@@ -170,11 +187,241 @@ namespace jubeater.aigoalplanner.Providers
             return response;
         }
 
-        private static JObject ToJson(AiChatMessage message) {
-            return new JObject {
-                ["role"]    = RoleName(message.Role),
-                ["content"] = message.Text ?? string.Empty
-            };
+        /// <summary>
+        /// Offers the model the tools in <paramref name="options"/>. Only function tools exist in
+        /// Chat Completions; any other kind of tool is a programming error, not something to drop
+        /// quietly, because the model would then plan without a tool the caller counted on.
+        /// </summary>
+        private static void AddTools(JObject payload, AiChatOptions options) {
+            if (options?.Tools == null || options.Tools.Count == 0) return;
+
+            var tools = new JArray();
+
+            foreach (AITool tool in options.Tools) {
+                if (!(tool is AIFunctionDeclaration function)) {
+                    throw new NotSupportedException("Only function tools can be offered to an OpenAI-compatible Provider, not " + tool?.GetType().Name + ".");
+                }
+
+                tools.Add(new JObject {
+                    ["type"]     = "function",
+                    ["function"] = new JObject {
+                        ["name"]        = function.Name,
+                        ["description"] = function.Description ?? string.Empty,
+                        ["parameters"]  = ParseJson(function.JsonSchema.GetRawText())
+                    }
+                });
+            }
+
+            payload["tools"] = tools;
+
+            JToken toolChoice = ToolChoiceFor(options.ToolMode);
+
+            if (toolChoice != null) payload["tool_choice"] = toolChoice;
+        }
+
+        private static JToken ToolChoiceFor(ChatToolMode toolMode) {
+            switch (toolMode) {
+                case null:                return null;
+                case NoneChatToolMode _:  return "none";
+                case AutoChatToolMode _:  return "auto";
+                case RequiredChatToolMode required when !string.IsNullOrEmpty(required.RequiredFunctionName):
+                    return new JObject {
+                        ["type"]     = "function",
+                        ["function"] = new JObject { ["name"] = required.RequiredFunctionName }
+                    };
+                case RequiredChatToolMode _: return "required";
+                default:                     return null;
+            }
+        }
+
+        /// <summary>
+        /// One message in, one or more out: Chat Completions wants every tool result as a message of
+        /// its own, while one <see cref="AiChatMessage"/> can carry the results of several calls.
+        /// </summary>
+        private static IEnumerable<JObject> ToJson(AiChatMessage message) {
+            List<FunctionResultContent> results = message.Contents.OfType<FunctionResultContent>().ToList();
+
+            if (results.Count > 0) {
+                return results.Select(result => new JObject {
+                    ["role"]         = "tool",
+                    ["tool_call_id"] = result.CallId,
+                    ["content"]      = ResultText(result)
+                });
+            }
+
+            List<FunctionCallContent> calls = message.Contents.OfType<FunctionCallContent>().ToList();
+
+            var json = new JObject { ["role"] = RoleName(message.Role) };
+
+            if (calls.Count == 0) {
+                json["content"] = message.Text ?? string.Empty;
+
+                return new[] { json };
+            }
+
+            // An assistant turn that only called tools has no text, which the API spells as null.
+            json["content"]    = string.IsNullOrEmpty(message.Text) ? JValue.CreateNull() : (JToken)message.Text;
+            json["tool_calls"] = new JArray(calls.Select(call => new JObject {
+                ["id"]       = call.CallId,
+                ["type"]     = "function",
+                ["function"] = new JObject {
+                    ["name"]      = call.Name,
+                    ["arguments"] = ArgumentsText(call.Arguments)
+                }
+            }));
+
+            return new[] { json };
+        }
+
+        /// <summary>
+        /// The model reads a tool result as text. A failed call says so rather than sending nothing,
+        /// so the model can tell a failure from an empty answer.
+        /// </summary>
+        private static string ResultText(FunctionResultContent result) {
+            if (result.Exception != null && result.Result == null) {
+                return "Error: " + result.Exception.Message;
+            }
+
+            switch (result.Result) {
+                case null:          return string.Empty;
+                case string text:   return text;
+                default:            return ToJToken(result.Result).ToString(Formatting.None);
+            }
+        }
+
+        private static string ArgumentsText(IDictionary<string, object> arguments) {
+            var json = new JObject();
+
+            if (arguments != null) {
+                foreach (KeyValuePair<string, object> argument in arguments) {
+                    json[argument.Key] = ToJToken(argument.Value);
+                }
+            }
+
+            return json.ToString(Formatting.None);
+        }
+
+        /// <summary>
+        /// Converts a value to JSON with the Newtonsoft.Json Blish HUD ships. A
+        /// <see cref="JsonElement"/> (what Microsoft.Extensions.AI uses for JSON) is copied by its
+        /// text wherever it sits in the value, because Newtonsoft.Json would otherwise serialize the
+        /// struct's properties.
+        /// </summary>
+        private static JToken ToJToken(object value) {
+            switch (value) {
+                case null:                return JValue.CreateNull();
+                case JToken token:        return token;
+                case JsonElement element: return ParseJson(element.GetRawText());
+                default:                  return JToken.FromObject(value, ValueSerializer);
+            }
+        }
+
+        private static readonly JsonSerializer ValueSerializer = JsonSerializer.Create(new JsonSerializerSettings {
+            Converters = { new JsonElementConverter() }
+        });
+
+        private sealed class JsonElementConverter : JsonConverter
+        {
+            public override bool CanConvert(Type objectType) => objectType == typeof(JsonElement);
+
+            public override bool CanRead => false;
+
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer) {
+                ParseJson(((JsonElement)value).GetRawText()).WriteTo(writer);
+            }
+
+            public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer) {
+                throw new NotSupportedException();
+            }
+        }
+
+        /// <summary>
+        /// Parses JSON with strings left as strings. Newtonsoft.Json turns anything that looks like a
+        /// date into a <see cref="DateTime"/> by default, which would hand a tool a different type
+        /// than the model sent, shift its time zone when it goes back, and empty a reply whose whole
+        /// text happens to be a date.
+        /// </summary>
+        private static JToken ParseJson(string json) {
+            using (var reader = new JsonTextReader(new System.IO.StringReader(json)) { DateParseHandling = DateParseHandling.None }) {
+                JToken token = JToken.ReadFrom(reader);
+
+                if (reader.Read()) throw new JsonReaderException("Unexpected content after the JSON value.");
+
+                return token;
+            }
+        }
+
+        /// <summary>
+        /// Reads the tools the model asked to call. Arguments that are not a JSON object are not
+        /// guessed at: the call keeps its name and id, carries the parse error, and the caller can
+        /// tell the model its call was malformed.
+        /// </summary>
+        private static IEnumerable<FunctionCallContent> ReadToolCalls(JArray toolCalls) {
+            if (toolCalls == null) yield break;
+
+            int index = 0;
+
+            foreach (JToken toolCall in toolCalls) {
+                JToken function = toolCall["function"];
+                string name     = function?["name"]?.Value<string>() ?? string.Empty;
+
+                // A call without an id cannot be answered, so one is made up from its position.
+                string callId = toolCall["id"]?.Value<string>();
+                if (string.IsNullOrEmpty(callId)) callId = "call_" + index;
+
+                index++;
+
+                Exception                   parseError = null;
+                Dictionary<string, object> arguments  = null;
+
+                try {
+                    arguments = ReadArguments(function?["arguments"]);
+                } catch (JsonException exception) {
+                    parseError = exception;
+                } catch (InvalidOperationException exception) {
+                    parseError = exception;
+                }
+
+                yield return new FunctionCallContent(callId, name, arguments) { Exception = parseError };
+            }
+        }
+
+        /// <summary>
+        /// Arguments arrive as a JSON string in the OpenAI API, but some compatible Providers (Ollama
+        /// among them) send the object itself, so both are read. Values become plain .NET values —
+        /// strings, numbers, booleans, null, lists and dictionaries — so tools do not have to know
+        /// which JSON library read them.
+        /// </summary>
+        private static Dictionary<string, object> ReadArguments(JToken arguments) {
+            if (arguments == null || arguments.Type == JTokenType.Null) return new Dictionary<string, object>();
+
+            if (arguments.Type == JTokenType.String) {
+                string text = arguments.Value<string>();
+
+                if (string.IsNullOrWhiteSpace(text)) return new Dictionary<string, object>();
+
+                arguments = ParseJson(text);
+            }
+
+            if (!(arguments is JObject json)) {
+                throw new InvalidOperationException("The tool call's arguments are not a JSON object.");
+            }
+
+            return json.Properties().ToDictionary(property => property.Name, property => ToPlainValue(property.Value));
+        }
+
+        private static object ToPlainValue(JToken token) {
+            switch (token.Type) {
+                case JTokenType.Object:
+                    return ((JObject)token).Properties().ToDictionary(property => property.Name, property => ToPlainValue(property.Value));
+                case JTokenType.Array:
+                    return token.Select(ToPlainValue).ToList();
+                case JTokenType.Null:
+                case JTokenType.Undefined:
+                    return null;
+                default:
+                    return ((JValue)token).Value;
+            }
         }
 
         private static string RoleName(AiChatRole role) {

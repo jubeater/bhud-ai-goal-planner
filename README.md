@@ -38,7 +38,7 @@ so Ollama, DeepSeek, OpenAI and the rest work with only the endpoint, the model 
 1. Open the Chat window from the corner icon, then click **Provider settings**.
 2. Enter the **endpoint URL**: `https://ollama.com/v1`, `https://api.deepseek.com` or, for a local
    Ollama, `http://localhost:11434/v1`. A base URL is enough; `/chat/completions` is appended.
-3. Enter the **model name**: `deepseek-chat`, `beam:cloud`, `qwen3.5:9b`.
+3. Enter the **model name**: `deepseek-flash`, `beam:cloud`, `qwen3.5:9b`.
 4. Paste the **API key** if the Provider needs one: put the key on the clipboard and click
    **Paste key**. A local Ollama needs no key at all.
 5. Click **Save**. The next Request uses these settings; the line under the input row says which
@@ -82,8 +82,9 @@ keeps `Microsoft.Extensions.AI` for the seam:
   .NET Framework process that already has `System.Text.Json` loaded through Gw2Sharp, and there are
   no binding redirects to sort out the versions.
 - **Raw HTTP for the wire format.** The request body is built and the reply is read with
-  `Newtonsoft.Json`, which Blish HUD already loads (13.0.1), so no extra JSON library is needed and
-  the module never touches `System.Text.Json` itself.
+  `Newtonsoft.Json`, which Blish HUD already loads (13.0.1), so no extra JSON library is needed. The
+  one place the module touches `System.Text.Json` is at the tool seam: `Microsoft.Extensions.AI`
+  describes a tool's schema as a `JsonElement`, which the client copies out as text.
 - **`Microsoft.Extensions.AI.Abstractions` is the one library Blish HUD does not have.** The `.bhm`
   therefore adds that assembly and its own dependency closure, and nothing else.
 
@@ -95,8 +96,9 @@ references it. Blish HUD's own assemblies (`Gw2Sharp`, `MonoGame`, `SharpDX`, `N
 The known risk is that a process holds one version per assembly name
 ([blish-hud/Blish-HUD#740](https://github.com/blish-hud/Blish-HUD/issues/740)): the
 `System.Text.Json` that `Microsoft.Extensions.AI.Abstractions` depends on can collide with the copy
-Blish HUD loads for Gw2Sharp, or with one that another module ships. The Chat only passes plain text,
-so the JSON surface this module actually reaches is small. If a collision turns up in game, the next
+Blish HUD loads for Gw2Sharp, or with one that another module ships. Plain Chat replies never reach
+`System.Text.Json`; a Request that offers tools does, through the tool schemas, so the in-game check
+has to exercise a tool call. If a collision turns up in game, the next
 step is to leave `System.Text.Json.dll` and the rest of that tree out of the module output and let
 Blish HUD's copy serve the abstractions.
 
