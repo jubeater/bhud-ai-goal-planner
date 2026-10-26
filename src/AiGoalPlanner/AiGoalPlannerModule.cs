@@ -9,6 +9,7 @@ using Blish_HUD.Modules;
 using Blish_HUD.Modules.Managers;
 using jubeater.aigoalplanner.Core;
 using jubeater.aigoalplanner.UI;
+using Microsoft.Xna.Framework.Graphics;
 
 namespace jubeater.aigoalplanner
 {
@@ -40,6 +41,13 @@ namespace jubeater.aigoalplanner
         private ChatWindow _chatWindow;
         private CornerIcon _cornerIcon;
 
+        /// <summary>
+        /// The module's own icon, loaded once from <c>ref/</c> and shared by the corner icon and the
+        /// Chat window. Content loaded from <c>ref/</c> belongs to the module, so <see cref="Unload"/>
+        /// disposes it after the controls that draw it are gone.
+        /// </summary>
+        private Texture2D _iconTexture;
+
         [ImportingConstructor]
         public AiGoalPlannerModule([Import("ModuleParameters")] ModuleParameters moduleParameters) : base(moduleParameters) { /* NOOP */ }
 
@@ -54,6 +62,8 @@ namespace jubeater.aigoalplanner
         }
 
         protected override void OnModuleLoaded(EventArgs e) {
+            _iconTexture = this.ContentsManager.GetTexture("icon.png");
+
             CreateCornerIcon();
             CreateChatWindow();
 
@@ -73,6 +83,13 @@ namespace jubeater.aigoalplanner
                 _chatWindow = null;
             }
 
+            // Nothing draws the icon any more, so the module releases it. Nulling it out means a
+            // re-enabled module loads a fresh texture instead of reusing a disposed one.
+            if (_iconTexture != null) {
+                _iconTexture.Dispose();
+                _iconTexture = null;
+            }
+
             _chat = null;
 
             Logger.Info("AI Goal Planner unloaded.");
@@ -80,7 +97,7 @@ namespace jubeater.aigoalplanner
 
         private void CreateCornerIcon() {
             _cornerIcon = new CornerIcon {
-                Icon             = this.ContentsManager.GetTexture("icon.png"),
+                Icon             = _iconTexture,
                 BasicTooltipText = "AI Goal Planner",
                 Priority         = CornerIconPriority,
                 Parent           = GameService.Graphics.SpriteScreen
@@ -93,7 +110,7 @@ namespace jubeater.aigoalplanner
             _chatWindow = new ChatWindow(
                 _chat,
                 AsyncTexture2D.FromAssetId(WindowBackgroundAssetId),
-                this.ContentsManager.GetTexture("icon.png"));
+                _iconTexture);
         }
 
         private void OnCornerIconClicked(object sender, MouseEventArgs e) {
