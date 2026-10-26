@@ -1,11 +1,15 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading.Tasks;
 using jubeater.aigoalplanner.Core;
 using jubeater.aigoalplanner.Providers;
 using jubeater.aigoalplanner.Tests.Fakes;
 using Microsoft.Extensions.AI;
+using Newtonsoft.Json.Linq;
 using Xunit;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
@@ -136,6 +140,220 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("\"role\":\"system\"",       body);
             Assert.Contains("You are AI Goal Planner.",  body);
         }
+
+        [Fact]
+        public async Task Offered_tools_reach_the_Provider_as_functions_with_their_schema() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            await client.GetResponseAsync(new[] { Request("What modules do I have?") },
+                                          new ChatOptions { Tools = new List<AITool> { ListModulesTool() } });
+
+            JObject body = JObject.Parse(Assert.Single(endpoint.RequestBodies));
+            JToken  tool = Assert.Single((JArray)body["tools"]);
+
+            Assert.Equal("function",                  (string)tool["type"]);
+            Assert.Equal("list_installed_modules",    (string)tool["function"]["name"]);
+            Assert.Equal("Lists the Installed Modules.", (string)tool["function"]["description"]);
+            Assert.Equal("object",                    (string)tool["function"]["parameters"]["type"]);
+            Assert.Null(body["tool_choice"]);
+        }
+
+        [Fact]
+        public async Task A_request_without_tools_sends_no_tools_field() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            await client.GetResponseAsync(new[] { Request("Hello") }, new ChatOptions());
+
+            JObject body = JObject.Parse(Assert.Single(endpoint.RequestBodies));
+
+            Assert.Null(body["tools"]);
+            Assert.Null(body["tool_choice"]);
+        }
+
+        [Fact]
+        public async Task Requiring_a_specific_tool_names_it_in_tool_choice() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            await client.GetResponseAsync(new[] { Request("Hello") }, new ChatOptions {
+                Tools    = new List<AITool> { ListModulesTool() },
+                ToolMode = ChatToolMode.RequireSpecific("list_installed_modules")
+            });
+
+            JToken toolChoice = JObject.Parse(Assert.Single(endpoint.RequestBodies))["tool_choice"];
+
+            Assert.Equal("function",               (string)toolChoice["type"]);
+            Assert.Equal("list_installed_modules", (string)toolChoice["function"]["name"]);
+        }
+
+        [Fact]
+        public async Task Requiring_any_tool_sends_required() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            await client.GetResponseAsync(new[] { Request("Hello") }, new ChatOptions {
+                Tools    = new List<AITool> { ListModulesTool() },
+                ToolMode = ChatToolMode.RequireAny
+            });
+
+            Assert.Equal("required", (string)JObject.Parse(Assert.Single(endpoint.RequestBodies))["tool_choice"]);
+        }
+
+        [Fact]
+        public async Task Tool_calls_in_the_reply_come_back_as_function_calls_with_their_arguments() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":["
+              + "{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"get_module_settings\",\"arguments\":\"{\\\"module\\\":\\\"Pathing\\\",\\\"limit\\\":3,\\\"tags\\\":[\\\"a\\\"]}\"}},"
+              + "{\"id\":\"call_2\",\"type\":\"function\",\"function\":{\"name\":\"list_installed_modules\",\"arguments\":\"{}\"}}"
+              + "]},\"finish_reason\":\"tool_calls\"}]}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Equal(ChatFinishReason.ToolCalls, response.FinishReason);
+
+            List<FunctionCallContent> calls = response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>().ToList();
+
+            Assert.Equal(2, calls.Count);
+            Assert.Equal("call_1",              calls[0].CallId);
+            Assert.Equal("get_module_settings", calls[0].Name);
+            Assert.Equal("Pathing",             calls[0].Arguments["module"]);
+            Assert.Equal(3L,                    calls[0].Arguments["limit"]);
+            Assert.Equal(new List<object> { "a" }, calls[0].Arguments["tags"]);
+            Assert.Null(calls[0].Exception);
+            Assert.Equal("list_installed_modules", calls[1].Name);
+            Assert.Empty(calls[1].Arguments);
+        }
+
+        [Fact]
+        public async Task Arguments_sent_as_an_object_instead_of_a_string_are_read_too() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"tool_calls\":["
+              + "{\"id\":\"call_1\",\"function\":{\"name\":\"get_module_settings\",\"arguments\":{\"module\":\"Pathing\"}}}"
+              + "]},\"finish_reason\":\"tool_calls\"}]}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            FunctionCallContent call = Assert.Single(response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>());
+
+            Assert.Equal("Pathing", call.Arguments["module"]);
+        }
+
+        [Fact]
+        public async Task A_tool_call_with_arguments_that_are_not_JSON_keeps_its_id_and_carries_the_error() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"tool_calls\":["
+              + "{\"function\":{\"name\":\"get_module_settings\",\"arguments\":\"{module: Pathing\"}}"
+              + "]},\"finish_reason\":\"tool_calls\"}]}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            FunctionCallContent call = Assert.Single(response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>());
+
+            Assert.Equal("call_0",              call.CallId);
+            Assert.Equal("get_module_settings", call.Name);
+            Assert.NotNull(call.Exception);
+        }
+
+        [Fact]
+        public async Task Earlier_tool_calls_and_their_results_are_sent_back_in_the_Chat_Completions_shape() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            var arguments = new Dictionary<string, object> { ["module"] = "Pathing" };
+
+            await client.GetResponseAsync(new[] {
+                Request("What does Pathing have?"),
+                new ChatMessage(ChatRole.Assistant, new List<AIContent> {
+                    new FunctionCallContent("call_1", "get_module_settings", arguments),
+                    new FunctionCallContent("call_2", "list_installed_modules")
+                }),
+                new ChatMessage(ChatRole.Tool, new List<AIContent> {
+                    new FunctionResultContent("call_1", "{\"settings\":[]}"),
+                    new FunctionResultContent("call_2", new { modules = new[] { "Pathing" } })
+                })
+            });
+
+            var messages = (JArray)JObject.Parse(Assert.Single(endpoint.RequestBodies))["messages"];
+
+            Assert.Equal(4, messages.Count);
+
+            JToken assistant = messages[1];
+            Assert.Equal("assistant", (string)assistant["role"]);
+            Assert.Equal(JTokenType.Null, assistant["content"].Type);
+            Assert.Equal("call_1",              (string)assistant["tool_calls"][0]["id"]);
+            Assert.Equal("function",            (string)assistant["tool_calls"][0]["type"]);
+            Assert.Equal("get_module_settings", (string)assistant["tool_calls"][0]["function"]["name"]);
+            Assert.Equal("{\"module\":\"Pathing\"}", (string)assistant["tool_calls"][0]["function"]["arguments"]);
+            Assert.Equal("{}",                  (string)assistant["tool_calls"][1]["function"]["arguments"]);
+
+            Assert.Equal("tool",              (string)messages[2]["role"]);
+            Assert.Equal("call_1",            (string)messages[2]["tool_call_id"]);
+            Assert.Equal("{\"settings\":[]}", (string)messages[2]["content"]);
+
+            Assert.Equal("tool",                       (string)messages[3]["role"]);
+            Assert.Equal("call_2",                     (string)messages[3]["tool_call_id"]);
+            Assert.Equal("{\"modules\":[\"Pathing\"]}", (string)messages[3]["content"]);
+        }
+
+        [Fact]
+        public async Task A_tool_result_that_is_a_JsonElement_is_sent_as_its_JSON_text() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            JsonElement result = JsonDocument.Parse("{\"enabled\":true}").RootElement;
+
+            await client.GetResponseAsync(new[] {
+                new ChatMessage(ChatRole.Assistant, new List<AIContent> { new FunctionCallContent("call_1", "get_module_settings") }),
+                new ChatMessage(ChatRole.Tool,      new List<AIContent> { new FunctionResultContent("call_1", result) })
+            });
+
+            var messages = (JArray)JObject.Parse(Assert.Single(endpoint.RequestBodies))["messages"];
+
+            Assert.Equal("{\"enabled\":true}", (string)messages[1]["content"]);
+        }
+
+        [Fact]
+        public async Task A_tool_that_failed_tells_the_model_so() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            await client.GetResponseAsync(new[] {
+                new ChatMessage(ChatRole.Assistant, new List<AIContent> { new FunctionCallContent("call_1", "get_module_settings") }),
+                new ChatMessage(ChatRole.Tool, new List<AIContent> {
+                    new FunctionResultContent("call_1", null) { Exception = new InvalidOperationException("Enable the module first.") }
+                })
+            });
+
+            var messages = (JArray)JObject.Parse(Assert.Single(endpoint.RequestBodies))["messages"];
+
+            Assert.Equal("Error: Enable the module first.", (string)messages[1]["content"]);
+        }
+
+        [Fact]
+        public async Task Offering_a_tool_that_is_not_a_function_is_refused() {
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody));
+
+            await Assert.ThrowsAsync<NotSupportedException>(() => client.GetResponseAsync(
+                new[] { Request("Hello") },
+                new ChatOptions { Tools = new List<AITool> { new NotAFunctionTool() } }));
+        }
+
+        private static AIFunctionDeclaration ListModulesTool() {
+            return AIFunctionFactory.CreateDeclaration(
+                "list_installed_modules",
+                "Lists the Installed Modules.",
+                JsonDocument.Parse("{\"type\":\"object\",\"properties\":{}}").RootElement);
+        }
+
+        private sealed class NotAFunctionTool : AITool { }
 
         private static OpenAiCompatibleChatClient ClientFor(StubHttpMessageHandler endpoint,
                                                             string               url = "https://api.deepseek.com",
