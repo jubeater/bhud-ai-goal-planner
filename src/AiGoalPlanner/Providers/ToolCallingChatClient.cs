@@ -79,20 +79,35 @@ namespace jubeater.aigoalplanner.Providers
                 new ChatMessage(ChatRole.User, "Check tool calling support. Call the test_tool tool.")
             };
 
-            var probeOptions = new ChatOptions {
+            var forcedOptions = new ChatOptions {
                 Tools    = new List<AITool> { TestProbeTool },
                 ToolMode = ChatToolMode.RequireSpecific("test_tool")
             };
 
-            ChatResponse probeResponse;
+            ChatResponse probeResponse = null;
+            ProviderException forced400 = null;
 
             try {
                 probeResponse = await _innerClient
-                                      .GetResponseAsync(probeMessages, probeOptions, cancellationToken)
+                                      .GetResponseAsync(probeMessages, forcedOptions, cancellationToken)
                                       .ConfigureAwait(false);
             } catch (ProviderException exception) when (exception.StatusCode == HttpStatusCode.BadRequest && exception.Failure != ProviderFailure.UnknownModel) {
-                _capabilityStore.Record(_endpoint, _model, canCallTools: false);
-                throw new ProviderException(ProviderFailure.ToolCallingNotSupported, "The model does not support tool calling.", exception);
+                forced400 = exception;
+            }
+
+            if (forced400 != null) {
+                var autoOptions = new ChatOptions {
+                    Tools = new List<AITool> { TestProbeTool }
+                };
+
+                try {
+                    probeResponse = await _innerClient
+                                          .GetResponseAsync(probeMessages, autoOptions, cancellationToken)
+                                          .ConfigureAwait(false);
+                } catch (ProviderException exception) when (exception.StatusCode == HttpStatusCode.BadRequest && exception.Failure != ProviderFailure.UnknownModel) {
+                    _capabilityStore.Record(_endpoint, _model, canCallTools: false);
+                    throw new ProviderException(ProviderFailure.ToolCallingNotSupported, "The model does not support tool calling.", exception);
+                }
             }
 
             bool calledTool = probeResponse?.Messages != null
@@ -103,7 +118,10 @@ namespace jubeater.aigoalplanner.Providers
 
             if (!calledTool) {
                 _capabilityStore.Record(_endpoint, _model, canCallTools: false);
-                throw new ProviderException(ProviderFailure.ToolCallingNotSupported);
+                string errorText = !string.IsNullOrWhiteSpace(probeResponse?.Text)
+                    ? probeResponse.Text
+                    : (forced400 != null ? forced400.Message : "The model replied without calling the tool.");
+                throw new ProviderException(ProviderFailure.ToolCallingNotSupported, "The model does not support tool calling.", new Exception(errorText));
             }
 
             _capabilityStore.Record(_endpoint, _model, canCallTools: true);

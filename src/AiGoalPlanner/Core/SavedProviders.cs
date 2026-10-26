@@ -33,6 +33,12 @@ namespace jubeater.aigoalplanner.Core
             return _modelsByEndpoint.TryGetValue(ProviderEndpointSuggestions.Normalize(endpoint), out string model) ? model : null;
         }
 
+        public bool Remove(string endpoint) {
+            if (string.IsNullOrWhiteSpace(endpoint)) return false;
+
+            return _modelsByEndpoint.Remove(ProviderEndpointSuggestions.Normalize(endpoint));
+        }
+
         public string ToJson() {
             return JsonConvert.SerializeObject(_modelsByEndpoint);
         }

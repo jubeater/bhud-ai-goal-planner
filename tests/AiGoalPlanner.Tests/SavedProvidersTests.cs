@@ -55,5 +55,18 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("https://ollama.com/v1", saved.Endpoints);
             Assert.Contains("https://api.deepseek.com", saved.Endpoints);
         }
+
+        [Fact]
+        public void Removing_a_saved_provider_forgets_its_model_and_drops_it_from_endpoints() {
+            var saved = new SavedProviders();
+            saved.SetModel("https://my-proxy.example/v1", "custom-model");
+            Assert.Equal("custom-model", saved.GetModel("https://my-proxy.example/v1"));
+
+            bool removed = saved.Remove("https://my-proxy.example/v1/");
+
+            Assert.True(removed);
+            Assert.Null(saved.GetModel("https://my-proxy.example/v1"));
+            Assert.DoesNotContain("https://my-proxy.example/v1", saved.Endpoints);
+        }
     }
 }

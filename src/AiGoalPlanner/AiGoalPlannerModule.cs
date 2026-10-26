@@ -1,6 +1,8 @@
 using System;
 using System.ComponentModel.Composition;
+using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using Blish_HUD;
 using Blish_HUD.Content;
@@ -14,6 +16,7 @@ using jubeater.aigoalplanner.Providers;
 using jubeater.aigoalplanner.UI;
 using Microsoft.Extensions.AI;
 using Microsoft.Xna.Framework.Graphics;
+using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 namespace jubeater.aigoalplanner
 {
@@ -115,7 +118,8 @@ namespace jubeater.aigoalplanner
             ProviderSettings settings = ProviderSettings.Parse(endpoint, model, _keyStore?.Load(endpoint));
             var client = new OpenAiCompatibleChatClient(settings, _httpClient);
 
-            return new ToolCallingChatClient(client, endpoint, model, _capabilityStore);
+            var toolCallingClient = new ToolCallingChatClient(client, endpoint, model, _capabilityStore);
+            return new ProbeLoggingChatClient(toolCallingClient, Logger);
         }
 
         protected override Task LoadAsync() {
@@ -211,7 +215,8 @@ namespace jubeater.aigoalplanner
                     SaveProviderKey,
                     NotifyProviderChanged,
                     endpoint => _savedProviders.GetModel(endpoint),
-                    () => _savedProviders.Endpoints);
+                    () => _savedProviders.Endpoints,
+                    RemoveSavedProvider);
             }
 
             _providerWindow.Show();
@@ -270,6 +275,73 @@ namespace jubeater.aigoalplanner
         /// </summary>
         private string BuildSystemPrompt() {
             return SystemPrompt.For(_modelSetting.Value, _endpointSetting.Value);
+        }
+
+        /// <summary>
+        /// Removes a saved custom Provider: deletes its stored key, forgets its saved model,
+        /// drops its capability records, and if it was the one currently in use, clears the
+        /// endpoint and model Settings so the Chat shows "Connect a Provider first".
+        /// </summary>
+        public void RemoveSavedProvider(string endpoint) {
+            if (string.IsNullOrWhiteSpace(endpoint)) return;
+
+            string normalized = ProviderEndpointSuggestions.Normalize(endpoint);
+
+            _keyStore?.Remove(endpoint);
+
+            _savedProviders?.Remove(endpoint);
+            if (_savedProvidersSetting != null && _savedProviders != null) {
+                _savedProvidersSetting.Value = _savedProviders.ToJson();
+            }
+
+            _capabilityStore?.Clear(endpoint);
+
+            if (ProviderEndpointSuggestions.Normalize(_endpointSetting?.Value).Equals(normalized, StringComparison.OrdinalIgnoreCase)) {
+                if (_endpointSetting != null) _endpointSetting.Value = string.Empty;
+                if (_modelSetting != null)    _modelSetting.Value    = string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// Intercepts chat requests at the module layer to log probe refusal diagnostics to the Blish HUD
+        /// log when a model is refused for not supporting tool calling.
+        /// </summary>
+        private sealed class ProbeLoggingChatClient : IChatClient
+        {
+            private readonly IChatClient _inner;
+            private readonly Logger      _logger;
+
+            public ProbeLoggingChatClient(IChatClient inner, Logger logger) {
+                _inner  = inner  ?? throw new ArgumentNullException(nameof(inner));
+                _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            }
+
+            public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages,
+                                                             ChatOptions               options           = null,
+                                                             CancellationToken         cancellationToken = default) {
+                try {
+                    return await _inner.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+                } catch (ProviderException exception) when (exception.Failure == ProviderFailure.ToolCallingNotSupported) {
+                    if (exception.InnerException != null && !string.IsNullOrWhiteSpace(exception.InnerException.Message)) {
+                        _logger.Warn(exception.InnerException, "Provider refused tool-calling probe: " + exception.InnerException.Message);
+                    }
+                    throw;
+                }
+            }
+
+            public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+                                                                                  ChatOptions               options           = null,
+                                                                                  CancellationToken         cancellationToken = default) {
+                return _inner.GetStreamingResponseAsync(messages, options, cancellationToken);
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null) {
+                return _inner.GetService(serviceType, serviceKey);
+            }
+
+            public void Dispose() {
+                _inner.Dispose();
+            }
         }
     }
 }

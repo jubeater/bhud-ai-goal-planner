@@ -69,6 +69,8 @@ namespace jubeater.aigoalplanner.Tests
                 () => client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") }));
 
             Assert.Equal(ProviderFailure.ToolCallingNotSupported, exception.Failure);
+            Assert.NotNull(exception.InnerException);
+            Assert.Equal("I cannot call tools.", exception.InnerException.Message);
             Assert.False(store.GetCapability(Endpoint, Model));
         }
 
@@ -128,9 +130,45 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
-        public async Task A_400_during_probe_records_cannot_call_tools() {
+        public async Task A_400_to_the_forced_probe_followed_by_a_tool_call_on_the_auto_retry_records_true() {
             var inner = new ScriptedChatClient();
-            inner.WillFail(ProviderFailure.Unexpected, HttpStatusCode.BadRequest);
+            // Forced probe returns 400 (e.g. DeepSeek thinking mode)
+            inner.WillFail(new ProviderException(ProviderFailure.Unexpected, "Thinking mode does not support this tool_choice", HttpStatusCode.BadRequest));
+            // Auto retry calls the test tool
+            inner.WillCallTool("test_tool");
+            // Real request
+            inner.WillReply("I can help with hero points.");
+
+            var store = new ToolCallingCapabilityStore();
+            var client = new ToolCallingChatClient(inner, Endpoint, Model, store);
+
+            ChatResponse response = await client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") });
+
+            Assert.Equal("I can help with hero points.", response.Text);
+            Assert.Equal(3, inner.Requests.Count);
+
+            // First request had forced tool mode
+            Assert.NotNull(inner.RequestOptions[0].ToolMode);
+            Assert.IsType<RequiredChatToolMode>(inner.RequestOptions[0].ToolMode);
+
+            // Second request had no tool mode (auto)
+            Assert.Null(inner.RequestOptions[1].ToolMode);
+
+            // Capability is remembered as true
+            Assert.True(store.GetCapability(Endpoint, Model));
+
+            // Next request does not probe
+            inner.WillReply("Second message reply.");
+            ChatResponse secondResponse = await client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Next message") });
+            Assert.Equal("Second message reply.", secondResponse.Text);
+            Assert.Equal(4, inner.Requests.Count);
+        }
+
+        [Fact]
+        public async Task A_400_on_both_forced_probe_and_auto_retry_records_false() {
+            var inner = new ScriptedChatClient();
+            inner.WillFail(new ProviderException(ProviderFailure.Unexpected, "Thinking mode does not support this tool_choice", HttpStatusCode.BadRequest));
+            inner.WillFail(new ProviderException(ProviderFailure.Unexpected, "tool_choice auto is not supported", HttpStatusCode.BadRequest));
 
             var store = new ToolCallingCapabilityStore();
             var client = new ToolCallingChatClient(inner, Endpoint, Model, store);
@@ -139,6 +177,17 @@ namespace jubeater.aigoalplanner.Tests
                 () => client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") }));
 
             Assert.Equal(ProviderFailure.ToolCallingNotSupported, exception.Failure);
+            Assert.Equal(2, inner.Requests.Count);
+
+            // First request had forced tool mode
+            Assert.NotNull(inner.RequestOptions[0].ToolMode);
+            // Second request had no tool mode (auto)
+            Assert.Null(inner.RequestOptions[1].ToolMode);
+
+            // Error text kept as inner exception's message
+            Assert.NotNull(exception.InnerException);
+            Assert.Equal("tool_choice auto is not supported", exception.InnerException.Message);
+
             Assert.False(store.GetCapability(Endpoint, Model));
 
             // Immediate rejection on next request without calling inner client
@@ -146,7 +195,23 @@ namespace jubeater.aigoalplanner.Tests
                 () => client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") }));
 
             Assert.Equal(ProviderFailure.ToolCallingNotSupported, secondException.Failure);
-            Assert.Single(inner.Requests);
+            Assert.Equal(2, inner.Requests.Count);
+        }
+
+        [Fact]
+        public async Task A_503_on_auto_retry_leaves_capability_unknown() {
+            var inner = new ScriptedChatClient();
+            inner.WillFail(ProviderFailure.Unexpected, HttpStatusCode.BadRequest);
+            inner.WillFail(ProviderFailure.Unexpected, HttpStatusCode.ServiceUnavailable);
+
+            var store = new ToolCallingCapabilityStore();
+            var client = new ToolCallingChatClient(inner, Endpoint, Model, store);
+
+            ProviderException exception = await Assert.ThrowsAsync<ProviderException>(
+                () => client.GetResponseAsync(new[] { new AiChatMessage(ChatRole.User, "Hello") }));
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, exception.StatusCode);
+            Assert.Null(store.GetCapability(Endpoint, Model));
         }
 
         [Fact]

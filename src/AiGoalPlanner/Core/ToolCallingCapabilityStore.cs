@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Newtonsoft.Json;
 
 namespace jubeater.aigoalplanner.Core
@@ -51,6 +52,28 @@ namespace jubeater.aigoalplanner.Core
 
             lock (_lock) {
                 if (_capabilities.Remove(key)) {
+                    Save();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Clears all stored capabilities for the given endpoint, so removing a Provider drops its probe results.
+        /// </summary>
+        public void Clear(string endpoint) {
+            if (string.IsNullOrWhiteSpace(endpoint)) return;
+
+            string prefix = ProviderEndpointSuggestions.Normalize(endpoint).ToLowerInvariant() + "|";
+
+            lock (_lock) {
+                var keysToRemove = _capabilities.Keys
+                                                .Where(key => key.StartsWith(prefix, StringComparison.Ordinal))
+                                                .ToList();
+
+                if (keysToRemove.Count > 0) {
+                    foreach (string key in keysToRemove) {
+                        _capabilities.Remove(key);
+                    }
                     Save();
                 }
             }

@@ -48,12 +48,14 @@ namespace jubeater.aigoalplanner.UI
         private readonly Action                    _providerChanged;
         private readonly Func<string, string>      _getSavedModel;
         private readonly Func<IEnumerable<string>> _getSavedEndpoints;
+        private readonly Action<string>            _removeProvider;
 
         private readonly Dictionary<string, string> _customEndpointsByLabel =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         private readonly StandardWindow _window;
         private readonly Dropdown       _providerDropdown;
+        private readonly StandardButton _removeButton;
         private readonly TextBox        _endpointBox;
         private readonly TextBox        _modelBox;
         private readonly Label          _keyStatusLabel;
@@ -74,7 +76,8 @@ namespace jubeater.aigoalplanner.UI
                                       Action<string, string>    saveKey,
                                       Action                    providerChanged,
                                       Func<string, string>      getSavedModel     = null,
-                                      Func<IEnumerable<string>> getSavedEndpoints = null) {
+                                      Func<IEnumerable<string>> getSavedEndpoints = null,
+                                      Action<string>            removeProvider    = null) {
             _readEndpoint      = readEndpoint      ?? throw new ArgumentNullException(nameof(readEndpoint));
             _readModel         = readModel         ?? throw new ArgumentNullException(nameof(readModel));
             _describeKey       = describeKey       ?? throw new ArgumentNullException(nameof(describeKey));
@@ -83,6 +86,7 @@ namespace jubeater.aigoalplanner.UI
             _providerChanged   = providerChanged   ?? throw new ArgumentNullException(nameof(providerChanged));
             _getSavedModel     = getSavedModel;
             _getSavedEndpoints = getSavedEndpoints;
+            _removeProvider    = removeProvider;
 
             _window = new StandardWindow(
                 windowBackground,
@@ -118,8 +122,17 @@ namespace jubeater.aigoalplanner.UI
             _providerDropdown = new Dropdown {
                 Parent   = content,
                 Location = new Point(0, 22),
-                Size     = new Point(ContentWidth, 27)
+                Size     = new Point(ContentWidth - 96, 27)
             };
+
+            _removeButton = new StandardButton {
+                Parent   = content,
+                Location = new Point(ContentWidth - 90, 22),
+                Size     = new Point(90, StandardButton.STANDARD_CONTROL_HEIGHT),
+                Text     = "Remove",
+                Enabled  = false
+            };
+            _removeButton.Click += OnRemoveClicked;
 
             PopulateDropdown(string.Empty);
             _providerDropdown.ValueChanged += OnProviderDropdownChanged;
@@ -250,6 +263,7 @@ namespace jubeater.aigoalplanner.UI
             _disposed = true;
 
             _saveButton.Click              -= OnSaveClicked;
+            _removeButton.Click            -= OnRemoveClicked;
             _pasteKeyButton.Click          -= OnPasteKeyClicked;
             _clearKeyButton.Click          -= OnClearKeyClicked;
             _providerDropdown.ValueChanged -= OnProviderDropdownChanged;
@@ -294,6 +308,7 @@ namespace jubeater.aigoalplanner.UI
             _providerDropdown.Items.Add("Custom");
 
             SelectDropdownItemForEndpoint(selectedEndpoint);
+            UpdateRemoveButtonState();
         }
 
         private void SelectDropdownItemForEndpoint(string endpoint) {
@@ -317,6 +332,8 @@ namespace jubeater.aigoalplanner.UI
 
         private void OnProviderDropdownChanged(object sender, ValueChangedEventArgs e) {
             if (_updatingUI || _disposed) return;
+
+            UpdateRemoveButtonState();
 
             string selected = _providerDropdown.SelectedItem;
             if (string.IsNullOrEmpty(selected) || selected == "Custom") return;
@@ -342,6 +359,8 @@ namespace jubeater.aigoalplanner.UI
         private void OnEndpointBoxTextChanged(object sender, EventArgs e) {
             if (_updatingUI || _disposed) return;
 
+            UpdateRemoveButtonState();
+
             string endpoint = ReadEndpoint();
 
             _updatingUI = true;
@@ -359,6 +378,43 @@ namespace jubeater.aigoalplanner.UI
             } finally {
                 _updatingUI = false;
             }
+        }
+
+        private void UpdateRemoveButtonState() {
+            string selected = _providerDropdown.SelectedItem;
+            _removeButton.Enabled = !string.IsNullOrEmpty(selected) && _customEndpointsByLabel.ContainsKey(selected);
+        }
+
+        private void OnRemoveClicked(object sender, MouseEventArgs e) {
+            if (_disposed) return;
+
+            string selected = _providerDropdown.SelectedItem;
+            if (string.IsNullOrEmpty(selected) || !_customEndpointsByLabel.TryGetValue(selected, out string endpoint)) {
+                return;
+            }
+
+            try {
+                _removeProvider?.Invoke(endpoint);
+            } catch (Exception exception) {
+                Logger.Warn(exception, "Removing the stored API key failed.");
+                ShowStatus("The saved key could not be removed.", ErrorColor);
+                return;
+            }
+
+            _updatingUI = true;
+            try {
+                PopulateDropdown(string.Empty);
+                _providerDropdown.SelectedItem = "Custom";
+                _endpointBox.Text              = string.Empty;
+                _modelBox.Text                 = string.Empty;
+                RefreshKeyStatus(string.Empty);
+                UpdateRemoveButtonState();
+                ShowStatus(string.Empty, HintColor);
+            } finally {
+                _updatingUI = false;
+            }
+
+            _providerChanged();
         }
 
         private void OnSaveClicked(object sender, MouseEventArgs e) {

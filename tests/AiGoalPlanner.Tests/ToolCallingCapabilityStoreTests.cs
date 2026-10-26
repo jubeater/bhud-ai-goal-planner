@@ -120,5 +120,24 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("Direct answer.", response.Text);
             Assert.Single(inner.Requests); // Only the actual request, no probe
         }
+
+        [Fact]
+        public void Dropping_capability_records_for_an_endpoint_removes_all_its_stored_models() {
+            var store = new ToolCallingCapabilityStore(_directory);
+            store.Record("https://my-proxy.example/v1", "model-a", canCallTools: true);
+            store.Record("https://my-proxy.example/v1", "model-b", canCallTools: false);
+            store.Record("https://other-provider.example/v1", "model-c", canCallTools: true);
+
+            store.Clear("https://my-proxy.example/v1/");
+
+            Assert.Null(store.GetCapability("https://my-proxy.example/v1", "model-a"));
+            Assert.Null(store.GetCapability("https://my-proxy.example/v1", "model-b"));
+            Assert.True(store.GetCapability("https://other-provider.example/v1", "model-c"));
+
+            var second = new ToolCallingCapabilityStore(_directory);
+            Assert.Null(second.GetCapability("https://my-proxy.example/v1", "model-a"));
+            Assert.Null(second.GetCapability("https://my-proxy.example/v1", "model-b"));
+            Assert.True(second.GetCapability("https://other-provider.example/v1", "model-c"));
+        }
     }
 }
