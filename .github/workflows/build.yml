@@ -18,10 +18,10 @@ jobs:
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
@@ -32,7 +32,7 @@ jobs:
         run: dotnet test AiGoalPlanner.sln -c Release --no-build --nologo
 
       - name: Keep the .bhm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: AiGoalPlanner-bhm
           path: src/AiGoalPlanner/bin/Release/net48/AiGoalPlanner.bhm
