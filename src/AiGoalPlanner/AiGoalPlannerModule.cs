@@ -1,6 +1,8 @@
 using System;
 using System.ComponentModel.Composition;
+using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using Blish_HUD;
 using Blish_HUD.Content;
@@ -14,6 +16,7 @@ using jubeater.aigoalplanner.Providers;
 using jubeater.aigoalplanner.UI;
 using Microsoft.Extensions.AI;
 using Microsoft.Xna.Framework.Graphics;
+using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 namespace jubeater.aigoalplanner
 {
@@ -53,7 +56,10 @@ namespace jubeater.aigoalplanner
 
         private SettingEntry<string> _endpointSetting;
         private SettingEntry<string> _modelSetting;
+        private SettingEntry<string> _savedProvidersSetting;
+        private SavedProviders       _savedProviders;
         private ProviderKeyStore     _keyStore;
+        private ToolCallingCapabilityStore _capabilityStore;
         private HttpClient           _httpClient;
 
         /// <summary>
@@ -69,7 +75,8 @@ namespace jubeater.aigoalplanner
         protected override void Initialize() {
             DefineProviderSettings();
 
-            _keyStore  = new ProviderKeyStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
+            _keyStore        = new ProviderKeyStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
+            _capabilityStore = new ToolCallingCapabilityStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
 
             _chat = new Chat(CreateChatClient, BuildSystemPrompt);
@@ -89,6 +96,14 @@ namespace jubeater.aigoalplanner
                 string.Empty,
                 () => "Model",
                 () => "The model to use, for example a model name from the Provider's settings page.");
+
+            _savedProvidersSetting = settings.DefineSetting(
+                "provider.saved",
+                string.Empty,
+                () => "Saved Providers",
+                () => "Remembers the models configured for each Provider.");
+
+            _savedProviders = SavedProviders.FromJson(_savedProvidersSetting.Value);
         }
 
         /// <summary>
@@ -98,9 +113,13 @@ namespace jubeater.aigoalplanner
         private IChatClient CreateChatClient() {
             string endpoint = _endpointSetting.Value;
 
-            ProviderSettings settings = ProviderSettings.Parse(endpoint, _modelSetting.Value, _keyStore?.Load(endpoint));
+            string model    = _modelSetting.Value;
 
-            return new OpenAiCompatibleChatClient(settings, _httpClient);
+            ProviderSettings settings = ProviderSettings.Parse(endpoint, model, _keyStore?.Load(endpoint));
+            var client = new OpenAiCompatibleChatClient(settings, _httpClient);
+
+            var toolCallingClient = new ToolCallingChatClient(client, endpoint, model, _capabilityStore);
+            return new ProbeLoggingChatClient(toolCallingClient, message => Logger.Warn(message), settings.ApiKey);
         }
 
         protected override Task LoadAsync() {
@@ -148,6 +167,9 @@ namespace jubeater.aigoalplanner
             }
 
             _chat = null;
+            _capabilityStore = null;
+            _savedProviders  = null;
+            _keyStore        = null;
 
             if (_httpClient != null) {
                 _httpClient.Dispose();
@@ -191,7 +213,10 @@ namespace jubeater.aigoalplanner
                     DescribeProviderKey,
                     SaveProviderSettings,
                     SaveProviderKey,
-                    NotifyProviderChanged);
+                    NotifyProviderChanged,
+                    endpoint => _savedProviders.GetModel(endpoint),
+                    () => _savedProviders.Endpoints,
+                    RemoveSavedProvider);
             }
 
             _providerWindow.Show();
@@ -206,6 +231,11 @@ namespace jubeater.aigoalplanner
 
             _endpointSetting.Value = settings.Endpoint;
             _modelSetting.Value    = settings.Model;
+
+            _savedProviders.SetModel(settings.Endpoint, settings.Model);
+            _savedProvidersSetting.Value = _savedProviders.ToJson();
+
+            _capabilityStore?.ForgetFailure(settings.Endpoint, settings.Model);
         }
 
         /// <summary>
@@ -245,6 +275,31 @@ namespace jubeater.aigoalplanner
         /// </summary>
         private string BuildSystemPrompt() {
             return SystemPrompt.For(_modelSetting.Value, _endpointSetting.Value);
+        }
+
+        /// <summary>
+        /// Removes a saved custom Provider: deletes its stored key, forgets its saved model,
+        /// drops its capability records, and if it was the one currently in use, clears the
+        /// endpoint and model Settings so the Chat shows "Connect a Provider first".
+        /// </summary>
+        public void RemoveSavedProvider(string endpoint) {
+            if (string.IsNullOrWhiteSpace(endpoint)) return;
+
+            string normalized = ProviderEndpointSuggestions.Normalize(endpoint);
+
+            _keyStore?.Remove(endpoint);
+
+            _savedProviders?.Remove(endpoint);
+            if (_savedProvidersSetting != null && _savedProviders != null) {
+                _savedProvidersSetting.Value = _savedProviders.ToJson();
+            }
+
+            _capabilityStore?.Clear(endpoint);
+
+            if (ProviderEndpointSuggestions.Normalize(_endpointSetting?.Value).Equals(normalized, StringComparison.OrdinalIgnoreCase)) {
+                if (_endpointSetting != null) _endpointSetting.Value = string.Empty;
+                if (_modelSetting != null)    _modelSetting.Value    = string.Empty;
+            }
         }
     }
 }

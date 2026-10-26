@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -32,16 +31,26 @@ namespace jubeater.aigoalplanner.Core
 
             string path = PathFor(endpoint);
 
-            if (!File.Exists(path)) return null;
-
-            try {
-                byte[] encrypted = File.ReadAllBytes(path);
-                byte[] plain     = ProtectedData.Unprotect(encrypted, Entropy, DataProtectionScope.CurrentUser);
-
-                return Encoding.UTF8.GetString(plain);
-            } catch (Exception) {
-                return null;
+            if (File.Exists(path)) {
+                return ReadKey(path);
             }
+
+            string oldPath = OldPathFor(endpoint);
+            if (!string.Equals(oldPath, path, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath)) {
+                string key = ReadKey(oldPath);
+                if (key != null) {
+                    try {
+                        Directory.CreateDirectory(_directory);
+                        File.Copy(oldPath, path, overwrite: true);
+                        File.Delete(oldPath);
+                    } catch {
+                        // Migration is best-effort; return key regardless
+                    }
+                }
+                return key;
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -61,7 +70,17 @@ namespace jubeater.aigoalplanner.Core
             byte[] plain     = Encoding.UTF8.GetBytes(key);
             byte[] encrypted = ProtectedData.Protect(plain, Entropy, DataProtectionScope.CurrentUser);
 
-            File.WriteAllBytes(PathFor(endpoint), encrypted);
+            string path = PathFor(endpoint);
+            File.WriteAllBytes(path, encrypted);
+
+            string oldPath = OldPathFor(endpoint);
+            if (!string.Equals(oldPath, path, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath)) {
+                try {
+                    File.Delete(oldPath);
+                } catch {
+                    // Ignore deletion failure of old file
+                }
+            }
         }
 
         public bool HasKey(string endpoint) {
@@ -71,23 +90,70 @@ namespace jubeater.aigoalplanner.Core
         public void Remove(string endpoint) {
             if (string.IsNullOrWhiteSpace(endpoint)) return;
 
-            string path = PathFor(endpoint);
+            Exception deleteException = null;
 
-            if (File.Exists(path)) File.Delete(path);
+            string path = PathFor(endpoint);
+            if (File.Exists(path)) {
+                try {
+                    File.Delete(path);
+                } catch (Exception exception) {
+                    deleteException = exception;
+                }
+            }
+
+            string oldPath = OldPathFor(endpoint);
+            if (!string.Equals(oldPath, path, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath)) {
+                try {
+                    File.Delete(oldPath);
+                } catch (Exception exception) {
+                    if (deleteException == null) {
+                        deleteException = exception;
+                    }
+                }
+            }
+
+            if (deleteException != null) {
+                throw deleteException;
+            }
         }
 
         /// <summary>
         /// A file name that identifies the endpoint without putting the URL itself in a file name.
+        /// Normalizes the endpoint (trim, drop trailing slash, ignore case) matching SavedProviders.
         /// </summary>
-        private string PathFor(string endpoint) {
+        public string PathFor(string endpoint) {
+            string normalized = ProviderEndpointSuggestions.Normalize(endpoint).ToLowerInvariant();
+            return FilePathFor(normalized);
+        }
+
+        /// <summary>
+        /// Legacy file name before endpoint normalization, which kept a trailing slash.
+        /// </summary>
+        public string OldPathFor(string endpoint) {
+            string normalized = ProviderEndpointSuggestions.Normalize(endpoint).ToLowerInvariant();
+            return FilePathFor(normalized + "/");
+        }
+
+        private string FilePathFor(string normalizedEndpoint) {
             using (SHA256 sha256 = SHA256.Create()) {
-                byte[] hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(endpoint.Trim().ToLowerInvariant()));
+                byte[] hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(normalizedEndpoint));
 
                 var name = new StringBuilder(hash.Length * 2);
 
                 foreach (byte value in hash) name.Append(value.ToString("x2"));
 
                 return Path.Combine(_directory, "provider-" + name + ".key");
+            }
+        }
+
+        private static string ReadKey(string path) {
+            try {
+                byte[] encrypted = File.ReadAllBytes(path);
+                byte[] plain     = ProtectedData.Unprotect(encrypted, Entropy, DataProtectionScope.CurrentUser);
+
+                return Encoding.UTF8.GetString(plain);
+            } catch (Exception) {
+                return null;
             }
         }
     }

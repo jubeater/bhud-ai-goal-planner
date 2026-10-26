@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using jubeater.aigoalplanner.Core;
 using Xunit;
@@ -90,6 +91,86 @@ namespace jubeater.aigoalplanner.Tests
 
             Assert.Null(store.Load(Endpoint));
             Assert.Null(store.Load(string.Empty));
+        }
+
+        [Fact]
+        public void A_key_saved_with_a_trailing_slash_loads_without_it_and_the_other_way_round() {
+            var store = new ProviderKeyStore(_directory);
+
+            store.Save("https://api.openai.com/v1/", "sk-key-slash");
+            Assert.Equal("sk-key-slash", store.Load("https://api.openai.com/v1"));
+
+            store.Save("https://api.deepseek.com/v1", "sk-key-no-slash");
+            Assert.Equal("sk-key-no-slash", store.Load("https://api.deepseek.com/v1/"));
+        }
+
+        [Fact]
+        public void A_key_file_stored_under_the_old_name_still_loads_and_is_moved_to_the_new_name() {
+            var store = new ProviderKeyStore(_directory);
+            string endpoint = "https://api.openai.com/v1";
+
+            string oldPath = store.OldPathFor(endpoint);
+            string newPath = store.PathFor(endpoint);
+
+            Directory.CreateDirectory(_directory);
+            byte[] entropy = Encoding.UTF8.GetBytes("jubeater.aigoalplanner:provider-key");
+            byte[] plain = Encoding.UTF8.GetBytes("sk-legacy-key");
+            byte[] encrypted = ProtectedData.Protect(plain, entropy, DataProtectionScope.CurrentUser);
+            File.WriteAllBytes(oldPath, encrypted);
+
+            Assert.True(File.Exists(oldPath));
+            Assert.False(File.Exists(newPath));
+
+            Assert.Equal("sk-legacy-key", store.Load(endpoint));
+            Assert.True(File.Exists(newPath));
+            Assert.False(File.Exists(oldPath));
+        }
+
+        [Fact]
+        public void Saving_or_clearing_a_key_removes_the_old_file() {
+            var store = new ProviderKeyStore(_directory);
+            string endpoint = "https://api.openai.com/v1";
+
+            string oldPath = store.OldPathFor(endpoint);
+            Directory.CreateDirectory(_directory);
+            File.WriteAllBytes(oldPath, new byte[] { 1, 2, 3 });
+
+            Assert.True(File.Exists(oldPath));
+
+            store.Save(endpoint, "sk-new-key");
+            Assert.False(File.Exists(oldPath));
+
+            // Re-create old file and check that clearing key also deletes it
+            File.WriteAllBytes(oldPath, new byte[] { 1, 2, 3 });
+            Assert.True(File.Exists(oldPath));
+
+            store.Save(endpoint, string.Empty);
+            Assert.False(File.Exists(oldPath));
+        }
+
+        [Fact]
+        public void A_key_file_that_cannot_be_deleted_causes_Remove_to_throw_and_retains_HasKey() {
+            var store = new ProviderKeyStore(_directory);
+            string endpoint = "https://api.openai.com/v1/";
+            store.Save(endpoint, "sk-the-key");
+
+            string path = store.PathFor(endpoint);
+            string oldPath = store.OldPathFor(endpoint);
+            Assert.True(File.Exists(path));
+            Assert.NotEqual(path, oldPath);
+
+            // Re-create old file to verify Remove attempts deleting it even when path deletion fails
+            File.WriteAllBytes(oldPath, new byte[] { 1, 2, 3 });
+            Assert.True(File.Exists(oldPath));
+
+            File.SetAttributes(path, FileAttributes.ReadOnly);
+            try {
+                Assert.Throws<UnauthorizedAccessException>(() => store.Remove(endpoint));
+                Assert.True(store.HasKey(endpoint));
+                Assert.False(File.Exists(oldPath));
+            } finally {
+                File.SetAttributes(path, FileAttributes.Normal);
+            }
         }
     }
 }

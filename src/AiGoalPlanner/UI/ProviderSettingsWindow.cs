@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Blish_HUD;
 using Blish_HUD.Content;
 using Blish_HUD.Controls;
@@ -30,23 +31,31 @@ namespace jubeater.aigoalplanner.UI
         /// button sits 16 px in from the right edge.
         /// </summary>
         private const int WindowWidth  = 560;
-        private const int WindowHeight = 340;
+        private const int WindowHeight = 400;
 
         private const int ContentWidth  = 540;
-        private const int ContentHeight = 260;
+        private const int ContentHeight = 320;
 
         private static readonly Color HintColor  = new Color(170, 170, 170);
         private static readonly Color ErrorColor = new Color(240, 165, 150);
         private static readonly Color SavedColor = new Color(190, 230, 170);
 
-        private readonly Func<string>           _readEndpoint;
-        private readonly Func<string>           _readModel;
-        private readonly Func<string, string>   _describeKey;
-        private readonly Action<string, string> _save;
-        private readonly Action<string, string> _saveKey;
-        private readonly Action                 _providerChanged;
+        private readonly Func<string>              _readEndpoint;
+        private readonly Func<string>              _readModel;
+        private readonly Func<string, string>      _describeKey;
+        private readonly Action<string, string>    _save;
+        private readonly Action<string, string>    _saveKey;
+        private readonly Action                    _providerChanged;
+        private readonly Func<string, string>      _getSavedModel;
+        private readonly Func<IEnumerable<string>> _getSavedEndpoints;
+        private readonly Action<string>            _removeProvider;
+
+        private readonly Dictionary<string, string> _customEndpointsByLabel =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         private readonly StandardWindow _window;
+        private readonly Dropdown       _providerDropdown;
+        private readonly StandardButton _removeButton;
         private readonly TextBox        _endpointBox;
         private readonly TextBox        _modelBox;
         private readonly Label          _keyStatusLabel;
@@ -56,21 +65,28 @@ namespace jubeater.aigoalplanner.UI
         private readonly Label          _statusLabel;
 
         private bool _disposed;
+        private bool _updatingUI;
 
-        public ProviderSettingsWindow(AsyncTexture2D         windowBackground,
-                                      Texture2D              emblem,
-                                      Func<string>           readEndpoint,
-                                      Func<string>           readModel,
-                                      Func<string, string>   describeKey,
-                                      Action<string, string> save,
-                                      Action<string, string> saveKey,
-                                      Action                 providerChanged) {
-            _readEndpoint    = readEndpoint    ?? throw new ArgumentNullException(nameof(readEndpoint));
-            _readModel       = readModel       ?? throw new ArgumentNullException(nameof(readModel));
-            _describeKey     = describeKey     ?? throw new ArgumentNullException(nameof(describeKey));
-            _save            = save            ?? throw new ArgumentNullException(nameof(save));
-            _saveKey         = saveKey         ?? throw new ArgumentNullException(nameof(saveKey));
-            _providerChanged = providerChanged ?? throw new ArgumentNullException(nameof(providerChanged));
+        public ProviderSettingsWindow(AsyncTexture2D            windowBackground,
+                                      Texture2D                 emblem,
+                                      Func<string>              readEndpoint,
+                                      Func<string>              readModel,
+                                      Func<string, string>      describeKey,
+                                      Action<string, string>    save,
+                                      Action<string, string>    saveKey,
+                                      Action                    providerChanged,
+                                      Func<string, string>      getSavedModel     = null,
+                                      Func<IEnumerable<string>> getSavedEndpoints = null,
+                                      Action<string>            removeProvider    = null) {
+            _readEndpoint      = readEndpoint      ?? throw new ArgumentNullException(nameof(readEndpoint));
+            _readModel         = readModel         ?? throw new ArgumentNullException(nameof(readModel));
+            _describeKey       = describeKey       ?? throw new ArgumentNullException(nameof(describeKey));
+            _save              = save              ?? throw new ArgumentNullException(nameof(save));
+            _saveKey           = saveKey           ?? throw new ArgumentNullException(nameof(saveKey));
+            _providerChanged   = providerChanged   ?? throw new ArgumentNullException(nameof(providerChanged));
+            _getSavedModel     = getSavedModel;
+            _getSavedEndpoints = getSavedEndpoints;
+            _removeProvider    = removeProvider;
 
             _window = new StandardWindow(
                 windowBackground,
@@ -85,6 +101,7 @@ namespace jubeater.aigoalplanner.UI
                 SavesPosition = true,
                 CanResize     = false
             };
+
             // A Blish HUD window already shifts its children by its ContentRegion, so the panel only
             // has to fill that region: its own top-left corner is where the content starts.
             var content = new Panel {
@@ -99,6 +116,33 @@ namespace jubeater.aigoalplanner.UI
                 Size      = new Point(ContentWidth, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
+                Text      = "Provider"
+            };
+
+            _providerDropdown = new Dropdown {
+                Parent   = content,
+                Location = new Point(0, 22),
+                Size     = new Point(ContentWidth - 96, 27)
+            };
+
+            _removeButton = new StandardButton {
+                Parent   = content,
+                Location = new Point(ContentWidth - 90, 22),
+                Size     = new Point(90, StandardButton.STANDARD_CONTROL_HEIGHT),
+                Text     = "Remove",
+                Enabled  = false
+            };
+            _removeButton.Click += OnRemoveClicked;
+
+            PopulateDropdown(string.Empty);
+            _providerDropdown.ValueChanged += OnProviderDropdownChanged;
+
+            new Label {
+                Parent    = content,
+                Location  = new Point(0, 57),
+                Size      = new Point(ContentWidth, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
                 Text      = "Endpoint URL (OpenAI-compatible)"
             };
 
@@ -106,14 +150,15 @@ namespace jubeater.aigoalplanner.UI
             // value (or names one Provider's model) is read as something already filled in.
             _endpointBox = new TextBox {
                 Parent          = content,
-                Location        = new Point(0, 22),
+                Location        = new Point(0, 79),
                 Size            = new Point(ContentWidth, 27),
                 PlaceholderText = "e.g. https://your-provider.example/v1"
             };
+            _endpointBox.TextChanged += OnEndpointBoxTextChanged;
 
             new Label {
                 Parent    = content,
-                Location  = new Point(0, 57),
+                Location  = new Point(0, 114),
                 Size      = new Point(ContentWidth, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
@@ -122,14 +167,14 @@ namespace jubeater.aigoalplanner.UI
 
             _modelBox = new TextBox {
                 Parent          = content,
-                Location        = new Point(0, 79),
+                Location        = new Point(0, 136),
                 Size            = new Point(ContentWidth, 27),
                 PlaceholderText = "Model name from your Provider"
             };
 
             new Label {
                 Parent    = content,
-                Location  = new Point(0, 114),
+                Location  = new Point(0, 171),
                 Size      = new Point(ContentWidth, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
@@ -140,7 +185,7 @@ namespace jubeater.aigoalplanner.UI
             // whether one is saved and its last four characters.
             _pasteKeyButton = new StandardButton {
                 Parent   = content,
-                Location = new Point(0, 136),
+                Location = new Point(0, 193),
                 Size     = new Point(110, StandardButton.STANDARD_CONTROL_HEIGHT),
                 Text     = "Paste key"
             };
@@ -148,7 +193,7 @@ namespace jubeater.aigoalplanner.UI
 
             _clearKeyButton = new StandardButton {
                 Parent   = content,
-                Location = new Point(116, 136),
+                Location = new Point(116, 193),
                 Size     = new Point(110, StandardButton.STANDARD_CONTROL_HEIGHT),
                 Text     = "Clear key"
             };
@@ -156,7 +201,7 @@ namespace jubeater.aigoalplanner.UI
 
             _keyStatusLabel = new Label {
                 Parent    = content,
-                Location  = new Point(232, 141),
+                Location  = new Point(232, 198),
                 Size      = new Point(ContentWidth - 232, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
@@ -165,7 +210,7 @@ namespace jubeater.aigoalplanner.UI
 
             _saveButton = new StandardButton {
                 Parent   = content,
-                Location = new Point(0, 172),
+                Location = new Point(0, 229),
                 Size     = new Point(90, StandardButton.STANDARD_CONTROL_HEIGHT),
                 Text     = "Save"
             };
@@ -175,7 +220,7 @@ namespace jubeater.aigoalplanner.UI
             // lines, and a status that is cut off says nothing.
             _statusLabel = new Label {
                 Parent         = content,
-                Location       = new Point(0, 206),
+                Location       = new Point(0, 263),
                 Width          = ContentWidth,
                 Font           = GameService.Content.DefaultFont14,
                 TextColor      = HintColor,
@@ -194,13 +239,22 @@ namespace jubeater.aigoalplanner.UI
         public void Show() {
             if (_disposed) return;
 
-            string endpoint = ReadEndpoint();
+            string endpoint = (_readEndpoint() ?? string.Empty).Trim();
+            string model    = (_readModel() ?? string.Empty).Trim();
 
-            _endpointBox.Text = endpoint;
-            _modelBox.Text    = (_readModel() ?? string.Empty).Trim();
-            _statusLabel.Text = string.Empty;
+            _updatingUI = true;
+            try {
+                PopulateDropdown(endpoint);
 
-            RefreshKeyStatus(endpoint);
+                _endpointBox.Text = endpoint;
+                _modelBox.Text    = model;
+                _statusLabel.Text = string.Empty;
+
+                RefreshKeyStatus(endpoint);
+                UpdateRemoveButtonState();
+            } finally {
+                _updatingUI = false;
+            }
 
             _window.Show();
             _endpointBox.Focused = true;
@@ -209,11 +263,159 @@ namespace jubeater.aigoalplanner.UI
         public void Dispose() {
             _disposed = true;
 
-            _saveButton.Click     -= OnSaveClicked;
-            _pasteKeyButton.Click -= OnPasteKeyClicked;
-            _clearKeyButton.Click -= OnClearKeyClicked;
+            _saveButton.Click              -= OnSaveClicked;
+            _removeButton.Click            -= OnRemoveClicked;
+            _pasteKeyButton.Click          -= OnPasteKeyClicked;
+            _clearKeyButton.Click          -= OnClearKeyClicked;
+            _providerDropdown.ValueChanged -= OnProviderDropdownChanged;
+            _endpointBox.TextChanged       -= OnEndpointBoxTextChanged;
 
             _window.Dispose();
+        }
+
+        private static string HostFor(string endpoint) {
+            if (Uri.TryCreate(endpoint, UriKind.Absolute, out Uri uri) && !string.IsNullOrWhiteSpace(uri.Host)) {
+                return uri.Host;
+            }
+
+            return (endpoint ?? string.Empty).Trim();
+        }
+
+        private void PopulateDropdown(string selectedEndpoint) {
+            _providerDropdown.Items.Clear();
+            _customEndpointsByLabel.Clear();
+
+            foreach (ProviderEndpointSuggestion suggestion in ProviderEndpointSuggestions.All) {
+                _providerDropdown.Items.Add(suggestion.Name);
+            }
+
+            if (_getSavedEndpoints != null) {
+                foreach (string endpoint in _getSavedEndpoints()) {
+                    if (string.IsNullOrWhiteSpace(endpoint)) continue;
+                    if (ProviderEndpointSuggestions.Match(endpoint) != null) continue;
+
+                    string label = HostFor(endpoint);
+                    string uniqueLabel = label;
+                    int counter = 2;
+                    while (_providerDropdown.Items.Contains(uniqueLabel) || uniqueLabel == "Custom") {
+                        uniqueLabel = label + " (" + counter++ + ")";
+                    }
+
+                    _customEndpointsByLabel[uniqueLabel] = endpoint;
+                    _providerDropdown.Items.Add(uniqueLabel);
+                }
+            }
+
+            _providerDropdown.Items.Add("Custom");
+
+            SelectDropdownItemForEndpoint(selectedEndpoint);
+            UpdateRemoveButtonState();
+        }
+
+        private void SelectDropdownItemForEndpoint(string endpoint) {
+            ProviderEndpointSuggestion match = ProviderEndpointSuggestions.Match(endpoint);
+            if (match != null) {
+                _providerDropdown.SelectedItem = match.Name;
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(endpoint)) {
+                foreach (KeyValuePair<string, string> entry in _customEndpointsByLabel) {
+                    if (ProviderEndpointSuggestions.Normalize(entry.Value).Equals(ProviderEndpointSuggestions.Normalize(endpoint), StringComparison.OrdinalIgnoreCase)) {
+                        _providerDropdown.SelectedItem = entry.Key;
+                        return;
+                    }
+                }
+            }
+
+            _providerDropdown.SelectedItem = "Custom";
+        }
+
+        private void OnProviderDropdownChanged(object sender, ValueChangedEventArgs e) {
+            if (_updatingUI || _disposed) return;
+
+            UpdateRemoveButtonState();
+
+            string selected = _providerDropdown.SelectedItem;
+            if (string.IsNullOrEmpty(selected) || selected == "Custom") return;
+
+            string endpoint = ProviderEndpointSuggestions.FindByName(selected)?.Endpoint;
+            if (endpoint == null && !_customEndpointsByLabel.TryGetValue(selected, out endpoint)) {
+                return;
+            }
+
+            _updatingUI = true;
+            try {
+                _endpointBox.Text = endpoint;
+
+                string savedModel = _getSavedModel?.Invoke(endpoint);
+                _modelBox.Text = savedModel ?? string.Empty;
+
+                RefreshKeyStatus(endpoint);
+                UpdateRemoveButtonState();
+            } finally {
+                _updatingUI = false;
+            }
+        }
+
+        private void OnEndpointBoxTextChanged(object sender, EventArgs e) {
+            if (_updatingUI || _disposed) return;
+
+            string endpoint = ReadEndpoint();
+
+            _updatingUI = true;
+            try {
+                SelectDropdownItemForEndpoint(endpoint);
+                UpdateRemoveButtonState();
+
+                if (string.IsNullOrWhiteSpace(_modelBox.Text) && !string.IsNullOrWhiteSpace(endpoint)) {
+                    string savedModel = _getSavedModel?.Invoke(endpoint);
+                    if (!string.IsNullOrWhiteSpace(savedModel)) {
+                        _modelBox.Text = savedModel;
+                    }
+                }
+
+                RefreshKeyStatus(endpoint);
+            } finally {
+                _updatingUI = false;
+            }
+        }
+
+        private void UpdateRemoveButtonState() {
+            string selected = _providerDropdown.SelectedItem;
+            _removeButton.Enabled = !string.IsNullOrEmpty(selected) && _customEndpointsByLabel.ContainsKey(selected);
+        }
+
+        private void OnRemoveClicked(object sender, MouseEventArgs e) {
+            if (_disposed) return;
+
+            string selected = _providerDropdown.SelectedItem;
+            if (string.IsNullOrEmpty(selected) || !_customEndpointsByLabel.TryGetValue(selected, out string endpoint)) {
+                return;
+            }
+
+            try {
+                _removeProvider?.Invoke(endpoint);
+            } catch (Exception exception) {
+                Logger.Warn(exception, "Removing the stored API key failed.");
+                ShowStatus("The saved key could not be removed.", ErrorColor);
+                return;
+            }
+
+            _updatingUI = true;
+            try {
+                PopulateDropdown(string.Empty);
+                _providerDropdown.SelectedItem = "Custom";
+                _endpointBox.Text              = string.Empty;
+                _modelBox.Text                 = string.Empty;
+                RefreshKeyStatus(string.Empty);
+                UpdateRemoveButtonState();
+                ShowStatus(string.Empty, HintColor);
+            } finally {
+                _updatingUI = false;
+            }
+
+            _providerChanged();
         }
 
         private void OnSaveClicked(object sender, MouseEventArgs e) {
@@ -235,6 +437,13 @@ namespace jubeater.aigoalplanner.UI
 
             _endpointBox.Text = endpoint;
             _modelBox.Text    = (_modelBox.Text ?? string.Empty).Trim();
+
+            _updatingUI = true;
+            try {
+                PopulateDropdown(endpoint);
+            } finally {
+                _updatingUI = false;
+            }
 
             RefreshKeyStatus(endpoint);
             ShowStatus("Saved. Your next message uses this.", SavedColor);
@@ -373,4 +582,3 @@ namespace jubeater.aigoalplanner.UI
         }
     }
 }
-

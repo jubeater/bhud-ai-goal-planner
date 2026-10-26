@@ -90,6 +90,7 @@ namespace jubeater.aigoalplanner.Tests
                 () => client.GetResponseAsync(new[] { Request("Hello") }));
 
             Assert.Equal(expected, exception.Failure);
+            Assert.Equal(statusCode, exception.StatusCode);
         }
 
         [Fact]
@@ -410,6 +411,43 @@ namespace jubeater.aigoalplanner.Tests
             await Assert.ThrowsAsync<NotSupportedException>(() => client.GetResponseAsync(
                 new[] { Request("Hello") },
                 new ChatOptions { Tools = new List<AITool> { new NotAFunctionTool() } }));
+        }
+
+        [Fact]
+        public async Task An_error_body_where_the_key_crosses_the_shorten_cut_is_redacted_before_shortening() {
+            const string apiKey = "sk-live-secret-key-1234567890abcdef";
+            // Padding of 495 characters so the key starts at index 495 and crosses the 500-char cut.
+            string padding = new string('x', 495);
+            string errorBody = padding + apiKey + " trailing text that exceeds the 500 character limit.";
+
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.BadRequest, errorBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint, key: apiKey);
+
+            ProviderException exception = await Assert.ThrowsAsync<ProviderException>(
+                () => client.GetResponseAsync(new[] { Request("Hello") }));
+
+            // The exception's message contains no prefix of the key longer than 4 characters
+            for (int length = 5; length <= apiKey.Length; length++) {
+                string prefix = apiKey.Substring(0, length);
+                Assert.DoesNotContain(prefix, exception.Message);
+            }
+
+            Assert.Contains("[reda", exception.Message);
+        }
+
+        [Fact]
+        public async Task An_error_body_containing_the_key_multiple_times_has_all_occurrences_redacted() {
+            const string apiKey = "sk-live-secret-key-99999";
+            string errorBody = "Error 1: " + apiKey + " is invalid. Details: " + apiKey + " expired. Retry without " + apiKey + ".";
+
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.BadRequest, errorBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint, key: apiKey);
+
+            ProviderException exception = await Assert.ThrowsAsync<ProviderException>(
+                () => client.GetResponseAsync(new[] { Request("Hello") }));
+
+            Assert.DoesNotContain(apiKey, exception.Message);
+            Assert.Contains("[redacted]", exception.Message);
         }
 
         private static AIFunctionDeclaration ListModulesTool() {

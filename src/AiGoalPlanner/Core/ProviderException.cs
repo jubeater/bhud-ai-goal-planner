@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 
 namespace jubeater.aigoalplanner.Core
 {
@@ -26,6 +27,9 @@ namespace jubeater.aigoalplanner.Core
         /// <summary>The Provider could not be reached over the network.</summary>
         Network,
 
+        /// <summary>The Provider or model does not support tool calling.</summary>
+        ToolCallingNotSupported,
+
         /// <summary>The Provider failed in a way the Chat has no specific explanation for.</summary>
         Unexpected
     }
@@ -36,19 +40,24 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     public sealed class ProviderException : Exception
     {
-        public ProviderException(ProviderFailure failure) : base(DefaultMessage(failure)) {
-            Failure = failure;
+        public ProviderException(ProviderFailure failure, HttpStatusCode? statusCode = null) : base(DefaultMessage(failure)) {
+            Failure    = failure;
+            StatusCode = statusCode;
         }
 
-        public ProviderException(ProviderFailure failure, string message) : base(message) {
-            Failure = failure;
+        public ProviderException(ProviderFailure failure, string message, HttpStatusCode? statusCode = null) : base(message) {
+            Failure    = failure;
+            StatusCode = statusCode;
         }
 
-        public ProviderException(ProviderFailure failure, string message, Exception innerException) : base(message, innerException) {
-            Failure = failure;
+        public ProviderException(ProviderFailure failure, string message, Exception innerException, HttpStatusCode? statusCode = null) : base(message, innerException) {
+            Failure    = failure;
+            StatusCode = statusCode;
         }
 
         public ProviderFailure Failure { get; }
+
+        public HttpStatusCode? StatusCode { get; }
 
         private static string DefaultMessage(ProviderFailure failure) {
             switch (failure) {
@@ -58,6 +67,7 @@ namespace jubeater.aigoalplanner.Core
                 case ProviderFailure.UnknownModel:    return "The Provider does not have that model.";
                 case ProviderFailure.RateLimited:     return "The Provider is rate limiting requests.";
                 case ProviderFailure.Network:         return "The Provider could not be reached.";
+                case ProviderFailure.ToolCallingNotSupported: return "That model cannot call tools.";
                 default:                              return "The Provider request failed.";
             }
         }

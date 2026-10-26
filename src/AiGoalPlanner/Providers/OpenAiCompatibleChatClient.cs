@@ -125,6 +125,10 @@ namespace jubeater.aigoalplanner.Providers
                         body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
                         if (!response.IsSuccessStatusCode) {
+                            if (_apiKey.Length > 0) {
+                                body = KeyRedaction.Redact(body, _apiKey);
+                            }
+
                             throw FailureFor(response.StatusCode, body);
                         }
                     }
@@ -459,18 +463,18 @@ namespace jubeater.aigoalplanner.Providers
             switch ((int)statusCode) {
                 case 401:
                 case 403:
-                    return new ProviderException(ProviderFailure.InvalidKey, "The Provider rejected the API key (" + (int)statusCode + "). " + Shorten(body));
+                    return new ProviderException(ProviderFailure.InvalidKey, "The Provider rejected the API key (" + (int)statusCode + "). " + Shorten(body), statusCode);
                 case 404:
-                    return new ProviderException(ProviderFailure.UnknownModel, "The Provider did not find the model or endpoint (404). " + Shorten(body));
+                    return new ProviderException(ProviderFailure.UnknownModel, "The Provider did not find the model or endpoint (404). " + Shorten(body), statusCode);
                 case 429:
-                    return new ProviderException(ProviderFailure.RateLimited, "The Provider is rate limiting requests (429). " + Shorten(body));
+                    return new ProviderException(ProviderFailure.RateLimited, "The Provider is rate limiting requests (429). " + Shorten(body), statusCode);
             }
 
             if ((int)statusCode == 400 && LooksLikeAnUnknownModel(body)) {
-                return new ProviderException(ProviderFailure.UnknownModel, "The Provider does not have that model (400). " + Shorten(body));
+                return new ProviderException(ProviderFailure.UnknownModel, "The Provider does not have that model (400). " + Shorten(body), statusCode);
             }
 
-            return new ProviderException(ProviderFailure.Unexpected, "The Provider returned HTTP " + (int)statusCode + ". " + Shorten(body));
+            return new ProviderException(ProviderFailure.Unexpected, "The Provider returned HTTP " + (int)statusCode + ". " + Shorten(body), statusCode);
         }
 
         private static bool LooksLikeAnUnknownModel(string body) {
