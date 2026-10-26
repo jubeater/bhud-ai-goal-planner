@@ -1,0 +1,26 @@
+# Build output
+bin/
+obj/
+*.bhm
+
+# IDE
+.vs/
+*.user
+*.suo
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+
+# Test results
+TestResults/
+
+# Secrets — never commit API keys or local dumps
+*apikey*
+*.secret
+*.key
+snapshot*.json
+
+# OS
+Thumbs.db
+Desktop.ini
