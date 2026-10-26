@@ -8,6 +8,10 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <!-- The module compiles against the Newtonsoft.Json that Blish HUD ships (13.0.1, through the
+         BlishHUD package); the test host has no host to borrow it from, so the same version is
+         referenced here to exercise the Provider client against the assembly that runs in game. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
       <PrivateAssets>all</PrivateAssets>

@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.Composition;
+using System.Net.Http;
 using System.Threading.Tasks;
 using Blish_HUD;
 using Blish_HUD.Content;
@@ -7,8 +8,11 @@ using Blish_HUD.Controls;
 using Blish_HUD.Input;
 using Blish_HUD.Modules;
 using Blish_HUD.Modules.Managers;
+using Blish_HUD.Settings;
 using jubeater.aigoalplanner.Core;
+using jubeater.aigoalplanner.Providers;
 using jubeater.aigoalplanner.UI;
+using Microsoft.Extensions.AI;
 using Microsoft.Xna.Framework.Graphics;
 
 namespace jubeater.aigoalplanner
@@ -42,6 +46,17 @@ namespace jubeater.aigoalplanner
         private CornerIcon _cornerIcon;
 
         /// <summary>
+        /// Created the first time the Player opens Provider settings, so the module does not pay for
+        /// a second window it may never show.
+        /// </summary>
+        private ProviderSettingsWindow _providerWindow;
+
+        private SettingEntry<string> _endpointSetting;
+        private SettingEntry<string> _modelSetting;
+        private ProviderKeyStore     _keyStore;
+        private HttpClient           _httpClient;
+
+        /// <summary>
         /// The module's own icon, loaded once from <c>ref/</c> and shared by the corner icon and the
         /// Chat window. Content loaded from <c>ref/</c> belongs to the module, so <see cref="Unload"/>
         /// disposes it after the controls that draw it are gone.
@@ -52,7 +67,40 @@ namespace jubeater.aigoalplanner
         public AiGoalPlannerModule([Import("ModuleParameters")] ModuleParameters moduleParameters) : base(moduleParameters) { /* NOOP */ }
 
         protected override void Initialize() {
-            _chat = new Chat();
+            DefineProviderSettings();
+
+            _keyStore  = new ProviderKeyStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
+            _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+
+            _chat = new Chat(CreateChatClient, BuildSystemPrompt);
+        }
+
+        private void DefineProviderSettings() {
+            SettingCollection settings = this.SettingsManager.ModuleSettings;
+
+            _endpointSetting = settings.DefineSetting(
+                "provider.endpoint",
+                string.Empty,
+                () => "Endpoint URL",
+                () => "The Provider's OpenAI-compatible endpoint, for example https://ollama.com/v1.");
+
+            _modelSetting = settings.DefineSetting(
+                "provider.model",
+                string.Empty,
+                () => "Model",
+                () => "The model to use, for example a model name from the Provider's settings page.");
+        }
+
+        /// <summary>
+        /// Builds the Provider client for the current Settings. A change in Settings takes effect on
+        /// the next Request; the Chat is not rebuilt, so its history stays.
+        /// </summary>
+        private IChatClient CreateChatClient() {
+            string endpoint = _endpointSetting.Value;
+
+            ProviderSettings settings = ProviderSettings.Parse(endpoint, _modelSetting.Value, _keyStore?.Load(endpoint));
+
+            return new OpenAiCompatibleChatClient(settings, _httpClient);
         }
 
         protected override Task LoadAsync() {
@@ -83,6 +131,11 @@ namespace jubeater.aigoalplanner
                 _chatWindow = null;
             }
 
+            if (_providerWindow != null) {
+                _providerWindow.Dispose();
+                _providerWindow = null;
+            }
+
             // Nothing draws the icon any more, so the module releases it. Nulling it out means a
             // re-enabled module loads a fresh texture instead of reusing a disposed one.
             if (_iconTexture != null) {
@@ -95,6 +148,11 @@ namespace jubeater.aigoalplanner
             }
 
             _chat = null;
+
+            if (_httpClient != null) {
+                _httpClient.Dispose();
+                _httpClient = null;
+            }
 
             Logger.Info("AI Goal Planner unloaded.");
         }
@@ -114,11 +172,79 @@ namespace jubeater.aigoalplanner
             _chatWindow = new ChatWindow(
                 _chat,
                 AsyncTexture2D.FromAssetId(WindowBackgroundAssetId),
-                _iconTexture);
+                _iconTexture,
+                OpenProviderSettings,
+                DescribeProvider);
         }
 
         private void OnCornerIconClicked(object sender, MouseEventArgs e) {
             _chatWindow?.Toggle();
+        }
+
+        private void OpenProviderSettings() {
+            if (_providerWindow == null) {
+                _providerWindow = new ProviderSettingsWindow(
+                    AsyncTexture2D.FromAssetId(WindowBackgroundAssetId),
+                    _iconTexture,
+                    () => _endpointSetting.Value,
+                    () => _modelSetting.Value,
+                    DescribeProviderKey,
+                    SaveProviderSettings,
+                    SaveProviderKey,
+                    NotifyProviderChanged);
+            }
+
+            _providerWindow.Show();
+        }
+
+        /// <summary>
+        /// Keeps the endpoint and the model. The key has its own buttons, so saving the rest of the
+        /// Settings never touches a stored key.
+        /// </summary>
+        private void SaveProviderSettings(string endpoint, string model) {
+            ProviderSettings settings = ProviderSettings.Parse(endpoint, model, apiKey: null);
+
+            _endpointSetting.Value = settings.Endpoint;
+            _modelSetting.Value    = settings.Model;
+        }
+
+        /// <summary>
+        /// Stores the key the Player pasted for the endpoint in the window, or removes the stored
+        /// key when the Player clears it. The key is never written to a Setting, logged or shown.
+        /// </summary>
+        private void SaveProviderKey(string endpoint, string key) {
+            // Refuses a key for an endpoint that is not a URL, so a half-typed endpoint cannot
+            // leave a key file behind that nothing will ever read again.
+            ProviderSettings.ParseEndpoint(endpoint);
+
+            _keyStore.Save(endpoint, key);
+        }
+
+        /// <summary>
+        /// The one line the settings view may show about the key: whether one is saved and its last
+        /// four characters, never the key itself.
+        /// </summary>
+        private string DescribeProviderKey(string endpoint) {
+            return ProviderKeySummary.Describe(_keyStore.Load(endpoint));
+        }
+
+        private void NotifyProviderChanged() {
+            _chatWindow?.RefreshProvider();
+        }
+
+        private string DescribeProvider() {
+            string endpoint = _endpointSetting.Value;
+
+            return ProviderSummary.Describe(endpoint, _modelSetting.Value, _keyStore.HasKey(endpoint));
+        }
+
+        /// <summary>
+        /// The identity message the Chat puts ahead of the Player's words. It is built from the same
+        /// Settings as the Provider client, so the model and the host it names are the ones the next
+        /// Request really uses.
+        /// </summary>
+        private string BuildSystemPrompt() {
+            return SystemPrompt.For(_modelSetting.Value, _endpointSetting.Value);
         }
     }
 }
