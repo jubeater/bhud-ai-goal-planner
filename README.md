@@ -39,19 +39,20 @@ so Ollama, DeepSeek, OpenAI and the rest work with only the endpoint, the model 
 2. Enter the **endpoint URL**: `https://ollama.com/v1`, `https://api.deepseek.com` or, for a local
    Ollama, `http://localhost:11434/v1`. A base URL is enough; `/chat/completions` is appended.
 3. Enter the **model name**: `deepseek-chat`, `beam:cloud`, `qwen3.5:9b`.
-4. Enter the **API key** if the Provider needs one, and leave it empty for a local Ollama.
+4. Paste the **API key** if the Provider needs one: put the key on the clipboard and click
+   **Paste key**. A local Ollama needs no key at all.
 5. Click **Save**. The next Request uses these settings; the line under the input row says which
    Provider the Chat will talk to.
 
 The key never goes into Blish HUD's `settings.json`, and it is never logged. It is encrypted with
 Windows DPAPI for the current Windows user and written to the module's data folder as one
 `provider-<hash>.key` file per endpoint — the endpoint is hashed into the file name, so the URL is
-not written next to it. **Forget key** deletes the file. The window never reads a saved key back
-into the field: the field starts empty, says when a key is saved, and saving with an empty field
-leaves the stored key untouched.
+not written next to it. **Clear key** deletes the file.
 
-Blish HUD 1.3.0 has no masked text box, so the key is visible while it is typed. Everything after
-that keeps it out of sight: not in the settings file, not in the log, never redisplayed.
+Blish HUD 1.3.0 has no masked text box, so a key is never typed into one: **Paste key** reads the
+clipboard and stores the key directly. The view only ever shows what is stored as
+`Key saved (...abcd)` — the last four characters — or `No key`, so a key is never drawn on screen,
+never appears in a Notice and never reaches the log.
 
 ## The Provider client and what the module ships
 

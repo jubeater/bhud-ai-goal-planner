@@ -188,9 +188,9 @@ namespace jubeater.aigoalplanner
                     _iconTexture,
                     () => _endpointSetting.Value,
                     () => _modelSetting.Value,
-                    endpoint => _keyStore.HasKey(endpoint),
+                    DescribeProviderKey,
                     SaveProviderSettings,
-                    ForgetProviderKey,
+                    SaveProviderKey,
                     NotifyProviderChanged);
             }
 
@@ -198,23 +198,34 @@ namespace jubeater.aigoalplanner
         }
 
         /// <summary>
-        /// Keeps what the Player saved: endpoint and model go into Settings, the key goes into the
-        /// key store. A blank key leaves a stored key alone, so re-saving the same Provider does not
-        /// silently disconnect it; removing a key is what the Forget key button is for.
+        /// Keeps the endpoint and the model. The key has its own buttons, so saving the rest of the
+        /// Settings never touches a stored key.
         /// </summary>
-        private void SaveProviderSettings(string endpoint, string model, string apiKey) {
-            ProviderSettings settings = ProviderSettings.Parse(endpoint, model, apiKey);
+        private void SaveProviderSettings(string endpoint, string model) {
+            ProviderSettings settings = ProviderSettings.Parse(endpoint, model, apiKey: null);
 
             _endpointSetting.Value = settings.Endpoint;
             _modelSetting.Value    = settings.Model;
-
-            if (settings.ApiKey.Length > 0) {
-                _keyStore.Save(settings.Endpoint, settings.ApiKey);
-            }
         }
 
-        private void ForgetProviderKey(string endpoint) {
-            _keyStore.Remove(endpoint);
+        /// <summary>
+        /// Stores the key the Player pasted for the endpoint in the window, or removes the stored
+        /// key when the Player clears it. The key is never written to a Setting, logged or shown.
+        /// </summary>
+        private void SaveProviderKey(string endpoint, string key) {
+            // Refuses a key for an endpoint that is not a URL, so a half-typed endpoint cannot
+            // leave a key file behind that nothing will ever read again.
+            ProviderSettings.ParseEndpoint(endpoint);
+
+            _keyStore.Save(endpoint, key);
+        }
+
+        /// <summary>
+        /// The one line the settings view may show about the key: whether one is saved and its last
+        /// four characters, never the key itself.
+        /// </summary>
+        private string DescribeProviderKey(string endpoint) {
+            return ProviderKeySummary.Describe(_keyStore.Load(endpoint));
         }
 
         private void NotifyProviderChanged() {

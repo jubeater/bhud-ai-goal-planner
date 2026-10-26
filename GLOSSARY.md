@@ -108,6 +108,11 @@ _Avoid_: Unlocked content, DLC
 The LLM service the Player connects the AI to, identified by an endpoint, an API key and a model, such as DeepSeek, Ollama, OpenAI or Claude.
 _Avoid_: Backend, vendor, model host
 
+**API key**:
+What a Provider asks for to identify the Player's account. It is stored encrypted, never logged, and
+never drawn on screen: the settings view shows only whether one is saved and its last four characters.
+_Avoid_: Token, secret, credential
+
 **Lookup**:
 A read-only check the AI makes while planning, such as listing Installed Modules or reading the Player's progress.
 _Avoid_: Query, tool call, fetch

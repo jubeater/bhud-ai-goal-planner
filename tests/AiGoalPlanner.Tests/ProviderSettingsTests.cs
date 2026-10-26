@@ -55,6 +55,29 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void An_endpoint_can_be_read_on_its_own_for_the_key_buttons() {
+            Assert.Equal("https://api.deepseek.com/v1",
+                         ProviderSettings.ParseEndpoint("  https://api.deepseek.com/v1  ").ToString());
+        }
+
+        [Theory]
+        [InlineData("api.deepseek.com")]
+        [InlineData("localhost:11434/v1")]
+        [InlineData("ftp://example.com/v1")]
+        public void An_endpoint_that_is_not_an_http_url_is_refused_on_its_own_too(string endpoint) {
+            ProviderException exception = Assert.Throws<ProviderException>(() => ProviderSettings.ParseEndpoint(endpoint));
+
+            Assert.Equal(ProviderFailure.InvalidEndpoint, exception.Failure);
+        }
+
+        [Fact]
+        public void A_missing_endpoint_is_refused_on_its_own_too() {
+            ProviderException exception = Assert.Throws<ProviderException>(() => ProviderSettings.ParseEndpoint("   "));
+
+            Assert.Equal(ProviderFailure.NotConfigured, exception.Failure);
+        }
+
+        [Fact]
         public void The_key_is_never_part_of_how_the_settings_describe_themselves() {
             ProviderSettings settings = ProviderSettings.Parse("https://api.deepseek.com", "deepseek-chat", "sk-the-key");
 

@@ -16,8 +16,9 @@ namespace jubeater.aigoalplanner.UI
     /// <remarks>
     /// The window collects what the Player typed and hands it over; what a usable Provider is, and
     /// where the key is kept, is decided by <see cref="ProviderSettings"/> and
-    /// <see cref="ProviderKeyStore"/>. A saved key is never read back into the window, so it cannot
-    /// be shown on screen by accident.
+    /// <see cref="ProviderKeyStore"/>. Blish HUD has no masked text box, so a key is never typed
+    /// into a field where it would be drawn on screen: it is pasted from the clipboard, and this
+    /// window only ever says whether one is saved and how it ends.
     /// </remarks>
     internal sealed class ProviderSettingsWindow : IDisposable
     {
@@ -26,40 +27,41 @@ namespace jubeater.aigoalplanner.UI
         private const int WindowWidth  = 470;
         private const int WindowHeight = 300;
 
-        private static readonly Color HintColor   = new Color(170, 170, 170);
-        private static readonly Color ErrorColor  = new Color(240, 165, 150);
-        private static readonly Color SavedColor  = new Color(190, 230, 170);
+        private static readonly Color HintColor  = new Color(170, 170, 170);
+        private static readonly Color ErrorColor = new Color(240, 165, 150);
+        private static readonly Color SavedColor = new Color(190, 230, 170);
 
-        private readonly Func<string>      _readEndpoint;
-        private readonly Func<string>      _readModel;
-        private readonly Func<string, bool> _hasKey;
-        private readonly Action<string, string, string> _save;
-        private readonly Action<string>    _forgetKey;
-        private readonly Action            _providerChanged;
+        private readonly Func<string>           _readEndpoint;
+        private readonly Func<string>           _readModel;
+        private readonly Func<string, string>   _describeKey;
+        private readonly Action<string, string> _save;
+        private readonly Action<string, string> _saveKey;
+        private readonly Action                 _providerChanged;
 
         private readonly StandardWindow _window;
         private readonly TextBox        _endpointBox;
         private readonly TextBox        _modelBox;
-        private readonly TextBox        _keyBox;
+        private readonly Label          _keyStatusLabel;
+        private readonly StandardButton _pasteKeyButton;
+        private readonly StandardButton _clearKeyButton;
         private readonly StandardButton _saveButton;
-        private readonly StandardButton _forgetButton;
         private readonly Label          _statusLabel;
 
         private bool _disposed;
 
-        public ProviderSettingsWindow(AsyncTexture2D    windowBackground,
-                                      Texture2D         emblem,
-                                      Func<string>      readEndpoint,
-                                      Func<string>      readModel,
-                                      Func<string, bool> hasKey,
-                                      Action<string, string, string> save,
-                                      Action<string>    forgetKey,
-                                      Action            providerChanged) {
+        public ProviderSettingsWindow(AsyncTexture2D         windowBackground,
+                                      Texture2D              emblem,
+                                      Func<string>           readEndpoint,
+                                      Func<string>           readModel,
+                                      Func<string, string>   describeKey,
+                                      Action<string, string> save,
+                                      Action<string, string> saveKey,
+                                      Action                 providerChanged) {
             _readEndpoint    = readEndpoint    ?? throw new ArgumentNullException(nameof(readEndpoint));
             _readModel       = readModel       ?? throw new ArgumentNullException(nameof(readModel));
-            _hasKey          = hasKey          ?? throw new ArgumentNullException(nameof(hasKey));
+            _describeKey     = describeKey     ?? throw new ArgumentNullException(nameof(describeKey));
             _save            = save            ?? throw new ArgumentNullException(nameof(save));
-            _forgetKey       = forgetKey       ?? throw new ArgumentNullException(nameof(forgetKey));
+            _saveKey         = saveKey         ?? throw new ArgumentNullException(nameof(saveKey));
             _providerChanged = providerChanged ?? throw new ArgumentNullException(nameof(providerChanged));
 
             _window = new StandardWindow(
@@ -82,6 +84,7 @@ namespace jubeater.aigoalplanner.UI
                 Size            = _window.ContentRegion.Size,
                 BackgroundColor = Color.Transparent
             };
+
 
             new Label {
                 Parent    = content,
@@ -121,15 +124,34 @@ namespace jubeater.aigoalplanner.UI
                 Size      = new Point(440, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
-                Text      = "API key"
+                Text      = "API key (optional: copy it, then paste it here)"
             };
 
-            // Blish HUD has no masked text field, so the box starts empty and is emptied again after
-            // a save: a stored key is never put back on screen.
-            _keyBox = new TextBox {
+            // The key is pasted rather than typed, so it is never drawn: the window is told only
+            // whether one is saved and its last four characters.
+            _pasteKeyButton = new StandardButton {
                 Parent   = content,
                 Location = new Point(0, 136),
-                Size     = new Point(440, 27)
+                Size     = new Point(110, StandardButton.STANDARD_CONTROL_HEIGHT),
+                Text     = "Paste key"
+            };
+            _pasteKeyButton.Click += OnPasteKeyClicked;
+
+            _clearKeyButton = new StandardButton {
+                Parent   = content,
+                Location = new Point(116, 136),
+                Size     = new Point(110, StandardButton.STANDARD_CONTROL_HEIGHT),
+                Text     = "Clear key"
+            };
+            _clearKeyButton.Click += OnClearKeyClicked;
+
+            _keyStatusLabel = new Label {
+                Parent    = content,
+                Location  = new Point(232, 141),
+                Size      = new Point(208, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
+                Text      = ProviderKeySummary.NoKey
             };
 
             _saveButton = new StandardButton {
@@ -140,18 +162,10 @@ namespace jubeater.aigoalplanner.UI
             };
             _saveButton.Click += OnSaveClicked;
 
-            _forgetButton = new StandardButton {
-                Parent   = content,
-                Location = new Point(96, 172),
-                Size     = new Point(110, StandardButton.STANDARD_CONTROL_HEIGHT),
-                Text     = "Forget key"
-            };
-            _forgetButton.Click += OnForgetKeyClicked;
-
             _statusLabel = new Label {
                 Parent    = content,
-                Location  = new Point(212, 177),
-                Size      = new Point(228, 20),
+                Location  = new Point(96, 177),
+                Size      = new Point(344, 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
                 Text      = string.Empty
@@ -167,14 +181,13 @@ namespace jubeater.aigoalplanner.UI
         public void Show() {
             if (_disposed) return;
 
-            string endpoint = (_readEndpoint() ?? string.Empty).Trim();
+            string endpoint = ReadEndpoint();
 
             _endpointBox.Text = endpoint;
             _modelBox.Text    = (_readModel() ?? string.Empty).Trim();
-            _keyBox.Text      = string.Empty;
             _statusLabel.Text = string.Empty;
 
-            RefreshKeyHint(endpoint);
+            RefreshKeyStatus(endpoint);
 
             _window.Show();
             _endpointBox.Focused = true;
@@ -183,15 +196,18 @@ namespace jubeater.aigoalplanner.UI
         public void Dispose() {
             _disposed = true;
 
-            _saveButton.Click   -= OnSaveClicked;
-            _forgetButton.Click -= OnForgetKeyClicked;
+            _saveButton.Click     -= OnSaveClicked;
+            _pasteKeyButton.Click -= OnPasteKeyClicked;
+            _clearKeyButton.Click -= OnClearKeyClicked;
 
             _window.Dispose();
         }
 
         private void OnSaveClicked(object sender, MouseEventArgs e) {
+            string endpoint = ReadEndpoint();
+
             try {
-                _save(_endpointBox.Text, _modelBox.Text, _keyBox.Text);
+                _save(endpoint, _modelBox.Text);
             } catch (ProviderException exception) {
                 ShowStatus(DescribeProblem(exception.Failure), ErrorColor);
                 return;
@@ -202,20 +218,79 @@ namespace jubeater.aigoalplanner.UI
             }
 
             // Show what was actually kept, not what was typed.
-            string endpoint = (_endpointBox.Text ?? string.Empty).Trim();
+            endpoint = ReadEndpoint();
 
             _endpointBox.Text = endpoint;
             _modelBox.Text    = (_modelBox.Text ?? string.Empty).Trim();
-            _keyBox.Text      = string.Empty;
 
-            RefreshKeyHint(endpoint);
+            RefreshKeyStatus(endpoint);
             ShowStatus("Saved. Your next message uses this.", SavedColor);
 
             _providerChanged();
         }
 
-        private void OnForgetKeyClicked(object sender, MouseEventArgs e) {
-            string endpoint = (_endpointBox.Text ?? string.Empty).Trim();
+        /// <summary>
+        /// Reads the key from the clipboard. A key is never typed into the window, so this is the
+        /// only way one gets in, and the window is never given the text it saved.
+        /// </summary>
+        private void OnPasteKeyClicked(object sender, MouseEventArgs e) {
+            string endpoint = ReadEndpoint();
+
+            if (endpoint.Length == 0) {
+                ShowStatus("Enter the endpoint first.", ErrorColor);
+                return;
+            }
+
+            PasteKeyFromClipboardAsync(endpoint);
+        }
+
+        private async void PasteKeyFromClipboardAsync(string endpoint) {
+            string clipboardText;
+
+            try {
+                clipboardText = await ClipboardUtil.WindowsClipboardService.GetTextAsync().ConfigureAwait(false);
+            } catch (Exception exception) {
+                // Only the failure is logged: what was on the clipboard never reaches the log.
+                Logger.Warn(exception, "Reading the clipboard for the API key failed.");
+
+                ShowOnMainThread(() => ShowStatusIfOpen("The clipboard could not be read.", ErrorColor));
+                return;
+            }
+
+            string key = ProviderKeySummary.FromClipboard(clipboardText);
+
+            // The clipboard is read off the game thread, and Blish HUD controls may only be touched
+            // from the game thread, so the rest happens there.
+            ShowOnMainThread(() => SavePastedKey(endpoint, key));
+        }
+
+        private void SavePastedKey(string endpoint, string key) {
+            if (_disposed) return;
+
+            if (key == null) {
+                ShowStatus("The clipboard is empty. Copy your API key first.", ErrorColor);
+                return;
+            }
+
+            try {
+                _saveKey(endpoint, key);
+            } catch (ProviderException exception) {
+                ShowStatus(DescribeProblem(exception.Failure), ErrorColor);
+                return;
+            } catch (Exception exception) {
+                Logger.Warn(exception, "Saving the pasted API key failed.");
+                ShowStatus("The API key could not be saved.", ErrorColor);
+                return;
+            }
+
+            RefreshKeyStatus(endpoint);
+            ShowStatus("Key saved. Your next message uses it.", SavedColor);
+
+            _providerChanged();
+        }
+
+        private void OnClearKeyClicked(object sender, MouseEventArgs e) {
+            string endpoint = ReadEndpoint();
 
             if (endpoint.Length == 0) {
                 ShowStatus("Enter the endpoint first.", ErrorColor);
@@ -223,34 +298,54 @@ namespace jubeater.aigoalplanner.UI
             }
 
             try {
-                _forgetKey(endpoint);
+                _saveKey(endpoint, string.Empty);
+            } catch (ProviderException exception) {
+                ShowStatus(DescribeProblem(exception.Failure), ErrorColor);
+                return;
             } catch (Exception exception) {
-                Logger.Warn(exception, "Removing the stored key failed.");
+                Logger.Warn(exception, "Removing the stored API key failed.");
                 ShowStatus("The saved key could not be removed.", ErrorColor);
                 return;
             }
 
-            RefreshKeyHint(endpoint);
+            RefreshKeyStatus(endpoint);
             ShowStatus("The saved key was removed.", SavedColor);
 
             _providerChanged();
         }
 
         /// <summary>
-        /// Says in the key box what leaving it empty will do, since there is no way to show a stored
-        /// key back to the Player for comparison.
+        /// Rewrites the one line the window shows about the key: that there is none, or that there
+        /// is one and how it ends. The key itself is never asked for here.
         /// </summary>
-        private void RefreshKeyHint(string endpoint) {
-            bool hasKey = endpoint.Length > 0 && _hasKey(endpoint);
+        private void RefreshKeyStatus(string endpoint) {
+            string description = _describeKey(endpoint);
 
-            _keyBox.PlaceholderText = hasKey
-                                          ? "A key is saved. Type a new one to replace it."
-                                          : "Leave empty if your Provider does not need a key.";
+            _keyStatusLabel.Text      = description;
+            _keyStatusLabel.TextColor = description == ProviderKeySummary.NoKey ? HintColor : SavedColor;
+        }
+
+        private static void ShowOnMainThread(Action action) {
+            GameService.Overlay.QueueMainThreadUpdate(gameTime => action());
+        }
+
+        private string ReadEndpoint() {
+            return (_endpointBox.Text ?? string.Empty).Trim();
         }
 
         private void ShowStatus(string text, Color color) {
             _statusLabel.Text      = text;
             _statusLabel.TextColor = color;
+        }
+
+        /// <summary>
+        /// Shows a status that was delivered from off the game thread, which may arrive after the
+        /// window has already been closed and its controls disposed.
+        /// </summary>
+        private void ShowStatusIfOpen(string text, Color color) {
+            if (_disposed) return;
+
+            ShowStatus(text, color);
         }
 
         private static string DescribeProblem(ProviderFailure failure) {
@@ -265,3 +360,4 @@ namespace jubeater.aigoalplanner.UI
         }
     }
 }
+

@@ -38,6 +38,25 @@ namespace jubeater.aigoalplanner.Core
         public string ApiKey { get; }
 
         /// <summary>
+        /// Reads an endpoint on its own, for the actions that change the key without touching the
+        /// rest of the Settings.
+        /// </summary>
+        public static Uri ParseEndpoint(string endpoint) {
+            string trimmedEndpoint = (endpoint ?? string.Empty).Trim();
+
+            if (trimmedEndpoint.Length == 0) {
+                throw new ProviderException(ProviderFailure.NotConfigured);
+            }
+
+            if (!Uri.TryCreate(trimmedEndpoint, UriKind.Absolute, out Uri endpointUri)
+             || (endpointUri.Scheme != Uri.UriSchemeHttp && endpointUri.Scheme != Uri.UriSchemeHttps)) {
+                throw new ProviderException(ProviderFailure.InvalidEndpoint);
+            }
+
+            return endpointUri;
+        }
+
+        /// <summary>
         /// Reads what the Player typed, throwing a <see cref="ProviderException"/> that says what
         /// is wrong with it.
         /// </summary>
@@ -50,10 +69,7 @@ namespace jubeater.aigoalplanner.Core
                 throw new ProviderException(ProviderFailure.NotConfigured);
             }
 
-            if (!Uri.TryCreate(trimmedEndpoint, UriKind.Absolute, out Uri endpointUri)
-             || (endpointUri.Scheme != Uri.UriSchemeHttp && endpointUri.Scheme != Uri.UriSchemeHttps)) {
-                throw new ProviderException(ProviderFailure.InvalidEndpoint);
-            }
+            Uri endpointUri = ParseEndpoint(trimmedEndpoint);
 
             return new ProviderSettings(trimmedEndpoint, endpointUri, trimmedModel, trimmedKey);
         }
