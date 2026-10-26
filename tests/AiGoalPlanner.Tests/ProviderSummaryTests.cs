@@ -11,8 +11,8 @@ namespace jubeater.aigoalplanner.Tests
     {
         [Theory]
         [InlineData(null, null)]
-        [InlineData("", "deepseek-chat")]
-        [InlineData("   ", "deepseek-chat")]
+        [InlineData("", "deepseek-flash")]
+        [InlineData("   ", "deepseek-flash")]
         [InlineData("https://api.deepseek.com", "")]
         [InlineData("https://api.deepseek.com", "   ")]
         public void A_Provider_that_is_not_set_up_yet_is_reported_as_such(string endpoint, string model) {
@@ -26,21 +26,21 @@ namespace jubeater.aigoalplanner.Tests
         [InlineData("ftp://example.com/v1")]
         public void An_endpoint_that_is_not_an_http_url_is_reported_as_invalid(string endpoint) {
             Assert.Equal("The endpoint URL is not valid. Check it in Provider settings.",
-                         ProviderSummary.Describe(endpoint, "deepseek-chat", hasKey: false));
+                         ProviderSummary.Describe(endpoint, "deepseek-flash", hasKey: false));
         }
 
         [Fact]
         public void A_configured_Provider_is_named_with_its_model_and_host() {
-            string summary = ProviderSummary.Describe(" https://api.deepseek.com/v1 ", " deepseek-chat ", hasKey: false);
+            string summary = ProviderSummary.Describe(" https://api.deepseek.com/v1 ", " deepseek-flash ", hasKey: false);
 
-            Assert.Equal("Using deepseek-chat at api.deepseek.com without an API key.", summary);
+            Assert.Equal("Using deepseek-flash at api.deepseek.com without an API key.", summary);
         }
 
         [Fact]
         public void A_stored_key_is_reported_as_present_and_never_shown() {
-            string summary = ProviderSummary.Describe("https://api.deepseek.com", "deepseek-chat", hasKey: true);
+            string summary = ProviderSummary.Describe("https://api.deepseek.com", "deepseek-flash", hasKey: true);
 
-            Assert.Equal("Using deepseek-chat at api.deepseek.com with an API key.", summary);
+            Assert.Equal("Using deepseek-flash at api.deepseek.com with an API key.", summary);
         }
     }
 }

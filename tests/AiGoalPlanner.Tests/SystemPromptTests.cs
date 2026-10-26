@@ -43,7 +43,7 @@ namespace jubeater.aigoalplanner.Tests
         [InlineData(null, null)]
         [InlineData("", "")]
         [InlineData("   ", "   ")]
-        [InlineData("deepseek-chat", "not a url")]
+        [InlineData("deepseek-flash", "not a url")]
         public void Settings_that_were_never_filled_in_are_described_instead_of_left_as_a_gap(string model, string endpoint) {
             string prompt = SystemPrompt.For(model, endpoint);
 

@@ -22,7 +22,7 @@ namespace jubeater.aigoalplanner.Tests
     public class OpenAiCompatibleChatClientTests
     {
         private const string ReplyBody =
-            "{\"model\":\"deepseek-chat\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}]}";
+            "{\"model\":\"deepseek-flash\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}]}";
 
         [Fact]
         public async Task A_reply_comes_back_as_the_models_text() {
@@ -32,7 +32,7 @@ namespace jubeater.aigoalplanner.Tests
 
             Assert.Equal("Try the Pathing module.", response.Text);
             Assert.Equal(ChatFinishReason.Stop, response.FinishReason);
-            Assert.Equal("deepseek-chat", response.ModelId);
+            Assert.Equal("deepseek-flash", response.ModelId);
         }
 
         [Fact]
@@ -49,7 +49,7 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("sk-the-key", request.Headers.Authorization.Parameter);
 
             string body = Assert.Single(endpoint.RequestBodies);
-            Assert.Contains("\"model\":\"deepseek-chat\"", body);
+            Assert.Contains("\"model\":\"deepseek-flash\"", body);
             Assert.Contains("Show only world bosses",     body);
             Assert.Contains("\"role\":\"user\"",           body);
         }
@@ -359,7 +359,7 @@ namespace jubeater.aigoalplanner.Tests
                                                             string               url = "https://api.deepseek.com",
                                                             string               key = "sk-the-key") {
             return new OpenAiCompatibleChatClient(
-                ProviderSettings.Parse(url, "deepseek-chat", key),
+                ProviderSettings.Parse(url, "deepseek-flash", key),
                 new HttpClient(endpoint));
         }
 
