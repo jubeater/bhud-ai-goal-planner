@@ -13,6 +13,7 @@ using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using JsonException = Newtonsoft.Json.JsonException;
+using JsonSerializer = Newtonsoft.Json.JsonSerializer;
 using AiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using AiChatRole = Microsoft.Extensions.AI.ChatRole;
 using AiChatResponse = Microsoft.Extensions.AI.ChatResponse;
@@ -143,7 +144,7 @@ namespace jubeater.aigoalplanner.Providers
             JObject json;
 
             try {
-                json = JObject.Parse(body);
+                json = ParseJson(body) as JObject ?? throw new JsonReaderException("The response is not a JSON object.");
             } catch (JsonException exception) {
                 throw new ProviderException(ProviderFailure.Unexpected, "The Provider returned a response that is not JSON.", exception);
             }
@@ -206,7 +207,7 @@ namespace jubeater.aigoalplanner.Providers
                     ["function"] = new JObject {
                         ["name"]        = function.Name,
                         ["description"] = function.Description ?? string.Empty,
-                        ["parameters"]  = JToken.Parse(function.JsonSchema.GetRawText())
+                        ["parameters"]  = ParseJson(function.JsonSchema.GetRawText())
                     }
                 });
             }
@@ -303,14 +304,50 @@ namespace jubeater.aigoalplanner.Providers
         /// <summary>
         /// Converts a value to JSON with the Newtonsoft.Json Blish HUD ships. A
         /// <see cref="JsonElement"/> (what Microsoft.Extensions.AI uses for JSON) is copied by its
-        /// text, because Newtonsoft.Json would otherwise serialize the struct's properties.
+        /// text wherever it sits in the value, because Newtonsoft.Json would otherwise serialize the
+        /// struct's properties.
         /// </summary>
         private static JToken ToJToken(object value) {
             switch (value) {
                 case null:                return JValue.CreateNull();
                 case JToken token:        return token;
-                case JsonElement element: return JToken.Parse(element.GetRawText());
-                default:                  return JToken.FromObject(value);
+                case JsonElement element: return ParseJson(element.GetRawText());
+                default:                  return JToken.FromObject(value, ValueSerializer);
+            }
+        }
+
+        private static readonly JsonSerializer ValueSerializer = JsonSerializer.Create(new JsonSerializerSettings {
+            Converters = { new JsonElementConverter() }
+        });
+
+        private sealed class JsonElementConverter : JsonConverter
+        {
+            public override bool CanConvert(Type objectType) => objectType == typeof(JsonElement);
+
+            public override bool CanRead => false;
+
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer) {
+                ParseJson(((JsonElement)value).GetRawText()).WriteTo(writer);
+            }
+
+            public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer) {
+                throw new NotSupportedException();
+            }
+        }
+
+        /// <summary>
+        /// Parses JSON with strings left as strings. Newtonsoft.Json turns anything that looks like a
+        /// date into a <see cref="DateTime"/> by default, which would hand a tool a different type
+        /// than the model sent, shift its time zone when it goes back, and empty a reply whose whole
+        /// text happens to be a date.
+        /// </summary>
+        private static JToken ParseJson(string json) {
+            using (var reader = new JsonTextReader(new System.IO.StringReader(json)) { DateParseHandling = DateParseHandling.None }) {
+                JToken token = JToken.ReadFrom(reader);
+
+                if (reader.Read()) throw new JsonReaderException("Unexpected content after the JSON value.");
+
+                return token;
             }
         }
 
@@ -363,7 +400,7 @@ namespace jubeater.aigoalplanner.Providers
 
                 if (string.IsNullOrWhiteSpace(text)) return new Dictionary<string, object>();
 
-                arguments = JToken.Parse(text);
+                arguments = ParseJson(text);
             }
 
             if (!(arguments is JObject json)) {

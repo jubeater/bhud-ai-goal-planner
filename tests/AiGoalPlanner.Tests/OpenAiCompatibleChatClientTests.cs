@@ -228,6 +228,72 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Empty(calls[1].Arguments);
         }
 
+        [Theory]
+        [InlineData("\"{\\\"at\\\":\\\"2026-10-26T18:00:00+02:00\\\"}\"")]
+        [InlineData("{\"at\":\"2026-10-26T18:00:00+02:00\"}")]
+        public async Task An_argument_that_looks_like_a_date_stays_the_string_the_model_sent(string arguments) {
+            string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"tool_calls\":["
+              + "{\"id\":\"call_1\",\"function\":{\"name\":\"remind_me\",\"arguments\":" + arguments + "}}"
+              + "]},\"finish_reason\":\"tool_calls\"}]}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            FunctionCallContent call = Assert.Single(response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>());
+
+            Assert.Equal("2026-10-26T18:00:00+02:00", call.Arguments["at"]);
+        }
+
+        [Fact]
+        public async Task A_reply_that_looks_like_a_date_comes_back_unchanged() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"2026-10-26T18:00:00+02:00\"},\"finish_reason\":\"stop\"}]}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Equal("2026-10-26T18:00:00+02:00", response.Text);
+        }
+
+        [Fact]
+        public async Task An_argument_that_looks_like_a_date_is_sent_back_unchanged() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            var arguments = new Dictionary<string, object> { ["at"] = "2026-10-26T18:00:00+02:00" };
+
+            await client.GetResponseAsync(new[] {
+                new ChatMessage(ChatRole.Assistant, new List<AIContent> { new FunctionCallContent("call_1", "remind_me", arguments) })
+            });
+
+            var messages = (JArray)JObject.Parse(Assert.Single(endpoint.RequestBodies))["messages"];
+
+            Assert.Equal("{\"at\":\"2026-10-26T18:00:00+02:00\"}", (string)messages[0]["tool_calls"][0]["function"]["arguments"]);
+        }
+
+        [Fact]
+        public async Task A_JsonElement_inside_a_tool_result_is_sent_as_its_JSON() {
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody);
+            OpenAiCompatibleChatClient client = ClientFor(endpoint);
+
+            var result = new Dictionary<string, object> {
+                ["settings"] = JsonDocument.Parse("{\"enabled\":true}").RootElement,
+                ["modules"]  = new List<object> { JsonDocument.Parse("\"Pathing\"").RootElement }
+            };
+
+            await client.GetResponseAsync(new[] {
+                new ChatMessage(ChatRole.Assistant, new List<AIContent> { new FunctionCallContent("call_1", "get_module_settings") }),
+                new ChatMessage(ChatRole.Tool,      new List<AIContent> { new FunctionResultContent("call_1", result) })
+            });
+
+            var messages = (JArray)JObject.Parse(Assert.Single(endpoint.RequestBodies))["messages"];
+
+            Assert.Equal("{\"settings\":{\"enabled\":true},\"modules\":[\"Pathing\"]}", (string)messages[1]["content"]);
+        }
+
         [Fact]
         public async Task Arguments_sent_as_an_object_instead_of_a_string_are_read_too() {
             const string body =
