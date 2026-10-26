@@ -119,7 +119,7 @@ namespace jubeater.aigoalplanner
             var client = new OpenAiCompatibleChatClient(settings, _httpClient);
 
             var toolCallingClient = new ToolCallingChatClient(client, endpoint, model, _capabilityStore);
-            return new ProbeLoggingChatClient(toolCallingClient, Logger);
+            return new ProbeLoggingChatClient(toolCallingClient, message => Logger.Warn(message), settings.ApiKey);
         }
 
         protected override Task LoadAsync() {
@@ -299,48 +299,6 @@ namespace jubeater.aigoalplanner
             if (ProviderEndpointSuggestions.Normalize(_endpointSetting?.Value).Equals(normalized, StringComparison.OrdinalIgnoreCase)) {
                 if (_endpointSetting != null) _endpointSetting.Value = string.Empty;
                 if (_modelSetting != null)    _modelSetting.Value    = string.Empty;
-            }
-        }
-
-        /// <summary>
-        /// Intercepts chat requests at the module layer to log probe refusal diagnostics to the Blish HUD
-        /// log when a model is refused for not supporting tool calling.
-        /// </summary>
-        private sealed class ProbeLoggingChatClient : IChatClient
-        {
-            private readonly IChatClient _inner;
-            private readonly Logger      _logger;
-
-            public ProbeLoggingChatClient(IChatClient inner, Logger logger) {
-                _inner  = inner  ?? throw new ArgumentNullException(nameof(inner));
-                _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            }
-
-            public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages,
-                                                             ChatOptions               options           = null,
-                                                             CancellationToken         cancellationToken = default) {
-                try {
-                    return await _inner.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
-                } catch (ProviderException exception) when (exception.Failure == ProviderFailure.ToolCallingNotSupported) {
-                    if (exception.InnerException != null && !string.IsNullOrWhiteSpace(exception.InnerException.Message)) {
-                        _logger.Warn(exception.InnerException, "Provider refused tool-calling probe: " + exception.InnerException.Message);
-                    }
-                    throw;
-                }
-            }
-
-            public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
-                                                                                  ChatOptions               options           = null,
-                                                                                  CancellationToken         cancellationToken = default) {
-                return _inner.GetStreamingResponseAsync(messages, options, cancellationToken);
-            }
-
-            public object GetService(Type serviceType, object serviceKey = null) {
-                return _inner.GetService(serviceType, serviceKey);
-            }
-
-            public void Dispose() {
-                _inner.Dispose();
             }
         }
     }

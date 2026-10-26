@@ -251,6 +251,7 @@ namespace jubeater.aigoalplanner.UI
                 _statusLabel.Text = string.Empty;
 
                 RefreshKeyStatus(endpoint);
+                UpdateRemoveButtonState();
             } finally {
                 _updatingUI = false;
             }
@@ -351,6 +352,7 @@ namespace jubeater.aigoalplanner.UI
                 _modelBox.Text = savedModel ?? string.Empty;
 
                 RefreshKeyStatus(endpoint);
+                UpdateRemoveButtonState();
             } finally {
                 _updatingUI = false;
             }
@@ -359,13 +361,12 @@ namespace jubeater.aigoalplanner.UI
         private void OnEndpointBoxTextChanged(object sender, EventArgs e) {
             if (_updatingUI || _disposed) return;
 
-            UpdateRemoveButtonState();
-
             string endpoint = ReadEndpoint();
 
             _updatingUI = true;
             try {
                 SelectDropdownItemForEndpoint(endpoint);
+                UpdateRemoveButtonState();
 
                 if (string.IsNullOrWhiteSpace(_modelBox.Text) && !string.IsNullOrWhiteSpace(endpoint)) {
                     string savedModel = _getSavedModel?.Invoke(endpoint);
