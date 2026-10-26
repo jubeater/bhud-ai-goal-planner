@@ -17,6 +17,8 @@ namespace jubeater.aigoalplanner.Tests.Fakes
     {
         private readonly Queue<object> _script = new Queue<object>();
 
+        private TaskCompletionSource<bool> _hold;
+
         public List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>> Requests { get; } =
             new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
 
@@ -36,18 +38,34 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             _script.Enqueue(new ProviderException(failure));
         }
 
-        public Task<ChatResponse> GetResponseAsync(IEnumerable<Microsoft.Extensions.AI.ChatMessage> messages,
-                                                   ChatOptions                                  options           = null,
-                                                   CancellationToken                            cancellationToken = default) {
+        /// <summary>
+        /// Makes the model take its time: every Request it is given is recorded and then waits
+        /// until <see cref="Release"/>, so a test can send something else while one is in flight.
+        /// </summary>
+        public void WillHold() {
+            _hold = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public void Release() {
+            _hold?.TrySetResult(true);
+        }
+
+        public async Task<ChatResponse> GetResponseAsync(IEnumerable<Microsoft.Extensions.AI.ChatMessage> messages,
+                                                         ChatOptions                                  options           = null,
+                                                         CancellationToken                            cancellationToken = default) {
             Requests.Add(messages.ToList());
+
+            TaskCompletionSource<bool> hold = _hold;
+
+            if (hold != null) await hold.Task.ConfigureAwait(false);
 
             if (_script.Count == 0) throw new InvalidOperationException("The scripted model has no reply left.");
 
             object next = _script.Dequeue();
 
-            if (next is ProviderException failure) return Task.FromException<ChatResponse>(failure);
+            if (next is ProviderException failure) throw failure;
 
-            return Task.FromResult((ChatResponse)next);
+            return (ChatResponse)next;
         }
 
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<Microsoft.Extensions.AI.ChatMessage> messages,

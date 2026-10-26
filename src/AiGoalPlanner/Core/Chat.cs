@@ -52,15 +52,23 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         /// <remarks>
         /// History is append-only: earlier messages are never edited or replaced. Only what the
-        /// Player and the AI said goes back to the model; notices stay in the Chat.
+        /// Player and the AI said goes back to the model; notices stay in the Chat. Sends are
+        /// serialized, and a Request that is still waiting its turn when the Player starts a new
+        /// Chat is dropped instead of being sent into the new one.
         /// </remarks>
         public async Task SendAsync(string request, CancellationToken cancellationToken = default) {
             if (string.IsNullOrWhiteSpace(request)) return;
 
+            // Read before waiting for the lock: a Request belongs to the Chat the Player sent it
+            // in, not to whatever Chat is current by the time the model is free to answer it.
+            int generation = Volatile.Read(ref _generation);
+
             await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
             try {
-                int generation = _generation;
+                // The Player started a new Chat while this Request was queued: it is dropped
+                // before it is shown and before the model sees it.
+                if (generation != Volatile.Read(ref _generation)) return;
 
                 Append(new ChatMessage(ChatMessageAuthor.Player, request.Trim()));
 
@@ -73,20 +81,20 @@ namespace jubeater.aigoalplanner.Core
                                       .GetResponseAsync(BuildHistory(), cancellationToken: cancellationToken)
                                       .ConfigureAwait(false);
                 } catch (ProviderException exception) {
-                    if (generation == _generation) AppendNotice(Describe(exception.Failure));
+                    if (generation == Volatile.Read(ref _generation)) AppendNotice(Describe(exception.Failure));
 
                     return;
                 } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
                     throw;
                 } catch (Exception) {
-                    if (generation == _generation) AppendNotice(Describe(ProviderFailure.Unexpected));
+                    if (generation == Volatile.Read(ref _generation)) AppendNotice(Describe(ProviderFailure.Unexpected));
 
                     return;
                 }
 
                 // The Player started a new Chat while the Provider was thinking: the reply belongs
                 // to the old Chat, so it is dropped rather than shown out of context.
-                if (generation != _generation) return;
+                if (generation != Volatile.Read(ref _generation)) return;
 
                 ShowResponse(response);
             } finally {

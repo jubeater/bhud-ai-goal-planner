@@ -157,6 +157,37 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_Request_queued_before_New_chat_is_dropped_instead_of_landing_in_the_new_Chat() {
+            var model = new ScriptedChatClient();
+            model.WillReply("An answer for the old Chat.");
+            model.WillReply("An answer for the new Chat.");
+            model.WillHold();
+
+            var chat = new Chat(() => model);
+
+            // The Player sends, and the model takes its time with this Request.
+            Task first = chat.SendAsync("Finish the hero points on this map");
+
+            await WaitUntilTheModelWasAsked(model, times: 1);
+
+            // The Player sends again, which queues a second Request behind the first, and then
+            // starts over before either one comes back.
+            Task second = chat.SendAsync("Level an alt");
+
+            chat.StartNewChat();
+
+            model.Release();
+
+            await first;
+            await second;
+
+            // Neither the old reply nor the queued Request belongs to the new Chat, and the model
+            // never saw the queued Request at all.
+            Assert.Empty(chat.Messages);
+            Assert.Single(model.Requests);
+        }
+
+        [Fact]
         public async Task Sending_nothing_adds_nothing_to_the_Chat() {
             var model = new ScriptedChatClient();
             var chat  = new Chat(() => model);
@@ -212,6 +243,18 @@ namespace jubeater.aigoalplanner.Tests
             await chat.SendAsync("Hello");
 
             Assert.Equal(2, raised);
+        }
+
+        /// <summary>
+        /// Waits until the scripted model has been asked, so a test that sends something while
+        /// another Request is in flight does not depend on how quickly that thread gets there.
+        /// </summary>
+        private static async Task WaitUntilTheModelWasAsked(ScriptedChatClient model, int times) {
+            for (int attempt = 0; attempt < 200 && model.Requests.Count < times; attempt++) {
+                await Task.Delay(10);
+            }
+
+            Assert.Equal(times, model.Requests.Count);
         }
     }
 }
