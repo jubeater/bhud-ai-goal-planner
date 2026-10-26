@@ -100,7 +100,7 @@ The expansions and other content the Player's GW2 account has access to.
 _Avoid_: Unlocked content, DLC
 
 **Provider**:
-The LLM service the Player connects the AI to, such as Claude or an OpenAI-compatible endpoint.
+The LLM service the Player connects the AI to, identified by an endpoint, an API key and a model, such as DeepSeek, Ollama, OpenAI or Claude.
 _Avoid_: Backend, vendor, model host
 
 **Lookup**:
