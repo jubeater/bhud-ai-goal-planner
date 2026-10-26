@@ -23,10 +23,12 @@ dotnet test
 [The Provider client and what the module ships](#the-provider-client-and-what-the-module-ships)).
 Blish HUD's own assemblies are referenced from the `BlishHUD` NuGet package and are deleted again
 before the zip, because Blish HUD already has them loaded; a `.bhm` an earlier build left in the
-output folder is removed too, so one build never packs the previous zip into the new one.
+output folder is removed too, so one build never packs the previous zip into the new one. Blish HUD
+holds that leftover open while the module is loaded, and then the build only warns: the stale zip
+rides along as one inert extra entry rather than failing a build that has nothing wrong with it.
 
 Building while Blish HUD is running can fail on a locked `.bhm`; send the zip elsewhere instead:
-`dotnet build -p:BlishHUDModuleOutputDir=obj\bhm\`.
+`dotnet build -p:BlishHUDModuleOutputDir=obj\bhm\`. The folder is created if it does not exist.
 
 ## Connecting a Provider
 

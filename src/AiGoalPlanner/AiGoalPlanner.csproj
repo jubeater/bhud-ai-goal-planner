@@ -55,6 +55,12 @@
     <Delete Files="@(BlishHudProvidedFile)" />
     <RemoveDir Directories="$(OutDir)de;$(OutDir)es;$(OutDir)fr" />
     <!--
+      Blish HUD's ZipDirectory does not create the folder it zips into, so the documented way to
+      keep the module out of a locked bin\ folder (-p:BlishHUDModuleOutputDir=obj\bhm\) would fail
+      with MSB3943 the first time on a fresh clone.
+    -->
+    <MakeDir Directories="$(BlishHUDModuleOutputDir)" />
+    <!--
       The packaging target stages the whole output directory, so a .bhm left there by an earlier
       build would be packed into the next one — doubling its size, or growing it on every build
       that sends the zip elsewhere with -p:BlishHUDModuleOutputDir=... . The module file itself is
@@ -63,8 +69,9 @@
     <ItemGroup>
       <StaleModuleFile Include="$(OutDir)*.bhm" Exclude="$(BlishHUDModuleFilePath)" />
     </ItemGroup>
-    <!-- Best effort: the leftover is inert if it stays, and a warning beats failing a build that
-         Blish HUD is running beside. -->
+    <!-- Best effort: a Blish HUD that is running with the module loaded can still hold the file
+         open, in which case this only warns and the stale zip travels along as one inert extra
+         entry; failing the build instead would leave the developer with no way to build. -->
     <Delete Files="@(StaleModuleFile)" ContinueOnError="WarnAndContinue" />
   </Target>
 
