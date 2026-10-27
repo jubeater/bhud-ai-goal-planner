@@ -185,6 +185,57 @@ namespace jubeater.aigoalplanner.Tests
             Assert.DoesNotContain("show.grid",   resultText);
         }
 
+        [Fact]
+        public async Task A_module_with_more_Settings_than_the_limit_returns_the_first_ones_and_says_the_list_was_cut() {
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+
+            int total = GetModuleSettingsTool.MaxSettings + 50;
+
+            ModuleSettingInfo[] many =
+                Enumerable.Range(1, total)
+                          .Select(index => new ModuleSettingInfo("setting." + index, "Setting " + index, "",
+                                                                 "Int32", index.ToString(), null, null))
+                          .ToArray();
+
+            world.SettingsByNamespace["bh.pathing"] = FakeWorld.Ok("Pathing", many);
+
+            AIFunction tool = GetModuleSettingsTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["namespace"] = "bh.pathing" }));
+
+            JArray settings = (JArray)result["settings"];
+
+            // The first ones, in the order the module holds them...
+            Assert.Equal(GetModuleSettingsTool.MaxSettings, settings.Count);
+            Assert.Equal("setting.1",   (string)((JObject)settings[0])["key"]);
+            Assert.Equal("setting.200", (string)((JObject)settings[settings.Count - 1])["key"]);
+
+            // ...and a note that the rest exists but was not sent, so one large module cannot flood
+            // the Request.
+            Assert.Equal(true, result["truncated"]);
+            Assert.Equal(total, (int)result["settings_total"]);
+            Assert.Contains("cut", ((string)result["note"]).ToLowerInvariant());
+        }
+
+        [Fact]
+        public async Task A_module_with_fewer_Settings_than_the_limit_is_answered_whole_and_says_nothing_about_cutting() {
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+            world.SettingsByNamespace["bh.pathing"] = FakeWorld.Ok(
+                "Pathing",
+                new ModuleSettingInfo("show.trails", "Show trails", "", "Boolean", "true", null, null),
+                new ModuleSettingInfo("trail.size",  "Trail size",  "", "Int32",   "3", "1", "10"));
+
+            AIFunction tool = GetModuleSettingsTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["namespace"] = "bh.pathing" }));
+
+            Assert.Equal(2, ((JArray)result["settings"]).Count);
+            Assert.Null(result["truncated"]);
+            Assert.Null(result["note"]);
+        }
+
         /// <summary>
         /// The tool's JSON. A hand-written Lookup returns its result string as it is, the way the
         /// Chat receives it.

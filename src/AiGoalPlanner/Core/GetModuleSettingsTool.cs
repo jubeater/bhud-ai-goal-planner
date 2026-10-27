@@ -21,6 +21,13 @@ namespace jubeater.aigoalplanner.Core
         public const string Name = "get_module_settings";
 
         /// <summary>
+        /// How many Settings one answer may carry. A module with more (Pathing, for one) is cut: the
+        /// first ones are answered with a note that the list was cut, so a single large module
+        /// cannot flood the Request and crowd out what the Player actually asked.
+        /// </summary>
+        public const int MaxSettings = 200;
+
+        /// <summary>
         /// This module's own namespace. Its Settings configure the Chat and the Provider; they are
         /// no business of the model that runs inside them.
         /// </summary>
@@ -49,9 +56,10 @@ namespace jubeater.aigoalplanner.Core
         /// Builds the tool against <paramref name="world"/>, the host that answers the Lookup. It is
         /// a hand-written <see cref="AIFunction"/> with a literal schema, per ADR-0008: the
         /// serializer-driven factory needs a System.Text.Json newer than the one Blish HUD runs.
+        /// <paramref name="logDebug"/> receives one line per call, with counts and no Setting values.
         /// </summary>
-        public static AIFunction Create(IBlishHudWorld world) {
-            return new Function(world);
+        public static AIFunction Create(IBlishHudWorld world, Action<string> logDebug = null) {
+            return new Function(world, logDebug);
         }
 
         /// <summary>
@@ -68,9 +76,15 @@ namespace jubeater.aigoalplanner.Core
             return "Reading module settings…";
         }
 
-        private static async Task<string> RunAsync(IBlishHudWorld world, string @namespace, CancellationToken cancellationToken) {
-            if (string.Equals(@namespace?.Trim(), ThisModuleNamespace, StringComparison.OrdinalIgnoreCase)) {
-                return Answer(ModuleSettingsStatus.ThisModule, "AI Goal Planner", Array.Empty<ModuleSettingInfo>()).ToString(Formatting.None);
+        private static async Task<LookupAnswer> RunAsync(IBlishHudWorld world, string @namespace, CancellationToken cancellationToken) {
+            string wanted = (@namespace ?? string.Empty).Trim();
+
+            if (string.Equals(wanted, ThisModuleNamespace, StringComparison.OrdinalIgnoreCase)) {
+                JObject refusal = Answer(ModuleSettingsStatus.ThisModule, "AI Goal Planner",
+                                         Array.Empty<ModuleSettingInfo>(), totalSettings: 0);
+
+                return new LookupAnswer(refusal.ToString(Formatting.None),
+                                        Detail(wanted, ModuleSettingsStatus.ThisModule, shown: 0, total: 0));
             }
 
             ModuleSettingsResult result = await world.GetModuleSettingsAsync(@namespace, cancellationToken)
@@ -80,40 +94,81 @@ namespace jubeater.aigoalplanner.Core
                                                             ? SettingWalk.Flatten(result.Settings)
                                                             : Array.Empty<ModuleSettingInfo>();
 
-            return Answer(result.Status, result.ModuleName, settings).ToString(Formatting.None);
+            int total = settings.Count;
+
+            if (total > MaxSettings) settings = settings.Take(MaxSettings).ToList();
+
+            string answer = Answer(result.Status, result.ModuleName, settings, total).ToString(Formatting.None);
+
+            return new LookupAnswer(answer, Detail(wanted, result.Status, settings.Count, total));
+        }
+
+        /// <summary>
+        /// What the debug log may say about this Lookup: which module, what came of it, and how many
+        /// Settings the answer carries out of how many the module holds. Never a Setting's value.
+        /// </summary>
+        private static string Detail(string @namespace, ModuleSettingsStatus status, int shown, int total) {
+            string counts = status != ModuleSettingsStatus.Ok
+                                ? "settings=0"
+                                : shown < total
+                                    ? "settings=" + shown + " of " + total
+                                    : "settings=" + shown;
+
+            return "module=" + @namespace + ", status=" + StatusText(status) + ", " + counts;
+        }
+
+        /// <summary>
+        /// The status as both the answer and the log spell it, so the two cannot drift apart.
+        /// </summary>
+        private static string StatusText(ModuleSettingsStatus status) {
+            switch (status) {
+                case ModuleSettingsStatus.Ok:                 return "ok";
+                case ModuleSettingsStatus.ModuleNotInstalled: return "not_installed";
+                case ModuleSettingsStatus.ModuleDisabled:     return "disabled";
+                default:                                      return "private";
+            }
         }
 
         /// <summary>
         /// The tool's answer in one shape: what was found, or the status that says why there is
-        /// nothing to read.
+        /// nothing to read. <paramref name="totalSettings"/> is how many Settings the module has
+        /// before the cap, so an answer that was cut can say so.
         /// </summary>
-        private static JObject Answer(ModuleSettingsStatus status, string moduleName, IReadOnlyList<ModuleSettingInfo> settings) {
+        private static JObject Answer(ModuleSettingsStatus status, string moduleName,
+                                      IReadOnlyList<ModuleSettingInfo> settings, int totalSettings) {
             var json = new JObject {
-                ["module"] = moduleName
+                ["module"] = moduleName,
+                ["status"] = StatusText(status)
             };
 
             switch (status) {
                 case ModuleSettingsStatus.Ok:
-                    json["status"]     = "ok";
-                    json["settings"]   = new JArray(settings.Select(ToJson));
+                    json["settings"] = new JArray(settings.Select(ToJson));
+
+                    // The model is told the list was cut, so it can say which Settings it did not
+                    // see instead of quietly treating the first ones as the whole module.
+                    if (totalSettings > settings.Count) {
+                        json["truncated"]      = true;
+                        json["settings_total"] = totalSettings;
+                        json["note"] = "This module has " + totalSettings + " settings; only the first " + settings.Count
+                                     + " are shown. The list was cut to keep the answer small.";
+                    }
+
                     break;
 
                 case ModuleSettingsStatus.ModuleNotInstalled:
-                    json["status"]      = "not_installed";
                     json["instruction"] =
                         "No installed module has that namespace. Call " + ListInstalledModulesTool.Name +
                         " to see what the Player has installed.";
                     break;
 
                 case ModuleSettingsStatus.ModuleDisabled:
-                    json["status"]      = "disabled";
                     json["instruction"] =
                         "This module is disabled. The Player has to enable it in Blish HUD before its "
                       + "settings can be read; suggest enabling it if the request needs it.";
                     break;
 
                 default:
-                    json["status"]      = "private";
                     json["instruction"] =
                         "These are the settings of AI Goal Planner itself. They are never shared with "
                       + "the model, and they are not part of what can be configured for the Player.";
@@ -142,11 +197,12 @@ namespace jubeater.aigoalplanner.Core
         {
             private readonly IBlishHudWorld _world;
 
-            public Function(IBlishHudWorld world) : base(GetModuleSettingsTool.Name, GetModuleSettingsTool.Description, Schema) {
+            public Function(IBlishHudWorld world, Action<string> logDebug)
+                : base(GetModuleSettingsTool.Name, GetModuleSettingsTool.Description, Schema, logDebug) {
                 _world = world;
             }
 
-            protected override async Task<object> InvokeLookupAsync(AIFunctionArguments arguments, CancellationToken cancellationToken) {
+            protected override async Task<LookupAnswer> InvokeLookupAsync(AIFunctionArguments arguments, CancellationToken cancellationToken) {
                 string @namespace = arguments != null && arguments.TryGetValue(NamespaceArgument, out object value)
                                         ? value as string
                                         : null;

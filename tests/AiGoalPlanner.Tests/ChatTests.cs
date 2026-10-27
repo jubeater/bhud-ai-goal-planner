@@ -741,6 +741,150 @@ namespace jubeater.aigoalplanner.Tests
             }
         }
 
+        [Fact]
+        public async Task A_Lookup_waits_for_the_game_thread_and_answers_once_it_has_run() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+
+            model.WillCallTool("list_installed_modules", "call_1");
+            model.WillReply("You have Pathing installed.");
+
+            var gameThread = new FakeGameThread();
+            var chat       = NewChat(model, world, gameThread);
+
+            Task send = chat.SendAsync("What modules do I have?");
+
+            // The read is queued for the game thread instead of being read where the Chat thinks:
+            // nothing has been read yet, and the Player only has their own Request to look at.
+            await WaitUntil(() => gameThread.WaitingCount == 1);
+
+            Assert.Equal(0, world.ListCalls);
+            Assert.Single(chat.Messages);
+
+            gameThread.Pump();
+            await send;
+
+            Assert.Equal(1, world.ListCalls);
+            Assert.Equal("You have Pathing installed.", chat.Messages.Last().Text);
+        }
+
+        [Fact]
+        public async Task Cancelling_stops_the_Request_while_a_Lookup_waits_for_the_game_thread() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+            world.SettingsByNamespace["bh.pathing"] = FakeWorld.Ok(
+                "Pathing",
+                new ModuleSettingInfo("trail.size", "Trail size", "", "Int32", "3", "1", "10"));
+
+            // A Settings read is the one that used to run another module's code off the game thread,
+            // so it is the one held open here.
+            model.WillCallTool("get_module_settings", "call_1",
+                               new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
+            model.WillReply("Never reached.");
+
+            var gameThread = new FakeGameThread();
+            var chat       = NewChat(model, world, gameThread);
+
+            using (var cancellation = new CancellationTokenSource()) {
+                Task send = chat.SendAsync("How wide are Pathing's trails?", cancellation.Token);
+
+                await WaitUntil(() => gameThread.WaitingCount == 1);
+
+                cancellation.Cancel();
+
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => send);
+
+                // The read never ran, the Player's Request stays and nothing answered it, and the
+                // progress that said what was being checked is gone.
+                Assert.Equal(0, world.SettingsCalls);
+                Assert.Single(chat.Messages);
+                Assert.Equal(ChatMessageAuthor.Player, chat.Messages[0].Author);
+                Assert.Empty(chat.ProgressLines);
+            }
+        }
+
+        [Fact]
+        public async Task Each_Provider_round_trip_is_logged_with_its_duration_finish_reason_and_tool_calls() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+
+            model.WillCallTool("list_installed_modules", "call_1");
+            model.WillReply("You have Pathing installed.");
+
+            var log  = new List<string>();
+            var chat = NewChat(model, world, log.Add);
+
+            await chat.SendAsync("What modules do I have?");
+
+            // One line per round trip: the one that asked for the Lookup, and the one that answered.
+            Assert.Equal(2, log.Count(line => line.Contains("Provider round trip")));
+
+            Assert.Contains(log, line => line.Contains("finish_reason=tool_calls") && line.Contains("tool_calls=1"));
+            Assert.Contains(log, line => line.Contains("finish_reason=stop")       && line.Contains("tool_calls=0"));
+        }
+
+        [Fact]
+        public async Task A_Lookup_is_logged_with_its_name_module_duration_and_size() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+            world.SettingsByNamespace["bh.pathing"] = FakeWorld.Ok(
+                "Pathing",
+                new ModuleSettingInfo("trail.size", "Trail size", "How wide trails are drawn.", "Int32", "3", "1", "10"));
+
+            model.WillCallTool("get_module_settings", "call_1",
+                               new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
+            model.WillReply("Pathing draws trails three pixels wide.");
+
+            var log  = new List<string>();
+            var chat = NewChat(model, world, log.Add);
+
+            await chat.SendAsync("How wide are Pathing's trails?");
+
+            string lookup = Assert.Single(log, line => line.Contains("Lookup get_module_settings"));
+
+            Assert.Contains("ms",               lookup);
+            Assert.Contains("module=bh.pathing", lookup);
+            Assert.Contains("settings=1",        lookup);
+            Assert.Contains("chars",             lookup);
+        }
+
+        [Fact]
+        public async Task No_Setting_value_reaches_the_log() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.maps", "Maps", "1.0.0", "", enabled: true));
+            world.SettingsByNamespace["bh.maps"] = FakeWorld.Ok(
+                "Maps",
+                new ModuleSettingInfo("api_key",    "API key",    "", "String",  "sk-live-123", null, null),
+                new ModuleSettingInfo("trail.size", "Trail size", "", "Int32",   "987654",      "1", "999999"),
+                new ModuleSettingInfo("show.grid",  "Show grid",  "", "Boolean", "true",        null, null));
+
+            model.WillCallTool("get_module_settings", "call_1",
+                               new Dictionary<string, object> { ["namespace"] = "bh.maps" });
+            model.WillReply("The Maps module shows a grid.");
+
+            var log  = new List<string>();
+            var chat = NewChat(model, world, log.Add);
+
+            await chat.SendAsync("What is in the Maps module settings?");
+
+            string everything = string.Join("\n", log);
+
+            // The Lookup was logged...
+            Assert.Contains("get_module_settings", everything);
+
+            // ...and the settings themselves stayed out of it. The trail size is a value the model
+            // is meant to see, so the log must not hold it either; the key never gets that far, and
+            // must not appear for the other reason.
+            Assert.DoesNotContain("987654",      everything);
+            Assert.DoesNotContain("sk-live-123", everything);
+            Assert.DoesNotContain("show.grid",   everything);
+        }
+
         /// <summary>
         /// A settings Lookup that waits for <paramref name="release"/> and is cut short by
         /// cancellation, so a test holds the Chat in the middle of a Lookup.
@@ -770,6 +914,23 @@ namespace jubeater.aigoalplanner.Tests
         /// </summary>
         private static Chat NewChat(ScriptedChatClient model, FakeWorld world) {
             return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"), Lookups.For(world));
+        }
+
+        /// <summary>
+        /// The Chat with Lookups that log, wired the way the module wires them: the same log takes
+        /// the Lookup lines and the Provider round trips.
+        /// </summary>
+        private static Chat NewChat(ScriptedChatClient model, FakeWorld world, Action<string> logDebug) {
+            return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"),
+                            Lookups.For(world, logDebug), logDebug);
+        }
+
+        /// <summary>
+        /// The Chat with Lookups that read on a game thread the test runs itself.
+        /// </summary>
+        private static Chat NewChat(ScriptedChatClient model, FakeWorld world, FakeGameThread gameThread) {
+            return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"),
+                            Lookups.For(new GameThreadWorld(world, gameThread)));
         }
 
         /// <summary>

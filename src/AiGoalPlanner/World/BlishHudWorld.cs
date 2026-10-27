@@ -17,9 +17,11 @@ namespace jubeater.aigoalplanner.World
     /// settings of the ones that are enabled.
     /// </summary>
     /// <remarks>
-    /// The Lookups run while the model thinks, so on a thread that is not the game's update thread.
-    /// Everything read here is a snapshot of what Blish HUD holds, and reading it touches no control,
-    /// so it is safe to ask for it off the game thread.
+    /// The Lookups run while the model thinks, on a thread that is not the game's update thread, so
+    /// this is never called from there: <see cref="GameThreadWorld"/> queues each read on the game
+    /// thread first, because Blish HUD and the Modules expect their state to be read on it. Reading
+    /// touches no control, so it changes nothing the Player can see; it only has to happen on the
+    /// right thread.
     /// </remarks>
     public sealed class BlishHudWorld : IBlishHudWorld
     {

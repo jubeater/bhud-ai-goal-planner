@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,6 +20,12 @@ namespace jubeater.aigoalplanner.Core
     /// <see cref="ToolRegistry"/>. When a Request needs Lookups, the Chat runs them and returns all
     /// of a round's results to the model before it is asked again, until the model answers, stops
     /// calling tools, or the tool-call limit ends the loop.
+    /// <para>
+    /// Every Provider round trip is logged at debug level through the log the module hands in, so a
+    /// slow or odd Request can be diagnosed from the Blish HUD log. What is logged is timing,
+    /// finish reason and counts; never the Player's words, the model's reply, or anything else that
+    /// could hold a key.
+    /// </para>
     /// </remarks>
     public sealed class Chat
     {
@@ -31,6 +38,12 @@ namespace jubeater.aigoalplanner.Core
         private readonly Func<IChatClient> _chatClient;
         private readonly Func<string>       _systemPrompt;
         private readonly ToolRegistry       _tools;
+
+        /// <summary>
+        /// Where the diagnostics of a Request go — one line per Provider round trip — or null when
+        /// nobody is listening. The module hands in its debug log; tests hand in a list.
+        /// </summary>
+        private readonly Action<string> _logDebug;
 
         /// <summary>
         /// Why this Chat cannot be used, e.g. that the module failed to load, or null when it can.
@@ -68,11 +81,15 @@ namespace jubeater.aigoalplanner.Core
         /// <paramref name="systemPrompt"/>. Both are asked again for every Request, so a change of
         /// Settings takes effect without losing the conversation. <paramref name="tools"/> holds the
         /// Lookups the model may call; without it the Chat simply has none to offer.
+        /// <paramref name="logDebug"/> receives one line per Provider round trip; without it the
+        /// Chat logs nothing.
         /// </summary>
-        public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools = null)
-            : this(chatClient, systemPrompt, tools, unavailableReason: null) { }
+        public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools = null,
+                    Action<string> logDebug = null)
+            : this(chatClient, systemPrompt, tools, logDebug, unavailableReason: null) { }
 
-        private Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools, string unavailableReason) {
+        private Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools,
+                     Action<string> logDebug, string unavailableReason) {
             _unavailableReason = unavailableReason;
 
             if (_unavailableReason == null) {
@@ -84,7 +101,8 @@ namespace jubeater.aigoalplanner.Core
                 _messages.Add(new ChatMessage(ChatMessageAuthor.Notice, _unavailableReason));
             }
 
-            _tools = tools;
+            _tools    = tools;
+            _logDebug = logDebug;
         }
 
         /// <summary>
@@ -95,7 +113,7 @@ namespace jubeater.aigoalplanner.Core
         /// starting a new Chat shows it again, so it cannot be cleared away.
         /// </summary>
         public static Chat Unavailable(string reason) {
-            return new Chat(null, null, null, reason ?? throw new ArgumentNullException(nameof(reason)));
+            return new Chat(null, null, null, null, reason ?? throw new ArgumentNullException(nameof(reason)));
         }
 
         /// <summary>
@@ -242,9 +260,13 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         private async Task RunRequest(int generation, CancellationToken cancellationToken) {
             int executedToolCalls = 0;
+            int round             = 0;
 
             while (true) {
+                round++;
+
                 ChatResponse response;
+                Stopwatch    clock = Stopwatch.StartNew();
 
                 try {
                     IChatClient chatClient = _chatClient();
@@ -253,18 +275,23 @@ namespace jubeater.aigoalplanner.Core
                                       .GetResponseAsync(BuildHistory(), BuildOptions(), cancellationToken)
                                       .ConfigureAwait(false);
                 } catch (ProviderException exception) {
+                    LogRoundFailed(round, clock, exception.Failure.ToString());
                     TryAppendNotice(generation, Describe(exception.Failure));
 
                     return;
                 } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                    LogRoundFailed(round, clock, "cancelled");
+
                     throw;
-                } catch (Exception) {
+                } catch (Exception exception) {
+                    LogRoundFailed(round, clock, exception.GetType().Name);
                     TryAppendNotice(generation, Describe(ProviderFailure.Unexpected));
 
                     return;
                 }
 
                 if (response == null) {
+                    LogRoundFailed(round, clock, "no response");
                     TryAppendNotice(generation, Describe(ProviderFailure.Unexpected));
 
                     return;
@@ -273,6 +300,8 @@ namespace jubeater.aigoalplanner.Core
                 List<FunctionCallContent> calls = response.Messages.SelectMany(message => message.Contents)
                                                                    .OfType<FunctionCallContent>()
                                                                    .ToList();
+
+                LogRound(round, clock, response, calls.Count);
 
                 if (calls.Count == 0) {
                     ShowResponse(generation, response);
@@ -493,6 +522,29 @@ namespace jubeater.aigoalplanner.Core
 
         private bool TryAppendNotice(int generation, string text) {
             return TryAppend(generation, new ChatMessage(ChatMessageAuthor.Notice, text));
+        }
+
+        /// <summary>
+        /// One line for a Provider round trip that came back: how long it took, how it finished and
+        /// how many Lookups the model asked for. Not what it said — a reply can hold anything the
+        /// Player's key was used to buy, and the log is not the place for it.
+        /// </summary>
+        private void LogRound(int round, Stopwatch clock, ChatResponse response, int toolCalls) {
+            if (_logDebug == null) return;
+
+            _logDebug("Provider round trip " + round + ": " + clock.ElapsedMilliseconds + " ms, finish_reason="
+                    + (response.FinishReason?.Value ?? "none") + ", tool_calls=" + toolCalls);
+        }
+
+        /// <summary>
+        /// One line for a Provider round trip that did not come back — it failed, or the Player
+        /// cancelled it — named by its failure rather than by its message: a Provider's message can
+        /// echo the request, and with it the key.
+        /// </summary>
+        private void LogRoundFailed(int round, Stopwatch clock, string failure) {
+            if (_logDebug == null) return;
+
+            _logDebug("Provider round trip " + round + " failed after " + clock.ElapsedMilliseconds + " ms: " + failure);
         }
 
         private static string Describe(ProviderFailure failure) {

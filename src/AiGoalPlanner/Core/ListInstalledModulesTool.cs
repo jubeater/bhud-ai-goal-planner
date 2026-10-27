@@ -33,9 +33,11 @@ namespace jubeater.aigoalplanner.Core
         /// Builds the tool against <paramref name="world"/>, the host that answers the Lookup. It is
         /// a hand-written <see cref="AIFunction"/> with a literal schema, per ADR-0008: the
         /// serializer-driven factory needs a System.Text.Json newer than the one Blish HUD runs.
+        /// <paramref name="logDebug"/> receives one line per call: how long it took, how many
+        /// Modules were listed and how big the answer is.
         /// </summary>
-        public static AIFunction Create(IBlishHudWorld world) {
-            return new Function(world);
+        public static AIFunction Create(IBlishHudWorld world, Action<string> logDebug = null) {
+            return new Function(world, logDebug);
         }
 
         /// <summary>
@@ -45,7 +47,7 @@ namespace jubeater.aigoalplanner.Core
             return "Checking installed modules…";
         }
 
-        private static async Task<string> RunAsync(IBlishHudWorld world, CancellationToken cancellationToken) {
+        private static async Task<LookupAnswer> RunAsync(IBlishHudWorld world, CancellationToken cancellationToken) {
             IReadOnlyList<InstalledModuleInfo> modules = await world.ListInstalledModulesAsync(cancellationToken)
                                                                    .ConfigureAwait(false);
 
@@ -54,7 +56,7 @@ namespace jubeater.aigoalplanner.Core
                 ["modules"] = new JArray(modules.Select(ToJson))
             };
 
-            return json.ToString(Formatting.None);
+            return new LookupAnswer(json.ToString(Formatting.None), "modules=" + modules.Count);
         }
 
         private static JObject ToJson(InstalledModuleInfo module) {
@@ -71,11 +73,12 @@ namespace jubeater.aigoalplanner.Core
         {
             private readonly IBlishHudWorld _world;
 
-            public Function(IBlishHudWorld world) : base(ListInstalledModulesTool.Name, ListInstalledModulesTool.Description, Schema) {
+            public Function(IBlishHudWorld world, Action<string> logDebug)
+                : base(ListInstalledModulesTool.Name, ListInstalledModulesTool.Description, Schema, logDebug) {
                 _world = world;
             }
 
-            protected override async Task<object> InvokeLookupAsync(AIFunctionArguments arguments, CancellationToken cancellationToken) {
+            protected override async Task<LookupAnswer> InvokeLookupAsync(AIFunctionArguments arguments, CancellationToken cancellationToken) {
                 return await RunAsync(_world, cancellationToken).ConfigureAwait(false);
             }
         }

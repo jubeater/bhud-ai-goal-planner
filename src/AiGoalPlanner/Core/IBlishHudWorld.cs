@@ -7,9 +7,16 @@ namespace jubeater.aigoalplanner.Core
 {
     /// <summary>
     /// The Blish HUD host as the Lookups see it: what Modules the Player has installed and what a
-    /// Module's Settings are. This is the port; <c>World.BlishHudWorld</c> is the adapter that asks
-    /// the real Blish HUD, and tests drive the Lookups with an in-memory world.
+    /// Module's Settings are. This is the port. <c>GameThreadWorld</c> is the decorator every
+    /// Lookup goes through, which reads on the game thread (ADR-0009); <c>World.BlishHudWorld</c> is
+    /// the adapter that asks the real Blish HUD, and tests drive the Lookups with an in-memory world.
     /// </summary>
+    /// <remarks>
+    /// A read answers from live state: it takes the state as Blish HUD holds it right now and never
+    /// waits for anything else, which is what lets the decorator run the whole read on the game
+    /// thread. A read that awaited something would finish somewhere else, and Blish HUD would be
+    /// read off its own update thread again.
+    /// </remarks>
     public interface IBlishHudWorld
     {
         /// <summary>
