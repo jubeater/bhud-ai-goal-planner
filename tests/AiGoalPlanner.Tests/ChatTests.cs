@@ -974,7 +974,7 @@ namespace jubeater.aigoalplanner.Tests
                               notice => {
                                   Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
                                   Assert.Contains("progression", notice.Text);
-                                  Assert.Contains("missing or lacks", notice.Text);
+                                  Assert.Equal("Your Guild Wars 2 API key lacks the 'progression' permission. Planning continues with available data.", notice.Text);
                               },
                               reply => {
                                   Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
@@ -1015,7 +1015,7 @@ namespace jubeater.aigoalplanner.Tests
                               notice => {
                                   Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
                                   Assert.Contains("account", notice.Text);
-                                  Assert.Contains("missing or lacks", notice.Text);
+                                  Assert.Equal("Your Guild Wars 2 API key lacks the 'account' permission. Planning continues with available data.", notice.Text);
                               },
                               reply => {
                                   Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
@@ -1025,6 +1025,37 @@ namespace jubeater.aigoalplanner.Tests
             string warning = Assert.Single(warnings);
             Assert.Contains("Lookup get_account_access", warning);
             Assert.Contains("account", warning);
+        }
+
+        [Fact]
+        public async Task When_no_api_access_a_Notice_is_shown_to_restart_blish_hud_and_planning_continues() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(AccountAccessStatus.NoApiAccess, null);
+
+            var warnings = new List<string>();
+
+            model.WillCallTool("get_account_access", "call_1");
+            model.WillReply("Since API access has not been granted, continuing with available data.");
+
+            var chat = NewChat(model, world, logDebug: null, logWarn: warnings.Add);
+
+            await chat.SendAsync("What expansions do I own?");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Equal("Blish HUD hasn't given AI Goal Planner API access yet. Make sure a Guild Wars 2 API key is added in Blish HUD, then restart Blish HUD.", notice.Text);
+                              },
+                              reply => {
+                                  Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
+                                  Assert.Contains("continuing", reply.Text);
+                              });
+
+            string warning = Assert.Single(warnings);
+            Assert.Contains("Lookup get_account_access", warning);
+            Assert.Contains("Blish HUD hasn't given AI Goal Planner API access yet", warning);
         }
 
         [Fact]
@@ -1050,7 +1081,7 @@ namespace jubeater.aigoalplanner.Tests
                               notice => {
                                   Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
                                   Assert.Contains("progression", notice.Text);
-                                  Assert.Contains("missing or lacks", notice.Text);
+                                  Assert.Equal("Your Guild Wars 2 API key lacks the 'progression' permission. Planning continues with available data.", notice.Text);
                               },
                               reply => {
                                   Assert.Equal(ChatMessageAuthor.Ai, reply.Author);

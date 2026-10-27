@@ -67,6 +67,10 @@ namespace jubeater.aigoalplanner.Core
 
             ProgressResult result = await world.GetProgressAsync(kind, cancellationToken).ConfigureAwait(false);
 
+            if (result.Status == ProgressStatus.NoApiAccess) {
+                return MissingPermissionRefusal.NoApiAccess();
+            }
+
             if (result.Status == ProgressStatus.MissingPermission) {
                 string perm = string.IsNullOrEmpty(result.MissingPermission)
                                   ? (kind == ProgressKind.Mastery ? "progression" : "characters")
@@ -77,15 +81,16 @@ namespace jubeater.aigoalplanner.Core
 
             if (result.Status == ProgressStatus.Unknown) {
                 var unknownJson = new JObject {
-                    ["status"]    = "unknown",
-                    ["kind"]      = "hero_points",
-                    ["character"] = result.CharacterName,
-                    ["map"]       = result.MapName,
-                    ["map_id"]    = result.MapId,
-                    ["region"]    = result.RegionName,
-                    ["message"]   = string.IsNullOrEmpty(result.Message)
-                                      ? "The Guild Wars 2 API returned no hero points data for this character."
-                                      : result.Message
+                    ["status"]      = "unknown",
+                    ["kind"]        = "hero_points",
+                    ["character"]   = result.CharacterName,
+                    ["map"]         = result.MapName,
+                    ["map_id"]      = result.MapId,
+                    ["region"]      = result.RegionName,
+                    ["message"]     = string.IsNullOrEmpty(result.Message)
+                                        ? "This is a known Guild Wars 2 API issue where hero-point data is missing for some characters. The Player can check the in-game Hero panel."
+                                        : result.Message,
+                    ["instruction"] = "This is a known Guild Wars 2 API issue where hero-point data is missing for some characters. Tell the Player to check the in-game Hero panel. Do not say the API key lacks access or that the character hasn't earned enough data."
                 };
 
                 return new LookupAnswer(unknownJson.ToString(Formatting.None), "status=unknown");

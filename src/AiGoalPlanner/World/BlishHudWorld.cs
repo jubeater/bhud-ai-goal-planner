@@ -145,9 +145,9 @@ namespace jubeater.aigoalplanner.World
 
         public async Task<AccountAccessResult> GetAccountAccessAsync(CancellationToken cancellationToken) {
             if (_gw2ApiManager == null || !_gw2ApiManager.HasSubtoken) {
-                _logWarn?.Invoke("Guild Wars 2 API key is missing; account access lookup is unavailable.");
-                return new AccountAccessResult(AccountAccessStatus.MissingPermission, Array.Empty<string>(),
-                                               "Guild Wars 2 API key is missing.", "account");
+                _logWarn?.Invoke("Guild Wars 2 API access has not been granted by Blish HUD; account access lookup is unavailable.");
+                return new AccountAccessResult(AccountAccessStatus.NoApiAccess, Array.Empty<string>(),
+                                               "Blish HUD hasn't given AI Goal Planner API access yet. Make sure a Guild Wars 2 API key is added in Blish HUD, then restart Blish HUD.");
             }
 
             if (!_gw2ApiManager.HasPermission(TokenPermission.Account)) {
@@ -179,8 +179,9 @@ namespace jubeater.aigoalplanner.World
         public async Task<ProgressResult> GetProgressAsync(ProgressKind kind, CancellationToken cancellationToken) {
             if (kind == ProgressKind.Mastery) {
                 if (_gw2ApiManager == null || !_gw2ApiManager.HasSubtoken) {
-                    _logWarn?.Invoke("Guild Wars 2 API key is missing; mastery progress lookup is unavailable.");
-                    return new ProgressResult(ProgressStatus.MissingPermission, kind, message: "Guild Wars 2 API key is missing.", missingPermission: "progression");
+                    _logWarn?.Invoke("Guild Wars 2 API access has not been granted by Blish HUD; mastery progress lookup is unavailable.");
+                    return new ProgressResult(ProgressStatus.NoApiAccess, kind,
+                                              message: "Blish HUD hasn't given AI Goal Planner API access yet. Make sure a Guild Wars 2 API key is added in Blish HUD, then restart Blish HUD.");
                 }
 
                 if (!_gw2ApiManager.HasPermission(TokenPermission.Progression)) {
@@ -207,7 +208,7 @@ namespace jubeater.aigoalplanner.World
                     Dictionary<string, List<CachedMasteryTrack>> masteriesByRegion = null;
                     if (tracksAvailable) {
                         masteriesByRegion = masteries
-                            .GroupBy(m => m.Region, StringComparer.OrdinalIgnoreCase)
+                            .GroupBy(m => MasteryProgressCalculator.NormalizeRegionName(m.Region), StringComparer.OrdinalIgnoreCase)
                             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
                     }
 
@@ -216,16 +217,19 @@ namespace jubeater.aigoalplanner.World
                     if (points?.Totals != null) {
                         foreach (AccountMasteryPointsRegion regionTotal in points.Totals) {
                             string regionName = regionTotal.Region;
+                            string canonicalRegion = MasteryProgressCalculator.NormalizeRegionName(regionName);
                             List<MasteryTrackProgress> unfinished = null;
+                            bool regionTracksAvailable = false;
 
-                            if (tracksAvailable) {
-                                unfinished = new List<MasteryTrackProgress>();
-                                if (masteriesByRegion.TryGetValue(regionName, out List<CachedMasteryTrack> tracks)) {
-                                    unfinished.AddRange(MasteryProgressCalculator.CalculateUnfinishedTracks(tracks, accountMasteryMap));
-                                }
+                            if (tracksAvailable && masteriesByRegion != null &&
+                                masteriesByRegion.TryGetValue(canonicalRegion, out List<CachedMasteryTrack> tracks) &&
+                                tracks != null && tracks.Count > 0) {
+                                regionTracksAvailable = true;
+                                unfinished = new List<MasteryTrackProgress>(
+                                    MasteryProgressCalculator.CalculateUnfinishedTracks(tracks, accountMasteryMap));
                             }
 
-                            regions.Add(new MasteryRegionProgress(regionName, regionTotal.Spent, regionTotal.Earned, unfinished, tracksAvailable));
+                            regions.Add(new MasteryRegionProgress(regionName, regionTotal.Spent, regionTotal.Earned, unfinished, regionTracksAvailable));
                         }
                     }
 
@@ -238,8 +242,9 @@ namespace jubeater.aigoalplanner.World
 
             if (kind == ProgressKind.HeroPoints) {
                 if (_gw2ApiManager == null || !_gw2ApiManager.HasSubtoken) {
-                    _logWarn?.Invoke("Guild Wars 2 API key is missing; hero points progress lookup is unavailable.");
-                    return new ProgressResult(ProgressStatus.MissingPermission, kind, message: "Guild Wars 2 API key is missing.", missingPermission: "characters");
+                    _logWarn?.Invoke("Guild Wars 2 API access has not been granted by Blish HUD; hero points progress lookup is unavailable.");
+                    return new ProgressResult(ProgressStatus.NoApiAccess, kind,
+                                              message: "Blish HUD hasn't given AI Goal Planner API access yet. Make sure a Guild Wars 2 API key is added in Blish HUD, then restart Blish HUD.");
                 }
 
                 if (!_gw2ApiManager.HasPermission(TokenPermission.Characters)) {
@@ -280,7 +285,7 @@ namespace jubeater.aigoalplanner.World
                             mapId: mapId,
                             mapName: mapName,
                             regionName: regionName,
-                            message: "The Guild Wars 2 API returned no hero points data for this character.");
+                            message: "This is a known Guild Wars 2 API issue where hero-point data is missing for some characters. The Player can check the in-game Hero panel.");
                     }
 
                     var completedSet = new HashSet<string>(completedPoints, StringComparer.OrdinalIgnoreCase);

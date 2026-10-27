@@ -38,6 +38,10 @@ namespace jubeater.aigoalplanner.Core
         private static async Task<LookupAnswer> RunAsync(IBlishHudWorld world, CancellationToken cancellationToken) {
             AccountAccessResult result = await world.GetAccountAccessAsync(cancellationToken).ConfigureAwait(false);
 
+            if (result.Status == AccountAccessStatus.NoApiAccess) {
+                return MissingPermissionRefusal.NoApiAccess();
+            }
+
             if (result.Status == AccountAccessStatus.MissingPermission) {
                 string perm = string.IsNullOrEmpty(result.MissingPermission) ? "account" : result.MissingPermission;
                 return MissingPermissionRefusal.For(perm);

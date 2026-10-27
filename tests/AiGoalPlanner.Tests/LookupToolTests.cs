@@ -387,7 +387,21 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("unavailable", (string)result["status"]);
             Assert.Equal("missing_permission", (string)result["reason"]);
             Assert.Equal("account", (string)result["permission"]);
-            Assert.Contains("account", (string)result["notice"]);
+            Assert.Equal("Your Guild Wars 2 API key lacks the 'account' permission. Planning continues with available data.", (string)result["notice"]);
+        }
+
+        [Fact]
+        public async Task Getting_account_access_when_no_api_access_returns_no_api_access_notice() {
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(AccountAccessStatus.NoApiAccess, null);
+
+            AIFunction tool = GetAccountAccessTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("no_api_access", (string)result["reason"]);
+            Assert.Equal("Blish HUD hasn't given AI Goal Planner API access yet. Make sure a Guild Wars 2 API key is added in Blish HUD, then restart Blish HUD.", (string)result["notice"]);
         }
 
         [Fact]
@@ -468,7 +482,21 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("unavailable", (string)result["status"]);
             Assert.Equal("missing_permission", (string)result["reason"]);
             Assert.Equal("progression", (string)result["permission"]);
-            Assert.Contains("progression", (string)result["notice"]);
+            Assert.Equal("Your Guild Wars 2 API key lacks the 'progression' permission. Planning continues with available data.", (string)result["notice"]);
+        }
+
+        [Fact]
+        public async Task Getting_progress_when_no_api_access_returns_no_api_access_notice() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(ProgressStatus.NoApiAccess, ProgressKind.Mastery);
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("no_api_access", (string)result["reason"]);
+            Assert.Equal("Blish HUD hasn't given AI Goal Planner API access yet. Make sure a Guild Wars 2 API key is added in Blish HUD, then restart Blish HUD.", (string)result["notice"]);
         }
 
         [Fact]
@@ -489,7 +517,7 @@ namespace jubeater.aigoalplanner.Tests
             world.HeroPointsProgressResult = new ProgressResult(
                 ProgressStatus.Unknown, ProgressKind.HeroPoints,
                 characterName: "Ranger", mapId: 1205, mapName: "Domain of Vabbi", regionName: "Crystal Desert",
-                message: "The Guild Wars 2 API returned no hero points data for this character.");
+                message: "This is a known Guild Wars 2 API issue where hero-point data is missing for some characters. The Player can check the in-game Hero panel.");
 
             AIFunction tool = GetProgressTool.Create(world);
 
@@ -499,7 +527,9 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("hero_points", (string)result["kind"]);
             Assert.Equal("Ranger", (string)result["character"]);
             Assert.Null(result["hero_challenges"]);
-            Assert.Contains("returned no hero points data", (string)result["message"]);
+            Assert.Contains("known", (string)result["message"], System.StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Hero panel", (string)result["message"], System.StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Hero panel", (string)result["instruction"], System.StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -537,7 +567,7 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("unavailable", (string)result["status"]);
             Assert.Equal("missing_permission", (string)result["reason"]);
             Assert.Equal("progression", (string)result["permission"]);
-            Assert.Contains("progression", (string)result["notice"]);
+            Assert.Equal("Your Guild Wars 2 API key lacks the 'progression' permission. Planning continues with available data.", (string)result["notice"]);
         }
 
         /// <summary>

@@ -267,7 +267,8 @@ namespace jubeater.aigoalplanner.Core
     {
         Ok,
         MissingPermission,
-        Unavailable
+        Unavailable,
+        NoApiAccess
     }
 
     /// <summary>
@@ -301,7 +302,8 @@ namespace jubeater.aigoalplanner.Core
         MissingPermission,
         NoCharacterOrMap,
         Unavailable,
-        Unknown
+        Unknown,
+        NoApiAccess
     }
 
     public sealed class MasteryTrackProgress
