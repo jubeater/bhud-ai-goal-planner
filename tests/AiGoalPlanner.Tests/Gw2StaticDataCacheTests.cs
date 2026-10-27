@@ -139,6 +139,53 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void Region_missing_hero_challenges_sums_all_maps_loaded_from_disk_on_startup() {
+            string cacheDir = Path.Combine(_tempDir, "cache");
+            Directory.CreateDirectory(cacheDir);
+
+            string map1 = "{\"id\":101,\"name\":\"Map One\",\"region_id\":10,\"region_name\":\"Region A\","
+                        + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"skill_challenges\":[\"c1\",\"c2\",\"c3\"]}";
+            string map2 = "{\"id\":102,\"name\":\"Map Two\",\"region_id\":10,\"region_name\":\"Region A\","
+                        + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"skill_challenges\":[\"c4\",\"c5\"]}";
+            File.WriteAllText(Path.Combine(cacheDir, "map_101.json"), map1);
+            File.WriteAllText(Path.Combine(cacheDir, "map_102.json"), map2);
+
+            // Fresh cache instance without calling GetMap first
+            var cache = new Gw2StaticDataCache(_tempDir);
+
+            var completed = new HashSet<string> { "c1" };
+            int missing = cache.GetRegionMissingHeroChallenges(10, completed);
+
+            // 5 total in region 10, 1 completed -> 4 missing
+            Assert.Equal(4, missing);
+        }
+
+        [Fact]
+        public void When_map_challenges_failed_to_load_it_is_not_cached_as_complete_and_subsequent_fetch_succeeds() {
+            string cacheDir = Path.Combine(_tempDir, "cache");
+            Directory.CreateDirectory(cacheDir);
+
+            var cache = new Gw2StaticDataCache(_tempDir);
+
+            // Attempt 1: Map created with challengesLoaded: false (e.g. floor map API call failed)
+            var failedMap = new CachedMapInfo(301, "Map Incomplete", 12, "Region B", 1, "Tyria", Array.Empty<string>(), defaultFloor: 0, challengesLoaded: false);
+            cache.SaveMap(failedMap);
+
+            // Verify it was not cached as complete on disk (no file written) or GetMap does not return it as complete
+            CachedMapInfo cachedAfterFailure = cache.GetMap(301);
+            Assert.True(cachedAfterFailure == null || !cachedAfterFailure.ChallengesLoaded);
+
+            // Attempt 2: Next fetch succeeds with challenges
+            var successfulMap = new CachedMapInfo(301, "Map Incomplete", 12, "Region B", 1, "Tyria", new[] { "sc-10", "sc-11" }, defaultFloor: 0, challengesLoaded: true);
+            cache.SaveMap(successfulMap);
+
+            CachedMapInfo loaded = cache.GetMap(301);
+            Assert.NotNull(loaded);
+            Assert.True(loaded.ChallengesLoaded);
+            Assert.Equal(2, loaded.SkillChallenges.Count);
+        }
+
+        [Fact]
         public void Malformed_cache_file_does_not_throw_and_logs_warning() {
             string cacheDir = Path.Combine(_tempDir, "cache");
             Directory.CreateDirectory(cacheDir);

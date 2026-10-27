@@ -40,16 +40,7 @@ namespace jubeater.aigoalplanner.Core
 
             if (result.Status == AccountAccessStatus.MissingPermission) {
                 string perm = string.IsNullOrEmpty(result.MissingPermission) ? "account" : result.MissingPermission;
-
-                var refusal = new JObject {
-                    ["status"]      = "unavailable",
-                    ["reason"]      = "missing_permission",
-                    ["permission"]  = perm,
-                    ["notice"]      = "Your Guild Wars 2 API key is missing or lacks the '" + perm + "' permission. Planning continues with available data.",
-                    ["instruction"] = "Guild Wars 2 API key or '" + perm + "' permission is missing. Mention this to the Player and continue planning with what is available."
-                };
-
-                return new LookupAnswer(refusal.ToString(Formatting.None), "status=missing_permission, permission=" + perm);
+                return MissingPermissionRefusal.For(perm);
             }
 
             if (result.Status != AccountAccessStatus.Ok) {

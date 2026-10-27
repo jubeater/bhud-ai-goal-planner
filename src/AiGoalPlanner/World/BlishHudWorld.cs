@@ -114,6 +114,7 @@ namespace jubeater.aigoalplanner.World
         public async Task<PlayerLocationResult> GetLocationAsync(CancellationToken cancellationToken) {
             string characterName = GameService.Gw2Mumble.PlayerCharacter?.Name;
             int mapId = GameService.Gw2Mumble.CurrentMap?.Id ?? 0;
+            string mumbleMapName = GameService.Gw2Mumble.CurrentMumbleMapName;
 
             if (mapId <= 0 || string.IsNullOrEmpty(characterName)) {
                 return new PlayerLocationResult(LocationStatus.Unavailable, null, "The Player is not in game or character selection is active.");
@@ -123,7 +124,7 @@ namespace jubeater.aigoalplanner.World
 
             string mapName = mapInfo?.Name;
             if (string.IsNullOrEmpty(mapName)) {
-                mapName = GameService.Gw2Mumble.CurrentMumbleMapName;
+                mapName = mumbleMapName;
             }
             if (string.IsNullOrEmpty(mapName)) {
                 mapName = "Map " + mapId;
@@ -163,7 +164,7 @@ namespace jubeater.aigoalplanner.World
 
                 return new AccountAccessResult(AccountAccessStatus.Ok, accessList.Distinct().ToList());
             } catch (Exception ex) {
-                _logWarn?.Invoke("GW2 API account call failed: " + ex.Message);
+                _logWarn?.Invoke("GW2 API account call failed: " + ex.GetType().Name);
                 return new AccountAccessResult(AccountAccessStatus.Unavailable, Array.Empty<string>(),
                                                "Could not retrieve account access from Guild Wars 2 API.");
             }
@@ -207,12 +208,7 @@ namespace jubeater.aigoalplanner.World
                             var unfinished = new List<MasteryTrackProgress>();
 
                             if (masteriesByRegion.TryGetValue(regionName, out List<CachedMasteryTrack> tracks)) {
-                                foreach (CachedMasteryTrack track in tracks) {
-                                    accountMasteryMap.TryGetValue(track.Id, out int level);
-                                    if (level < track.TotalLevels) {
-                                        unfinished.Add(new MasteryTrackProgress(track.Id, track.Name, regionName, level, track.TotalLevels));
-                                    }
-                                }
+                                unfinished.AddRange(MasteryProgressCalculator.CalculateUnfinishedTracks(tracks, accountMasteryMap));
                             }
 
                             regions.Add(new MasteryRegionProgress(regionName, regionTotal.Spent, regionTotal.Earned, unfinished));
@@ -221,7 +217,7 @@ namespace jubeater.aigoalplanner.World
 
                     return new ProgressResult(ProgressStatus.Ok, kind, masteryRegions: regions);
                 } catch (Exception ex) {
-                    _logWarn?.Invoke("GW2 API mastery progress call failed: " + ex.Message);
+                    _logWarn?.Invoke("GW2 API mastery progress call failed: " + ex.GetType().Name);
                     return new ProgressResult(ProgressStatus.Unavailable, kind, message: "Could not retrieve mastery progress from Guild Wars 2 API.");
                 }
             }
@@ -237,34 +233,71 @@ namespace jubeater.aigoalplanner.World
                     return new ProgressResult(ProgressStatus.MissingPermission, kind, message: "Guild Wars 2 API key lacks the 'characters' permission.", missingPermission: "characters");
                 }
 
+                if (!_gw2ApiManager.HasPermission(TokenPermission.Progression)) {
+                    _logWarn?.Invoke("Guild Wars 2 API key lacks 'progression' permission; hero points progress lookup is unavailable.");
+                    return new ProgressResult(ProgressStatus.MissingPermission, kind, message: "Guild Wars 2 API key lacks the 'progression' permission.", missingPermission: "progression");
+                }
+
                 string characterName = GameService.Gw2Mumble.PlayerCharacter?.Name;
                 int mapId = GameService.Gw2Mumble.CurrentMap?.Id ?? 0;
+                string mumbleMapName = GameService.Gw2Mumble.CurrentMumbleMapName;
 
                 if (string.IsNullOrEmpty(characterName) || mapId <= 0) {
                     return new ProgressResult(ProgressStatus.NoCharacterOrMap, kind, message: "The Player is not currently on a map in Guild Wars 2.");
                 }
 
                 try {
-                    var completedPoints = await _gw2ApiManager.Gw2ApiClient.V2.Characters[characterName].HeroPoints.GetAsync(cancellationToken).ConfigureAwait(false);
-                    var completedSet = new HashSet<string>(completedPoints ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                    var pointsTask = _gw2ApiManager.Gw2ApiClient.V2.Characters[characterName].HeroPoints.GetAsync(cancellationToken);
+                    var mapTask = GetMapAsync(mapId, cancellationToken);
 
-                    CachedMapInfo mapInfo = await GetMapAsync(mapId, cancellationToken).ConfigureAwait(false);
+                    await Task.WhenAll(pointsTask, mapTask).ConfigureAwait(false);
+
+                    var completedPoints = await pointsTask.ConfigureAwait(false);
+                    CachedMapInfo mapInfo = await mapTask.ConfigureAwait(false);
+
+                    string mapName = mapInfo?.Name ?? mumbleMapName ?? ("Map " + mapId);
+                    string regionName = mapInfo?.RegionName ?? string.Empty;
+
+                    if (completedPoints == null || completedPoints.Count == 0) {
+                        return new ProgressResult(
+                            ProgressStatus.Unknown,
+                            kind,
+                            characterName: characterName,
+                            mapId: mapId,
+                            mapName: mapName,
+                            regionName: regionName,
+                            message: "The Guild Wars 2 API returned no hero points data for this character.");
+                    }
+
+                    var completedSet = new HashSet<string>(completedPoints, StringComparer.OrdinalIgnoreCase);
 
                     int mapTotal = mapInfo?.SkillChallenges?.Count ?? 0;
                     int mapCompleted = mapInfo?.SkillChallenges?.Count(id => completedSet.Contains(id)) ?? 0;
-                    int regionMissing = (_cache != null && mapInfo != null)
-                                            ? _cache.GetRegionMissingHeroChallenges(mapInfo.RegionId, completedSet)
-                                            : 0;
 
-                    string mapName = mapInfo?.Name ?? GameService.Gw2Mumble.CurrentMumbleMapName ?? ("Map " + mapId);
-                    string regionName = mapInfo?.RegionName ?? string.Empty;
+                    bool regionIncomplete = false;
+                    int regionMissing = 0;
 
-                    var heroChallenges = new HeroChallengeProgress(mapTotal, mapCompleted, regionMissing);
+                    if (_cache != null && mapInfo != null && mapInfo.RegionId > 0) {
+                        if (!_cache.HasRegion(mapInfo.RegionId)) {
+                            bool regionLoaded = await EnsureRegionMapsAsync(mapInfo.ContinentId, mapInfo.DefaultFloor, mapInfo.RegionId, cancellationToken).ConfigureAwait(false);
+                            if (!regionLoaded) {
+                                regionIncomplete = true;
+                            }
+                        }
+
+                        if (!regionIncomplete) {
+                            regionMissing = _cache.GetRegionMissingHeroChallenges(mapInfo.RegionId, completedSet);
+                        }
+                    } else {
+                        regionIncomplete = true;
+                    }
+
+                    var heroChallenges = new HeroChallengeProgress(mapTotal, mapCompleted, regionIncomplete ? (int?)null : regionMissing, regionIncomplete);
 
                     return new ProgressResult(ProgressStatus.Ok, kind, heroChallenges: heroChallenges,
                                               characterName: characterName, mapId: mapId, mapName: mapName, regionName: regionName);
                 } catch (Exception ex) {
-                    _logWarn?.Invoke("GW2 API hero points progress call failed: " + ex.Message);
+                    _logWarn?.Invoke("GW2 API hero points progress call failed: " + ex.GetType().Name);
                     return new ProgressResult(ProgressStatus.Unavailable, kind, message: "Could not retrieve hero points progress from Guild Wars 2 API.");
                 }
             }
@@ -287,14 +320,14 @@ namespace jubeater.aigoalplanner.World
                 _cache?.SaveMasteries(list);
                 return list;
             } catch (Exception ex) {
-                _logWarn?.Invoke("Could not fetch masteries from GW2 API: " + ex.Message);
+                _logWarn?.Invoke("Could not fetch masteries from GW2 API: " + ex.GetType().Name);
                 return Array.Empty<CachedMasteryTrack>();
             }
         }
 
         private async Task<CachedMapInfo> GetMapAsync(int mapId, CancellationToken cancellationToken) {
             CachedMapInfo cached = _cache?.GetMap(mapId);
-            if (cached != null) return cached;
+            if (cached != null && cached.ChallengesLoaded) return cached;
 
             if (_gw2ApiManager?.Gw2ApiClient == null) return null;
 
@@ -302,6 +335,7 @@ namespace jubeater.aigoalplanner.World
                 Gw2Sharp.WebApi.V2.Models.Map map = await _gw2ApiManager.Gw2ApiClient.V2.Maps.GetAsync(mapId, cancellationToken).ConfigureAwait(false);
                 if (map == null) return null;
 
+                bool challengesLoaded = false;
                 IReadOnlyList<string> skillChallenges = Array.Empty<string>();
                 try {
                     ContinentFloorRegionMap floorMap = await _gw2ApiManager.Gw2ApiClient.V2.Continents[map.ContinentId]
@@ -314,16 +348,51 @@ namespace jubeater.aigoalplanner.World
                     if (floorMap?.SkillChallenges != null) {
                         skillChallenges = floorMap.SkillChallenges.Select(sc => sc.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
                     }
-                } catch {
-                    // floor map optional
+                    challengesLoaded = true;
+                } catch (Exception ex) {
+                    _logWarn?.Invoke("Could not fetch floor map for map " + map.Id + " from GW2 API: " + ex.GetType().Name);
                 }
 
-                var info = new CachedMapInfo(map.Id, map.Name, map.RegionId, map.RegionName, map.ContinentId, map.ContinentName, skillChallenges);
-                _cache?.SaveMap(info);
+                var info = new CachedMapInfo(map.Id, map.Name, map.RegionId, map.RegionName, map.ContinentId, map.ContinentName, skillChallenges, map.DefaultFloor, challengesLoaded);
+                if (challengesLoaded) {
+                    _cache?.SaveMap(info);
+                }
                 return info;
             } catch (Exception ex) {
-                _logWarn?.Invoke("Could not fetch map " + mapId + " from GW2 API: " + ex.Message);
+                _logWarn?.Invoke("Could not fetch map " + mapId + " from GW2 API: " + ex.GetType().Name);
                 return null;
+            }
+        }
+
+        private async Task<bool> EnsureRegionMapsAsync(int continentId, int defaultFloor, int regionId, CancellationToken cancellationToken) {
+            if (_gw2ApiManager?.Gw2ApiClient == null || continentId <= 0 || regionId <= 0) return false;
+
+            try {
+                ContinentFloorRegion region = await _gw2ApiManager.Gw2ApiClient.V2.Continents[continentId]
+                    .Floors[defaultFloor]
+                    .Regions[regionId]
+                    .GetAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (region?.Maps == null || region.Maps.Count == 0) return false;
+
+                var mapIds = new List<int>();
+                foreach (ContinentFloorRegionMap rMap in region.Maps.Values) {
+                    mapIds.Add(rMap.Id);
+                    IReadOnlyList<string> sc = Array.Empty<string>();
+                    if (rMap.SkillChallenges != null) {
+                        sc = rMap.SkillChallenges.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
+                    }
+
+                    var cachedMap = new CachedMapInfo(rMap.Id, rMap.Name, regionId, region.Name, continentId, string.Empty, sc, defaultFloor, challengesLoaded: true);
+                    _cache?.SaveMap(cachedMap);
+                }
+
+                _cache?.SaveRegion(regionId, mapIds);
+                return true;
+            } catch (Exception ex) {
+                _logWarn?.Invoke("Could not fetch region maps for region " + regionId + " from GW2 API: " + ex.GetType().Name);
+                return false;
             }
         }
 

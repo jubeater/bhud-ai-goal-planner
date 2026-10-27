@@ -420,6 +420,63 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("hero_points", (string)result["instruction"]);
         }
 
+        [Fact]
+        public async Task Getting_hero_points_progress_when_api_response_is_empty_returns_unknown_status_not_a_count() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.Unknown, ProgressKind.HeroPoints,
+                characterName: "Ranger", mapId: 1205, mapName: "Domain of Vabbi", regionName: "Crystal Desert",
+                message: "The Guild Wars 2 API returned no hero points data for this character.");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("unknown", (string)result["status"]);
+            Assert.Equal("hero_points", (string)result["kind"]);
+            Assert.Equal("Ranger", (string)result["character"]);
+            Assert.Null(result["hero_challenges"]);
+            Assert.Contains("returned no hero points data", (string)result["message"]);
+        }
+
+        [Fact]
+        public async Task Getting_hero_points_progress_when_region_is_incomplete_reports_incomplete_region_instead_of_count() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.HeroPoints,
+                heroChallenges: new HeroChallengeProgress(mapTotal: 14, mapCompleted: 7, regionMissing: null, regionIncomplete: true),
+                characterName: "Ranger", mapId: 1205, mapName: "Domain of Vabbi", regionName: "Crystal Desert");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("ok", (string)result["status"]);
+            JObject hc = (JObject)result["hero_challenges"];
+            Assert.Equal(14, (int)hc["map_total"]);
+            Assert.Equal(7, (int)hc["map_completed"]);
+            Assert.Equal(JTokenType.Null, hc["region_missing"].Type);
+            Assert.True((bool)hc["region_incomplete"]);
+            Assert.NotNull(hc["region_note"]);
+        }
+
+        [Fact]
+        public async Task Getting_hero_points_progress_when_progression_permission_missing_returns_missing_permission_notice() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.MissingPermission, ProgressKind.HeroPoints,
+                missingPermission: "progression");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("missing_permission", (string)result["reason"]);
+            Assert.Equal("progression", (string)result["permission"]);
+            Assert.Contains("progression", (string)result["notice"]);
+        }
+
         /// <summary>
         /// The tool's JSON. A hand-written Lookup returns its result string as it is, the way the
         /// Chat receives it.

@@ -31,23 +31,28 @@ namespace jubeater.aigoalplanner.World
     public sealed class CachedMapInfo
     {
         public CachedMapInfo(int id, string name, int regionId, string regionName,
-                             int continentId, string continentName, IReadOnlyList<string> skillChallenges) {
-            Id              = id;
-            Name            = name ?? string.Empty;
-            RegionId        = regionId;
-            RegionName      = regionName ?? string.Empty;
-            ContinentId     = continentId;
-            ContinentName   = continentName ?? string.Empty;
-            SkillChallenges = skillChallenges ?? Array.Empty<string>();
+                             int continentId, string continentName, IReadOnlyList<string> skillChallenges,
+                             int defaultFloor = 0, bool challengesLoaded = true) {
+            Id               = id;
+            Name             = name ?? string.Empty;
+            RegionId         = regionId;
+            RegionName       = regionName ?? string.Empty;
+            ContinentId      = continentId;
+            ContinentName    = continentName ?? string.Empty;
+            SkillChallenges  = skillChallenges ?? Array.Empty<string>();
+            DefaultFloor     = defaultFloor;
+            ChallengesLoaded = challengesLoaded;
         }
 
-        public int                   Id              { get; }
-        public string                Name            { get; }
-        public int                   RegionId        { get; }
-        public string                RegionName      { get; }
-        public int                   ContinentId     { get; }
-        public string                ContinentName   { get; }
-        public IReadOnlyList<string> SkillChallenges { get; }
+        public int                   Id               { get; }
+        public string                Name             { get; }
+        public int                   RegionId         { get; }
+        public string                RegionName       { get; }
+        public int                   ContinentId      { get; }
+        public string                ContinentName    { get; }
+        public IReadOnlyList<string> SkillChallenges  { get; }
+        public int                   DefaultFloor     { get; }
+        public bool                  ChallengesLoaded { get; }
     }
 
     public interface IGw2StaticDataCache
@@ -57,6 +62,9 @@ namespace jubeater.aigoalplanner.World
 
         CachedMapInfo GetMap(int mapId);
         void SaveMap(CachedMapInfo map);
+
+        bool HasRegion(int regionId);
+        void SaveRegion(int regionId, IReadOnlyList<int> mapIds);
 
         int GetRegionMissingHeroChallenges(int regionId, ISet<string> completedChallengeIds);
     }
@@ -73,12 +81,15 @@ namespace jubeater.aigoalplanner.World
 
         private List<CachedMasteryTrack> _masteries;
         private readonly Dictionary<int, CachedMapInfo> _maps = new Dictionary<int, CachedMapInfo>();
+        private readonly Dictionary<int, List<int>> _knownRegions = new Dictionary<int, List<int>>();
 
         public Gw2StaticDataCache(string moduleDirectory, Action<string> logWarn = null) {
             _cacheDir = string.IsNullOrWhiteSpace(moduleDirectory)
                             ? null
                             : Path.Combine(moduleDirectory, "cache");
             _logWarn  = logWarn;
+            LoadAllMapsFromDisk();
+            LoadAllRegionsFromDisk();
         }
 
         public IReadOnlyList<CachedMasteryTrack> GetMasteries() {
@@ -110,12 +121,12 @@ namespace jubeater.aigoalplanner.World
 
         public CachedMapInfo GetMap(int mapId) {
             lock (_lock) {
-                if (_maps.TryGetValue(mapId, out CachedMapInfo cached)) return cached;
+                if (_maps.TryGetValue(mapId, out CachedMapInfo cached) && cached.ChallengesLoaded) return cached;
             }
 
             CachedMapInfo fromDisk = LoadMapFromDisk(mapId);
 
-            if (fromDisk != null) {
+            if (fromDisk != null && fromDisk.ChallengesLoaded) {
                 lock (_lock) {
                     _maps[mapId] = fromDisk;
                     return fromDisk;
@@ -128,11 +139,43 @@ namespace jubeater.aigoalplanner.World
         public void SaveMap(CachedMapInfo map) {
             if (map == null) return;
 
+            if (!map.ChallengesLoaded) {
+                // Do not cache incomplete challenges to disk or as completed
+                return;
+            }
+
             lock (_lock) {
                 _maps[map.Id] = map;
             }
 
             SaveMapToDisk(map);
+        }
+
+        public bool HasRegion(int regionId) {
+            if (regionId <= 0) return false;
+
+            lock (_lock) {
+                if (!_knownRegions.TryGetValue(regionId, out List<int> mapIds)) return false;
+                if (mapIds == null || mapIds.Count == 0) return false;
+
+                foreach (int mapId in mapIds) {
+                    if (!_maps.TryGetValue(mapId, out CachedMapInfo map) || !map.ChallengesLoaded) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        public void SaveRegion(int regionId, IReadOnlyList<int> mapIds) {
+            if (regionId <= 0 || mapIds == null) return;
+
+            lock (_lock) {
+                _knownRegions[regionId] = mapIds.ToList();
+            }
+
+            SaveRegionToDisk(regionId, mapIds);
         }
 
         public int GetRegionMissingHeroChallenges(int regionId, ISet<string> completedChallengeIds) {
@@ -150,6 +193,75 @@ namespace jubeater.aigoalplanner.World
 
                 return totalMissing;
             }
+        }
+
+        private void LoadAllMapsFromDisk() {
+            if (string.IsNullOrEmpty(_cacheDir) || !Directory.Exists(_cacheDir)) return;
+
+            try {
+                string[] files = Directory.GetFiles(_cacheDir, "map_*.json");
+                foreach (string file in files) {
+                    try {
+                        string json = System.IO.File.ReadAllText(file);
+                        CachedMapInfo map = ParseMapJson(json);
+                        if (map != null && map.ChallengesLoaded) {
+                            lock (_lock) {
+                                _maps[map.Id] = map;
+                            }
+                        }
+                    } catch (Exception ex) {
+                        _logWarn?.Invoke("Failed to load map cache from " + Path.GetFileName(file) + ": " + ex.GetType().Name);
+                    }
+                }
+            } catch (Exception ex) {
+                _logWarn?.Invoke("Failed to enumerate map cache files: " + ex.GetType().Name);
+            }
+        }
+
+        private void LoadAllRegionsFromDisk() {
+            if (string.IsNullOrEmpty(_cacheDir) || !Directory.Exists(_cacheDir)) return;
+
+            try {
+                string[] files = Directory.GetFiles(_cacheDir, "region_*.json");
+                foreach (string file in files) {
+                    try {
+                        string json = System.IO.File.ReadAllText(file);
+                        JObject obj = JObject.Parse(json);
+                        int regionId = obj.Value<int>("region_id");
+                        JArray mapIdsArray = obj.Value<JArray>("map_ids");
+                        if (regionId > 0 && mapIdsArray != null) {
+                            List<int> mapIds = mapIdsArray.Select(t => (int)t).ToList();
+                            lock (_lock) {
+                                _knownRegions[regionId] = mapIds;
+                            }
+                        }
+                    } catch (Exception ex) {
+                        _logWarn?.Invoke("Failed to load region cache from " + Path.GetFileName(file) + ": " + ex.GetType().Name);
+                    }
+                }
+            } catch (Exception ex) {
+                _logWarn?.Invoke("Failed to enumerate region cache files: " + ex.GetType().Name);
+            }
+        }
+
+        private static CachedMapInfo ParseMapJson(string json) {
+            JObject item = JObject.Parse(json);
+
+            int id = item.Value<int>("id");
+            string name = item.Value<string>("name");
+            int regionId = item.Value<int>("region_id");
+            string regionName = item.Value<string>("region_name");
+            int continentId = item.Value<int>("continent_id");
+            string continentName = item.Value<string>("continent_name");
+            int defaultFloor = item.Value<int>("default_floor");
+            bool challengesLoaded = item["challenges_loaded"] != null
+                                        ? item.Value<bool>("challenges_loaded")
+                                        : true;
+
+            JArray challenges = item.Value<JArray>("skill_challenges");
+            List<string> scList = challenges != null ? challenges.Select(c => (string)c).ToList() : new List<string>();
+
+            return new CachedMapInfo(id, name, regionId, regionName, continentId, continentName, scList, defaultFloor, challengesLoaded);
         }
 
         private IReadOnlyList<CachedMasteryTrack> LoadMasteriesFromDisk() {
@@ -174,7 +286,7 @@ namespace jubeater.aigoalplanner.World
 
                 return list;
             } catch (Exception ex) {
-                _logWarn?.Invoke("Failed to load masteries cache: " + ex.Message);
+                _logWarn?.Invoke("Failed to load masteries cache: " + ex.GetType().Name);
                 return null;
             }
         }
@@ -195,7 +307,7 @@ namespace jubeater.aigoalplanner.World
 
                 System.IO.File.WriteAllText(filePath, array.ToString(Formatting.None));
             } catch (Exception ex) {
-                _logWarn?.Invoke("Failed to save masteries cache: " + ex.Message);
+                _logWarn?.Invoke("Failed to save masteries cache: " + ex.GetType().Name);
             }
         }
 
@@ -208,21 +320,9 @@ namespace jubeater.aigoalplanner.World
 
             try {
                 string json = System.IO.File.ReadAllText(filePath);
-                JObject item = JObject.Parse(json);
-
-                int id = item.Value<int>("id");
-                string name = item.Value<string>("name");
-                int regionId = item.Value<int>("region_id");
-                string regionName = item.Value<string>("region_name");
-                int continentId = item.Value<int>("continent_id");
-                string continentName = item.Value<string>("continent_name");
-
-                JArray challenges = item.Value<JArray>("skill_challenges");
-                List<string> scList = challenges != null ? challenges.Select(c => (string)c).ToList() : new List<string>();
-
-                return new CachedMapInfo(id, name, regionId, regionName, continentId, continentName, scList);
+                return ParseMapJson(json);
             } catch (Exception ex) {
-                _logWarn?.Invoke("Failed to load map cache for map " + mapId + ": " + ex.Message);
+                _logWarn?.Invoke("Failed to load map cache for map " + mapId + ": " + ex.GetType().Name);
                 return null;
             }
         }
@@ -235,18 +335,38 @@ namespace jubeater.aigoalplanner.World
                 string filePath = Path.Combine(_cacheDir, "map_" + map.Id + ".json");
 
                 var obj = new JObject {
-                    ["id"]               = map.Id,
-                    ["name"]             = map.Name,
-                    ["region_id"]        = map.RegionId,
-                    ["region_name"]      = map.RegionName,
-                    ["continent_id"]     = map.ContinentId,
-                    ["continent_name"]   = map.ContinentName,
-                    ["skill_challenges"] = new JArray(map.SkillChallenges)
+                    ["id"]                = map.Id,
+                    ["name"]              = map.Name,
+                    ["region_id"]         = map.RegionId,
+                    ["region_name"]       = map.RegionName,
+                    ["continent_id"]      = map.ContinentId,
+                    ["continent_name"]    = map.ContinentName,
+                    ["default_floor"]     = map.DefaultFloor,
+                    ["challenges_loaded"] = map.ChallengesLoaded,
+                    ["skill_challenges"]  = new JArray(map.SkillChallenges)
                 };
 
                 System.IO.File.WriteAllText(filePath, obj.ToString(Formatting.None));
             } catch (Exception ex) {
-                _logWarn?.Invoke("Failed to save map cache for map " + map.Id + ": " + ex.Message);
+                _logWarn?.Invoke("Failed to save map cache for map " + map.Id + ": " + ex.GetType().Name);
+            }
+        }
+
+        private void SaveRegionToDisk(int regionId, IReadOnlyList<int> mapIds) {
+            if (string.IsNullOrEmpty(_cacheDir) || mapIds == null) return;
+
+            try {
+                Directory.CreateDirectory(_cacheDir);
+                string filePath = Path.Combine(_cacheDir, "region_" + regionId + ".json");
+
+                var obj = new JObject {
+                    ["region_id"] = regionId,
+                    ["map_ids"]   = new JArray(mapIds)
+                };
+
+                System.IO.File.WriteAllText(filePath, obj.ToString(Formatting.None));
+            } catch (Exception ex) {
+                _logWarn?.Invoke("Failed to save region cache for region " + regionId + ": " + ex.GetType().Name);
             }
         }
     }

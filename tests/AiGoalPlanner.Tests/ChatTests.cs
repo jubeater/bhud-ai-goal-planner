@@ -1028,6 +1028,41 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task When_hero_points_lookup_lacks_progression_permission_a_Notice_is_shown_and_planning_continues() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(ProgressStatus.MissingPermission, ProgressKind.HeroPoints, missingPermission: "progression");
+
+            var warnings = new List<string>();
+
+            model.WillCallTool("get_progress", "call_1", new Dictionary<string, object> { ["kind"] = "hero_points" });
+            model.WillReply("Since progression permission is missing, I cannot read hero challenges.");
+
+            var chat = NewChat(model, world, logDebug: null, logWarn: warnings.Add);
+
+            await chat.SendAsync("What hero points do I need?");
+
+            Assert.Collection(chat.Messages,
+                              request => {
+                                  Assert.Equal(ChatMessageAuthor.Player, request.Author);
+                                  Assert.Equal("What hero points do I need?", request.Text);
+                              },
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("progression", notice.Text);
+                                  Assert.Contains("missing or lacks", notice.Text);
+                              },
+                              reply => {
+                                  Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
+                                  Assert.Contains("progression permission is missing", reply.Text);
+                              });
+
+            string warning = Assert.Single(warnings);
+            Assert.Contains("Lookup get_progress", warning);
+            Assert.Contains("progression", warning);
+        }
+
+        [Fact]
         public async Task Owned_Content_is_passed_through_to_the_model_and_influences_its_reply() {
             var model = new ScriptedChatClient();
             var world = new FakeWorld();

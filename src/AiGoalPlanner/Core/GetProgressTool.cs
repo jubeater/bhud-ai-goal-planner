@@ -72,15 +72,23 @@ namespace jubeater.aigoalplanner.Core
                                   ? (kind == ProgressKind.Mastery ? "progression" : "characters")
                                   : result.MissingPermission;
 
-                var refusal = new JObject {
-                    ["status"]      = "unavailable",
-                    ["reason"]      = "missing_permission",
-                    ["permission"]  = perm,
-                    ["notice"]      = "Your Guild Wars 2 API key is missing or lacks the '" + perm + "' permission. Planning continues with available data.",
-                    ["instruction"] = "Guild Wars 2 API key or '" + perm + "' permission is missing. Mention this to the Player and continue planning with what is available."
+                return MissingPermissionRefusal.For(perm);
+            }
+
+            if (result.Status == ProgressStatus.Unknown) {
+                var unknownJson = new JObject {
+                    ["status"]    = "unknown",
+                    ["kind"]      = "hero_points",
+                    ["character"] = result.CharacterName,
+                    ["map"]       = result.MapName,
+                    ["map_id"]    = result.MapId,
+                    ["region"]    = result.RegionName,
+                    ["message"]   = string.IsNullOrEmpty(result.Message)
+                                      ? "The Guild Wars 2 API returned no hero points data for this character."
+                                      : result.Message
                 };
 
-                return new LookupAnswer(refusal.ToString(Formatting.None), "status=missing_permission, permission=" + perm);
+                return new LookupAnswer(unknownJson.ToString(Formatting.None), "status=unknown");
             }
 
             if (result.Status == ProgressStatus.NoCharacterOrMap) {
@@ -133,6 +141,20 @@ namespace jubeater.aigoalplanner.Core
             // Hero points
             HeroChallengeProgress hc = result.HeroChallenges ?? new HeroChallengeProgress(0, 0, 0);
 
+            var hcObj = new JObject {
+                ["map_total"]     = hc.MapTotal,
+                ["map_completed"] = hc.MapCompleted,
+                ["map_missing"]   = hc.MapMissing
+            };
+
+            if (hc.RegionIncomplete) {
+                hcObj["region_missing"]    = null;
+                hcObj["region_incomplete"] = true;
+                hcObj["region_note"]       = "Region hero challenges count is incomplete because some maps could not be loaded.";
+            } else {
+                hcObj["region_missing"] = hc.RegionMissing;
+            }
+
             var heroJson = new JObject {
                 ["status"]          = "ok",
                 ["kind"]            = "hero_points",
@@ -140,12 +162,7 @@ namespace jubeater.aigoalplanner.Core
                 ["map"]             = result.MapName,
                 ["map_id"]          = result.MapId,
                 ["region"]          = result.RegionName,
-                ["hero_challenges"] = new JObject {
-                    ["map_total"]      = hc.MapTotal,
-                    ["map_completed"]  = hc.MapCompleted,
-                    ["map_missing"]    = hc.MapMissing,
-                    ["region_missing"] = hc.RegionMissing
-                }
+                ["hero_challenges"] = hcObj
             };
 
             return new LookupAnswer(heroJson.ToString(Formatting.None), "map=" + result.MapName + ", missing=" + hc.MapMissing);

@@ -396,7 +396,7 @@ namespace jubeater.aigoalplanner.Core
                 } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
                     throw;
                 } catch (Exception exception) {
-                    _logWarn?.Invoke("Lookup " + call.Name + " failed: " + exception.Message);
+                    _logWarn?.Invoke("Lookup " + call.Name + " failed: " + exception.GetType().Name);
                     results.Add(new FunctionResultContent(call.CallId, null) {
                         Exception = exception
                     });

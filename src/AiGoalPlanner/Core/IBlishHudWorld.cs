@@ -271,7 +271,8 @@ namespace jubeater.aigoalplanner.Core
         Ok,
         MissingPermission,
         NoCharacterOrMap,
-        Unavailable
+        Unavailable,
+        Unknown
     }
 
     public sealed class MasteryTrackProgress
@@ -309,16 +310,22 @@ namespace jubeater.aigoalplanner.Core
 
     public sealed class HeroChallengeProgress
     {
-        public HeroChallengeProgress(int mapTotal, int mapCompleted, int regionMissing) {
-            MapTotal      = mapTotal;
-            MapCompleted  = mapCompleted;
-            RegionMissing = regionMissing;
+        public HeroChallengeProgress(int mapTotal, int mapCompleted, int? regionMissing, bool regionIncomplete = false) {
+            MapTotal         = mapTotal;
+            MapCompleted     = mapCompleted;
+            RegionMissing    = regionMissing;
+            RegionIncomplete = regionIncomplete;
         }
 
-        public int MapTotal      { get; }
-        public int MapCompleted  { get; }
-        public int MapMissing    => Math.Max(0, MapTotal - MapCompleted);
-        public int RegionMissing { get; }
+        public HeroChallengeProgress(int mapTotal, int mapCompleted, int regionMissing)
+            : this(mapTotal, mapCompleted, (int?)regionMissing, false) {
+        }
+
+        public int   MapTotal         { get; }
+        public int   MapCompleted     { get; }
+        public int   MapMissing       => Math.Max(0, MapTotal - MapCompleted);
+        public int?  RegionMissing    { get; }
+        public bool  RegionIncomplete { get; }
     }
 
     public sealed class ProgressResult
