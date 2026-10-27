@@ -32,7 +32,7 @@ namespace jubeater.aigoalplanner.World
     {
         public CachedMapInfo(int id, string name, int regionId, string regionName,
                              int continentId, string continentName, IReadOnlyList<string> skillChallenges,
-                             int defaultFloor = 0, bool challengesLoaded = true) {
+                             int defaultFloor = 0, bool challengesLoaded = true, string type = null) {
             Id               = id;
             Name             = name ?? string.Empty;
             RegionId         = regionId;
@@ -42,6 +42,7 @@ namespace jubeater.aigoalplanner.World
             SkillChallenges  = skillChallenges ?? Array.Empty<string>();
             DefaultFloor     = defaultFloor;
             ChallengesLoaded = challengesLoaded;
+            Type             = type ?? string.Empty;
         }
 
         public int                   Id               { get; }
@@ -53,6 +54,7 @@ namespace jubeater.aigoalplanner.World
         public IReadOnlyList<string> SkillChallenges  { get; }
         public int                   DefaultFloor     { get; }
         public bool                  ChallengesLoaded { get; }
+        public string                Type             { get; }
     }
 
     public interface IGw2StaticDataCache
@@ -190,7 +192,7 @@ namespace jubeater.aigoalplanner.World
             if (all == null || all.Count == 0) return Array.Empty<CachedMapInfo>();
 
             lock (_lock) {
-                return all.Where(m => m.RegionId == regionId).ToList();
+                return all.Where(m => m.RegionId == regionId && string.Equals(m.Type, "Public", StringComparison.OrdinalIgnoreCase)).ToList();
             }
         }
 
@@ -227,8 +229,18 @@ namespace jubeater.aigoalplanner.World
             lock (_lock) {
                 int totalMissing = 0;
 
+                if (_knownRegions.TryGetValue(regionId, out List<int> mapIds) && mapIds != null && mapIds.Count > 0) {
+                    foreach (int mapId in mapIds) {
+                        if (_maps.TryGetValue(mapId, out CachedMapInfo map)) {
+                            int completed = map.SkillChallenges.Count(id => completedChallengeIds.Contains(id));
+                            totalMissing += Math.Max(0, map.SkillChallenges.Count - completed);
+                        }
+                    }
+                    return totalMissing;
+                }
+
                 foreach (CachedMapInfo map in _maps.Values) {
-                    if (map.RegionId == regionId) {
+                    if (map.RegionId == regionId && (string.IsNullOrEmpty(map.Type) || string.Equals(map.Type, "Public", StringComparison.OrdinalIgnoreCase))) {
                         int completed = map.SkillChallenges.Count(id => completedChallengeIds.Contains(id));
                         totalMissing += Math.Max(0, map.SkillChallenges.Count - completed);
                     }
@@ -306,9 +318,10 @@ namespace jubeater.aigoalplanner.World
                     int continentId = item.Value<int>("continent_id");
                     string continentName = item.Value<string>("continent_name");
                     int defaultFloor = item.Value<int>("default_floor");
+                    string type = item.Value<string>("type") ?? string.Empty;
 
                     list.Add(new CachedMapInfo(id, name, regionId, regionName, continentId, continentName,
-                                               Array.Empty<string>(), defaultFloor, challengesLoaded: false));
+                                               Array.Empty<string>(), defaultFloor, challengesLoaded: false, type: type));
                 }
 
                 lock (_lock) {
@@ -336,7 +349,8 @@ namespace jubeater.aigoalplanner.World
                     ["region_name"]    = m.RegionName,
                     ["continent_id"]   = m.ContinentId,
                     ["continent_name"] = m.ContinentName,
-                    ["default_floor"]  = m.DefaultFloor
+                    ["default_floor"]  = m.DefaultFloor,
+                    ["type"]           = m.Type
                 }));
 
                 System.IO.File.WriteAllText(filePath, array.ToString(Formatting.None));
@@ -358,11 +372,12 @@ namespace jubeater.aigoalplanner.World
             bool challengesLoaded = item["challenges_loaded"] != null
                                         ? item.Value<bool>("challenges_loaded")
                                         : true;
+            string type = item.Value<string>("type") ?? string.Empty;
 
             JArray challenges = item.Value<JArray>("skill_challenges");
             List<string> scList = challenges != null ? challenges.Select(c => (string)c).ToList() : new List<string>();
 
-            return new CachedMapInfo(id, name, regionId, regionName, continentId, continentName, scList, defaultFloor, challengesLoaded);
+            return new CachedMapInfo(id, name, regionId, regionName, continentId, continentName, scList, defaultFloor, challengesLoaded, type);
         }
 
         private IReadOnlyList<CachedMasteryTrack> LoadMasteriesFromDisk() {
@@ -444,6 +459,7 @@ namespace jubeater.aigoalplanner.World
                     ["continent_name"]    = map.ContinentName,
                     ["default_floor"]     = map.DefaultFloor,
                     ["challenges_loaded"] = map.ChallengesLoaded,
+                    ["type"]              = map.Type,
                     ["skill_challenges"]  = new JArray(map.SkillChallenges)
                 };
 

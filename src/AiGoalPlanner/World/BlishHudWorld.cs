@@ -375,7 +375,8 @@ namespace jubeater.aigoalplanner.World
                 IApiV2ObjectList<Gw2Sharp.WebApi.V2.Models.Map> all = await _gw2ApiManager.Gw2ApiClient.V2.Maps.AllAsync(cancellationToken).ConfigureAwait(false);
                 var list = new List<CachedMapInfo>();
                 foreach (Gw2Sharp.WebApi.V2.Models.Map m in all) {
-                    list.Add(new CachedMapInfo(m.Id, m.Name, m.RegionId, m.RegionName, m.ContinentId, m.ContinentName, Array.Empty<string>(), m.DefaultFloor, challengesLoaded: false));
+                    string mapType = m.Type?.RawValue ?? m.Type?.Value.ToString() ?? string.Empty;
+                    list.Add(new CachedMapInfo(m.Id, m.Name, m.RegionId, m.RegionName, m.ContinentId, m.ContinentName, Array.Empty<string>(), m.DefaultFloor, challengesLoaded: false, type: mapType));
                 }
                 _cache?.SaveAllMaps(list);
                 return list;
@@ -395,6 +396,7 @@ namespace jubeater.aigoalplanner.World
                 Gw2Sharp.WebApi.V2.Models.Map map = await _gw2ApiManager.Gw2ApiClient.V2.Maps.GetAsync(mapId, cancellationToken).ConfigureAwait(false);
                 if (map == null) return null;
 
+                string mapType = map.Type?.RawValue ?? map.Type?.Value.ToString() ?? string.Empty;
                 bool challengesLoaded = false;
                 IReadOnlyList<string> skillChallenges = Array.Empty<string>();
                 try {
@@ -410,10 +412,15 @@ namespace jubeater.aigoalplanner.World
                     }
                     challengesLoaded = true;
                 } catch (Exception ex) {
-                    _logWarn?.Invoke("Could not fetch floor map for map " + map.Id + " from GW2 API: " + ex.GetType().Name);
+                    if (IsNotFound(ex)) {
+                        skillChallenges = Array.Empty<string>();
+                        challengesLoaded = true;
+                    } else {
+                        _logWarn?.Invoke("Could not fetch floor map for map " + map.Id + " from GW2 API: " + ex.GetType().Name);
+                    }
                 }
 
-                var info = new CachedMapInfo(map.Id, map.Name, map.RegionId, map.RegionName, map.ContinentId, map.ContinentName, skillChallenges, map.DefaultFloor, challengesLoaded);
+                var info = new CachedMapInfo(map.Id, map.Name, map.RegionId, map.RegionName, map.ContinentId, map.ContinentName, skillChallenges, map.DefaultFloor, challengesLoaded, type: mapType);
                 if (challengesLoaded) {
                     _cache?.SaveMap(info);
                 }
@@ -428,8 +435,8 @@ namespace jubeater.aigoalplanner.World
             if (_gw2ApiManager?.Gw2ApiClient == null || continentId <= 0 || regionId <= 0) return false;
 
             try {
-                IReadOnlyList<CachedMapInfo> allMaps = await GetAllMapsAsync(cancellationToken).ConfigureAwait(false);
-                List<CachedMapInfo> regionMaps = allMaps.Where(m => m.RegionId == regionId).ToList();
+                await GetAllMapsAsync(cancellationToken).ConfigureAwait(false);
+                IReadOnlyList<CachedMapInfo> regionMaps = _cache?.GetMapsInRegion(regionId) ?? Array.Empty<CachedMapInfo>();
                 if (regionMaps.Count == 0) return false;
 
                 var floorsToFetch = regionMaps
@@ -456,13 +463,22 @@ namespace jubeater.aigoalplanner.World
                                     if (rMap.SkillChallenges != null) {
                                         sc = rMap.SkillChallenges.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
                                     }
-                                    var cachedMap = new CachedMapInfo(rMap.Id, rMap.Name, regionId, region.Name ?? m.RegionName, continentId, m.ContinentName, sc, floor, challengesLoaded: true);
+                                    var cachedMap = new CachedMapInfo(rMap.Id, rMap.Name, regionId, region.Name ?? m.RegionName, continentId, m.ContinentName, sc, floor, challengesLoaded: true, type: m.Type);
                                     _cache?.SaveMap(cachedMap);
                                 }
                             }
                         }
                     } catch (Exception ex) {
-                        _logWarn?.Invoke("Could not fetch floor " + floor + " region " + regionId + " from GW2 API: " + ex.GetType().Name);
+                        if (IsNotFound(ex)) {
+                            // A 404 from a map's floor-region endpoint means that map has no hero challenges.
+                            // Cache it as loaded with 0 challenges; it's not a failure.
+                            foreach (CachedMapInfo m in regionMaps.Where(rm => rm.DefaultFloor == floor)) {
+                                var cachedMap = new CachedMapInfo(m.Id, m.Name, regionId, m.RegionName, continentId, m.ContinentName, Array.Empty<string>(), floor, challengesLoaded: true, type: m.Type);
+                                _cache?.SaveMap(cachedMap);
+                            }
+                        } else {
+                            _logWarn?.Invoke("Could not fetch floor " + floor + " region " + regionId + " from GW2 API: " + ex.GetType().Name);
+                        }
                     }
                 }
 
@@ -486,6 +502,8 @@ namespace jubeater.aigoalplanner.World
                 return false;
             }
         }
+
+        internal static bool IsNotFound(Exception ex) => Gw2ApiExceptionHelper.IsNotFound(ex);
 
         /// <summary>
         /// A running module's settings. Null when the instance is not running, or is still loading

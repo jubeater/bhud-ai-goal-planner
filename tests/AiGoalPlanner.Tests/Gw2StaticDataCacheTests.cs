@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using jubeater.aigoalplanner.World;
 using Xunit;
 
@@ -207,8 +208,8 @@ namespace jubeater.aigoalplanner.Tests
             Directory.CreateDirectory(cacheDir);
 
             // Two maps in region 37 on different floors: Map 10 on floor 80 (small floor), Map 11 on floor 1
-            string mapsJson = "[{\"id\":10,\"name\":\"Small Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":80},"
-                            + "{\"id\":11,\"name\":\"Main Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1}]";
+            string mapsJson = "[{\"id\":10,\"name\":\"Small Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":80,\"type\":\"Public\"},"
+                            + "{\"id\":11,\"name\":\"Main Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"}]";
             File.WriteAllText(Path.Combine(cacheDir, "maps.json"), mapsJson);
 
             // Map 10 has 5 skill challenges, Map 11 has 10 skill challenges
@@ -233,6 +234,61 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void A_region_with_a_Public_map_and_an_Instance_map_whose_floor_returns_404_is_complete_and_missing_covers_only_Public_map() {
+            string cacheDir = Path.Combine(_tempDir, "cache");
+            Directory.CreateDirectory(cacheDir);
+
+            // Public map 10 on floor 1, Instance map 1446 on floor -53
+            string mapsJson = "[{\"id\":10,\"name\":\"Public Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"},"
+                            + "{\"id\":1446,\"name\":\"Aetherblade Armada\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":-53,\"type\":\"Instance\"}]";
+            File.WriteAllText(Path.Combine(cacheDir, "maps.json"), mapsJson);
+
+            // Public Map 10 has 5 challenges
+            string map10 = "{\"id\":10,\"name\":\"Public Map\",\"region_id\":37,\"region_name\":\"Region 37\","
+                         + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"challenges_loaded\":true,\"type\":\"Public\",\"skill_challenges\":[\"sc-1\",\"sc-2\",\"sc-3\",\"sc-4\",\"sc-5\"]}";
+            // Instance Map 1446 floor returns 404 -> cached as loaded with 0 challenges
+            string map1446 = "{\"id\":1446,\"name\":\"Aetherblade Armada\",\"region_id\":37,\"region_name\":\"Region 37\","
+                           + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":-53,\"challenges_loaded\":true,\"type\":\"Instance\",\"skill_challenges\":[]}";
+            File.WriteAllText(Path.Combine(cacheDir, "map_10.json"), map10);
+            File.WriteAllText(Path.Combine(cacheDir, "map_1446.json"), map1446);
+
+            var cache = new Gw2StaticDataCache(_tempDir);
+
+            // 1. GetMapsInRegion returns only the Public map, skipping the Instance map
+            IReadOnlyList<CachedMapInfo> regionMaps = cache.GetMapsInRegion(37);
+            Assert.Single(regionMaps);
+            Assert.Equal(10, regionMaps[0].Id);
+
+            // 2. Region is saved with Public maps, and HasRegion is true (complete)
+            cache.SaveRegion(37, regionMaps.Select(m => m.Id).ToList());
+            Assert.True(cache.HasRegion(37));
+
+            // 3. Completed 2 on Public map -> missing count covers only Public map (3 missing)
+            var completed = new HashSet<string> { "sc-1", "sc-2" };
+            int missing = cache.GetRegionMissingHeroChallenges(37, completed);
+            Assert.Equal(3, missing);
+        }
+
+        [Fact]
+        public void A_Public_map_whose_floor_fetch_times_out_leaves_region_incomplete() {
+            string cacheDir = Path.Combine(_tempDir, "cache");
+            Directory.CreateDirectory(cacheDir);
+
+            string mapsJson = "[{\"id\":10,\"name\":\"Public Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"}]";
+            File.WriteAllText(Path.Combine(cacheDir, "maps.json"), mapsJson);
+
+            // Map 10 floor fetch timed out -> not cached or challenges_loaded is false
+            var cache = new Gw2StaticDataCache(_tempDir);
+
+            IReadOnlyList<CachedMapInfo> regionMaps = cache.GetMapsInRegion(37);
+            Assert.Single(regionMaps);
+
+            // Even if an attempt is made to mark the region with map 10, HasRegion must be false because challenges are not loaded
+            cache.SaveRegion(37, regionMaps.Select(m => m.Id).ToList());
+            Assert.False(cache.HasRegion(37));
+        }
+
+        [Fact]
         public void All_maps_summary_can_be_saved_and_loaded_from_disk() {
             var cache = new Gw2StaticDataCache(_tempDir);
             var maps = new[] {
@@ -248,6 +304,14 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal(80, loaded[0].DefaultFloor);
             Assert.Equal(11, loaded[1].Id);
             Assert.Equal(1, loaded[1].DefaultFloor);
+        }
+
+        [Fact]
+        public void IsNotFound_identifies_404_responses_and_not_timeouts_or_server_errors() {
+            Assert.True(Gw2ApiExceptionHelper.IsNotFound(new Exception("Response status code does not indicate success: 404 (Not Found).")));
+            Assert.False(Gw2ApiExceptionHelper.IsNotFound(new TimeoutException("The operation has timed out.")));
+            Assert.False(Gw2ApiExceptionHelper.IsNotFound(new System.Threading.Tasks.TaskCanceledException()));
+            Assert.False(Gw2ApiExceptionHelper.IsNotFound(new Exception("500 Internal Server Error")));
         }
 
         [Fact]
