@@ -11,7 +11,7 @@ You're done when the report names the commit it reviewed, every finding is repro
    - **P2:** a spec criterion not met, or a repo standard broken.
    - **P3:** a judgement call (a code smell, docs drift).
    - When an earlier finding turns out to be wrong, say so and withdraw it.
-4. **Write the report:**
+4. **Write the report and post it as a comment on the PR** (`gh pr comment <n> --body-file <file>`), so the implementing agent and the orchestrator can link to it:
    - first line: the PR and the exact commit reviewed
    - then `## Standards` and `## Spec`, each finding with a file and line link and a concrete failing input
    - then the test count, the Stj5Check result, and whether anything was changed in the repo (nothing should be)
