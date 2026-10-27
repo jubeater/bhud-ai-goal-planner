@@ -95,14 +95,13 @@ way to ship a module dependency: Blish HUD loads an assembly packaged with the m
 references it. Blish HUD's own assemblies (`Gw2Sharp`, `MonoGame`, `SharpDX`, `Newtonsoft.Json`,
 ...) are deleted before the zip, so the `.bhm` carries nothing Blish HUD already has.
 
-The known risk is that a process holds one version per assembly name
-([blish-hud/Blish-HUD#740](https://github.com/blish-hud/Blish-HUD/issues/740)): the
-`System.Text.Json` that `Microsoft.Extensions.AI.Abstractions` depends on can collide with the copy
-Blish HUD loads for Gw2Sharp, or with one that another module ships. Plain Chat replies never reach
-`System.Text.Json`; a Request that offers tools does, through the tool schemas, so the in-game check
-has to exercise a tool call. If a collision turns up in game, the next
-step is to leave `System.Text.Json.dll` and the rest of that tree out of the module output and let
-Blish HUD's copy serve the abstractions.
+A process holds one version per assembly name
+([blish-hud/Blish-HUD#740](https://github.com/blish-hud/Blish-HUD/issues/740)), and Blish HUD
+embeds `System.Text.Json` 5.0 in `Blish HUD.exe` and loads it first. So the module always runs on
+5.0, even though it ships 10.0, and any `Microsoft.Extensions.AI` path that needs a newer
+`System.Text.Json` fails at runtime. [ADR-0008](docs/adr/0008-stay-on-blish-huds-system-text-json-5.md)
+lists what that rules out (for example `AIFunctionFactory.Create`), and a CI test runs the Chat
+against Blish HUD's own assemblies to catch it.
 
 **In game:** enable the module in Blish HUD 1.3.0, open the Chat and send a Request. A library that
 fails to load shows up in `Documents\Guild Wars 2\addons\blishhud\logs` rather than as a build error;
