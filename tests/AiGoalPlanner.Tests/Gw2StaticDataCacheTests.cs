@@ -202,6 +202,55 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void A_region_whose_maps_are_on_two_floors_still_counts_both_floors_challenges() {
+            string cacheDir = Path.Combine(_tempDir, "cache");
+            Directory.CreateDirectory(cacheDir);
+
+            // Two maps in region 37 on different floors: Map 10 on floor 80 (small floor), Map 11 on floor 1
+            string mapsJson = "[{\"id\":10,\"name\":\"Small Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":80},"
+                            + "{\"id\":11,\"name\":\"Main Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1}]";
+            File.WriteAllText(Path.Combine(cacheDir, "maps.json"), mapsJson);
+
+            // Map 10 has 5 skill challenges, Map 11 has 10 skill challenges
+            string map10 = "{\"id\":10,\"name\":\"Small Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\","
+                         + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":80,\"skill_challenges\":[\"sc-1\",\"sc-2\",\"sc-3\",\"sc-4\",\"sc-5\"]}";
+            string map11 = "{\"id\":11,\"name\":\"Main Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\","
+                         + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"skill_challenges\":[\"sc-6\",\"sc-7\",\"sc-8\",\"sc-9\",\"sc-10\",\"sc-11\",\"sc-12\",\"sc-13\",\"sc-14\",\"sc-15\"]}";
+            File.WriteAllText(Path.Combine(cacheDir, "map_10.json"), map10);
+            File.WriteAllText(Path.Combine(cacheDir, "map_11.json"), map11);
+
+            var cache = new Gw2StaticDataCache(_tempDir);
+
+            // Verify both maps are returned for the region across both floors
+            IReadOnlyList<CachedMapInfo> regionMaps = cache.GetMapsInRegion(37);
+            Assert.Equal(2, regionMaps.Count);
+
+            // Completed 2 on small floor, 3 on main floor (5 completed out of 15 total -> 10 missing)
+            var completed = new HashSet<string> { "sc-1", "sc-2", "sc-6", "sc-7", "sc-8" };
+            int missing = cache.GetRegionMissingHeroChallenges(37, completed);
+
+            Assert.Equal(10, missing);
+        }
+
+        [Fact]
+        public void All_maps_summary_can_be_saved_and_loaded_from_disk() {
+            var cache = new Gw2StaticDataCache(_tempDir);
+            var maps = new[] {
+                new CachedMapInfo(10, "Map 10", 37, "Region 37", 1, "Tyria", Array.Empty<string>(), defaultFloor: 80, challengesLoaded: false),
+                new CachedMapInfo(11, "Map 11", 37, "Region 37", 1, "Tyria", Array.Empty<string>(), defaultFloor: 1, challengesLoaded: false)
+            };
+            cache.SaveAllMaps(maps);
+
+            var freshCache = new Gw2StaticDataCache(_tempDir);
+            var loaded = freshCache.GetAllMaps();
+            Assert.Equal(2, loaded.Count);
+            Assert.Equal(10, loaded[0].Id);
+            Assert.Equal(80, loaded[0].DefaultFloor);
+            Assert.Equal(11, loaded[1].Id);
+            Assert.Equal(1, loaded[1].DefaultFloor);
+        }
+
+        [Fact]
         public void Null_directory_is_handled_gracefully_without_throwing() {
             var cache = new Gw2StaticDataCache(null);
 

@@ -193,25 +193,33 @@ namespace jubeater.aigoalplanner.World
                     var accountMasteries = await accountMasteriesTask.ConfigureAwait(false);
                     var masteries = await masteriesTask.ConfigureAwait(false);
 
+                    bool tracksAvailable = masteries != null;
+
                     var accountMasteryMap = (accountMasteries ?? Enumerable.Empty<AccountMastery>())
                         .ToDictionary(m => m.Id, m => m.Level);
 
-                    var masteriesByRegion = (masteries ?? Enumerable.Empty<CachedMasteryTrack>())
-                        .GroupBy(m => m.Region, StringComparer.OrdinalIgnoreCase)
-                        .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+                    Dictionary<string, List<CachedMasteryTrack>> masteriesByRegion = null;
+                    if (tracksAvailable) {
+                        masteriesByRegion = masteries
+                            .GroupBy(m => m.Region, StringComparer.OrdinalIgnoreCase)
+                            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+                    }
 
                     var regions = new List<MasteryRegionProgress>();
 
                     if (points?.Totals != null) {
                         foreach (AccountMasteryPointsRegion regionTotal in points.Totals) {
                             string regionName = regionTotal.Region;
-                            var unfinished = new List<MasteryTrackProgress>();
+                            List<MasteryTrackProgress> unfinished = null;
 
-                            if (masteriesByRegion.TryGetValue(regionName, out List<CachedMasteryTrack> tracks)) {
-                                unfinished.AddRange(MasteryProgressCalculator.CalculateUnfinishedTracks(tracks, accountMasteryMap));
+                            if (tracksAvailable) {
+                                unfinished = new List<MasteryTrackProgress>();
+                                if (masteriesByRegion.TryGetValue(regionName, out List<CachedMasteryTrack> tracks)) {
+                                    unfinished.AddRange(MasteryProgressCalculator.CalculateUnfinishedTracks(tracks, accountMasteryMap));
+                                }
                             }
 
-                            regions.Add(new MasteryRegionProgress(regionName, regionTotal.Spent, regionTotal.Earned, unfinished));
+                            regions.Add(new MasteryRegionProgress(regionName, regionTotal.Spent, regionTotal.Earned, unfinished, tracksAvailable));
                         }
                     }
 
@@ -271,26 +279,58 @@ namespace jubeater.aigoalplanner.World
 
                     var completedSet = new HashSet<string>(completedPoints, StringComparer.OrdinalIgnoreCase);
 
-                    int mapTotal = mapInfo?.SkillChallenges?.Count ?? 0;
-                    int mapCompleted = mapInfo?.SkillChallenges?.Count(id => completedSet.Contains(id)) ?? 0;
+                    int continentId = mapInfo?.ContinentId ?? 0;
+                    int regionId = mapInfo?.RegionId ?? 0;
+
+                    if (regionId <= 0 && _cache != null) {
+                        var allMaps = await GetAllMapsAsync(cancellationToken).ConfigureAwait(false);
+                        var summary = allMaps?.FirstOrDefault(m => m.Id == mapId);
+                        if (summary != null) {
+                            continentId = summary.ContinentId;
+                            regionId = summary.RegionId;
+                            if (string.IsNullOrEmpty(regionName)) regionName = summary.RegionName;
+                            if (string.IsNullOrEmpty(mapName) || mapName == "Map " + mapId) mapName = summary.Name;
+                        }
+                    }
 
                     bool regionIncomplete = false;
                     int regionMissing = 0;
 
-                    if (_cache != null && mapInfo != null && mapInfo.RegionId > 0) {
-                        if (!_cache.HasRegion(mapInfo.RegionId)) {
-                            bool regionLoaded = await EnsureRegionMapsAsync(mapInfo.ContinentId, mapInfo.DefaultFloor, mapInfo.RegionId, cancellationToken).ConfigureAwait(false);
+                    if (_cache != null && regionId > 0 && continentId > 0) {
+                        if (!_cache.HasRegion(regionId)) {
+                            bool regionLoaded = await EnsureRegionMapsAsync(continentId, regionId, cancellationToken).ConfigureAwait(false);
                             if (!regionLoaded) {
                                 regionIncomplete = true;
                             }
                         }
 
                         if (!regionIncomplete) {
-                            regionMissing = _cache.GetRegionMissingHeroChallenges(mapInfo.RegionId, completedSet);
+                            regionMissing = _cache.GetRegionMissingHeroChallenges(regionId, completedSet);
                         }
                     } else {
                         regionIncomplete = true;
                     }
+
+                    CachedMapInfo reloaded = _cache?.GetMap(mapId);
+                    if (reloaded != null && reloaded.ChallengesLoaded) {
+                        mapInfo = reloaded;
+                        if (string.IsNullOrEmpty(mapName) || mapName == "Map " + mapId) mapName = mapInfo.Name;
+                        if (string.IsNullOrEmpty(regionName)) regionName = mapInfo.RegionName;
+                    }
+
+                    if (mapInfo == null || !mapInfo.ChallengesLoaded) {
+                        return new ProgressResult(
+                            ProgressStatus.Unknown,
+                            kind,
+                            characterName: characterName,
+                            mapId: mapId,
+                            mapName: mapName,
+                            regionName: regionName,
+                            message: "Hero challenge data for this map could not be loaded.");
+                    }
+
+                    int mapTotal = mapInfo.SkillChallenges.Count;
+                    int mapCompleted = mapInfo.SkillChallenges.Count(id => completedSet.Contains(id));
 
                     var heroChallenges = new HeroChallengeProgress(mapTotal, mapCompleted, regionIncomplete ? (int?)null : regionMissing, regionIncomplete);
 
@@ -309,7 +349,7 @@ namespace jubeater.aigoalplanner.World
             IReadOnlyList<CachedMasteryTrack> cached = _cache?.GetMasteries();
             if (cached != null && cached.Count > 0) return cached;
 
-            if (_gw2ApiManager?.Gw2ApiClient == null) return Array.Empty<CachedMasteryTrack>();
+            if (_gw2ApiManager?.Gw2ApiClient == null) return null;
 
             try {
                 IApiV2ObjectList<Mastery> all = await _gw2ApiManager.Gw2ApiClient.V2.Masteries.AllAsync(cancellationToken).ConfigureAwait(false);
@@ -321,7 +361,27 @@ namespace jubeater.aigoalplanner.World
                 return list;
             } catch (Exception ex) {
                 _logWarn?.Invoke("Could not fetch masteries from GW2 API: " + ex.GetType().Name);
-                return Array.Empty<CachedMasteryTrack>();
+                return null;
+            }
+        }
+
+        private async Task<IReadOnlyList<CachedMapInfo>> GetAllMapsAsync(CancellationToken cancellationToken) {
+            IReadOnlyList<CachedMapInfo> cached = _cache?.GetAllMaps();
+            if (cached != null && cached.Count > 0) return cached;
+
+            if (_gw2ApiManager?.Gw2ApiClient == null) return Array.Empty<CachedMapInfo>();
+
+            try {
+                IApiV2ObjectList<Gw2Sharp.WebApi.V2.Models.Map> all = await _gw2ApiManager.Gw2ApiClient.V2.Maps.AllAsync(cancellationToken).ConfigureAwait(false);
+                var list = new List<CachedMapInfo>();
+                foreach (Gw2Sharp.WebApi.V2.Models.Map m in all) {
+                    list.Add(new CachedMapInfo(m.Id, m.Name, m.RegionId, m.RegionName, m.ContinentId, m.ContinentName, Array.Empty<string>(), m.DefaultFloor, challengesLoaded: false));
+                }
+                _cache?.SaveAllMaps(list);
+                return list;
+            } catch (Exception ex) {
+                _logWarn?.Invoke("Could not fetch maps summary from GW2 API: " + ex.GetType().Name);
+                return Array.Empty<CachedMapInfo>();
             }
         }
 
@@ -364,34 +424,65 @@ namespace jubeater.aigoalplanner.World
             }
         }
 
-        private async Task<bool> EnsureRegionMapsAsync(int continentId, int defaultFloor, int regionId, CancellationToken cancellationToken) {
+        private async Task<bool> EnsureRegionMapsAsync(int continentId, int regionId, CancellationToken cancellationToken) {
             if (_gw2ApiManager?.Gw2ApiClient == null || continentId <= 0 || regionId <= 0) return false;
 
             try {
-                ContinentFloorRegion region = await _gw2ApiManager.Gw2ApiClient.V2.Continents[continentId]
-                    .Floors[defaultFloor]
-                    .Regions[regionId]
-                    .GetAsync(cancellationToken)
-                    .ConfigureAwait(false);
+                IReadOnlyList<CachedMapInfo> allMaps = await GetAllMapsAsync(cancellationToken).ConfigureAwait(false);
+                List<CachedMapInfo> regionMaps = allMaps.Where(m => m.RegionId == regionId).ToList();
+                if (regionMaps.Count == 0) return false;
 
-                if (region?.Maps == null || region.Maps.Count == 0) return false;
+                var floorsToFetch = regionMaps
+                    .Where(m => {
+                        CachedMapInfo c = _cache?.GetMap(m.Id);
+                        return c == null || !c.ChallengesLoaded;
+                    })
+                    .Select(m => m.DefaultFloor)
+                    .Distinct()
+                    .ToList();
 
-                var mapIds = new List<int>();
-                foreach (ContinentFloorRegionMap rMap in region.Maps.Values) {
-                    mapIds.Add(rMap.Id);
-                    IReadOnlyList<string> sc = Array.Empty<string>();
-                    if (rMap.SkillChallenges != null) {
-                        sc = rMap.SkillChallenges.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
+                foreach (int floor in floorsToFetch) {
+                    try {
+                        ContinentFloorRegion region = await _gw2ApiManager.Gw2ApiClient.V2.Continents[continentId]
+                            .Floors[floor]
+                            .Regions[regionId]
+                            .GetAsync(cancellationToken)
+                            .ConfigureAwait(false);
+
+                        if (region?.Maps != null) {
+                            foreach (CachedMapInfo m in regionMaps.Where(rm => rm.DefaultFloor == floor)) {
+                                if (region.Maps.TryGetValue(m.Id, out ContinentFloorRegionMap rMap)) {
+                                    IReadOnlyList<string> sc = Array.Empty<string>();
+                                    if (rMap.SkillChallenges != null) {
+                                        sc = rMap.SkillChallenges.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
+                                    }
+                                    var cachedMap = new CachedMapInfo(rMap.Id, rMap.Name, regionId, region.Name ?? m.RegionName, continentId, m.ContinentName, sc, floor, challengesLoaded: true);
+                                    _cache?.SaveMap(cachedMap);
+                                }
+                            }
+                        }
+                    } catch (Exception ex) {
+                        _logWarn?.Invoke("Could not fetch floor " + floor + " region " + regionId + " from GW2 API: " + ex.GetType().Name);
                     }
-
-                    var cachedMap = new CachedMapInfo(rMap.Id, rMap.Name, regionId, region.Name, continentId, string.Empty, sc, defaultFloor, challengesLoaded: true);
-                    _cache?.SaveMap(cachedMap);
                 }
 
-                _cache?.SaveRegion(regionId, mapIds);
-                return true;
+                bool allLoaded = true;
+                foreach (CachedMapInfo m in regionMaps) {
+                    CachedMapInfo loaded = _cache?.GetMap(m.Id);
+                    if (loaded == null || !loaded.ChallengesLoaded) {
+                        allLoaded = false;
+                        break;
+                    }
+                }
+
+                if (allLoaded) {
+                    _cache?.SaveRegion(regionId, regionMaps.Select(m => m.Id).ToList());
+                    return true;
+                }
+
+                return false;
             } catch (Exception ex) {
-                _logWarn?.Invoke("Could not fetch region maps for region " + regionId + " from GW2 API: " + ex.GetType().Name);
+                _logWarn?.Invoke("Could not ensure region maps for region " + regionId + " from GW2 API: " + ex.GetType().Name);
                 return false;
             }
         }

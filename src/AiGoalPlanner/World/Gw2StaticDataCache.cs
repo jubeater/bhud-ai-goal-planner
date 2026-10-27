@@ -63,6 +63,10 @@ namespace jubeater.aigoalplanner.World
         CachedMapInfo GetMap(int mapId);
         void SaveMap(CachedMapInfo map);
 
+        IReadOnlyList<CachedMapInfo> GetAllMaps();
+        void SaveAllMaps(IReadOnlyList<CachedMapInfo> maps);
+        IReadOnlyList<CachedMapInfo> GetMapsInRegion(int regionId);
+
         bool HasRegion(int regionId);
         void SaveRegion(int regionId, IReadOnlyList<int> mapIds);
 
@@ -80,6 +84,7 @@ namespace jubeater.aigoalplanner.World
         private readonly object         _lock = new object();
 
         private List<CachedMasteryTrack> _masteries;
+        private List<CachedMapInfo>      _allMaps;
         private readonly Dictionary<int, CachedMapInfo> _maps = new Dictionary<int, CachedMapInfo>();
         private readonly Dictionary<int, List<int>> _knownRegions = new Dictionary<int, List<int>>();
 
@@ -90,6 +95,7 @@ namespace jubeater.aigoalplanner.World
             _logWarn  = logWarn;
             LoadAllMapsFromDisk();
             LoadAllRegionsFromDisk();
+            LoadMapsSummaryFromDisk();
         }
 
         public IReadOnlyList<CachedMasteryTrack> GetMasteries() {
@@ -149,6 +155,43 @@ namespace jubeater.aigoalplanner.World
             }
 
             SaveMapToDisk(map);
+        }
+
+        public IReadOnlyList<CachedMapInfo> GetAllMaps() {
+            lock (_lock) {
+                if (_allMaps != null) return _allMaps;
+            }
+
+            IReadOnlyList<CachedMapInfo> loaded = LoadMapsSummaryFromDisk();
+            if (loaded != null && loaded.Count > 0) {
+                lock (_lock) {
+                    _allMaps = loaded.ToList();
+                    return _allMaps;
+                }
+            }
+
+            return Array.Empty<CachedMapInfo>();
+        }
+
+        public void SaveAllMaps(IReadOnlyList<CachedMapInfo> maps) {
+            if (maps == null) return;
+
+            lock (_lock) {
+                _allMaps = maps.ToList();
+            }
+
+            SaveMapsSummaryToDisk(maps);
+        }
+
+        public IReadOnlyList<CachedMapInfo> GetMapsInRegion(int regionId) {
+            if (regionId <= 0) return Array.Empty<CachedMapInfo>();
+
+            IReadOnlyList<CachedMapInfo> all = GetAllMaps();
+            if (all == null || all.Count == 0) return Array.Empty<CachedMapInfo>();
+
+            lock (_lock) {
+                return all.Where(m => m.RegionId == regionId).ToList();
+            }
         }
 
         public bool HasRegion(int regionId) {
@@ -241,6 +284,64 @@ namespace jubeater.aigoalplanner.World
                 }
             } catch (Exception ex) {
                 _logWarn?.Invoke("Failed to enumerate region cache files: " + ex.GetType().Name);
+            }
+        }
+
+        private IReadOnlyList<CachedMapInfo> LoadMapsSummaryFromDisk() {
+            if (string.IsNullOrEmpty(_cacheDir)) return null;
+
+            string filePath = Path.Combine(_cacheDir, "maps.json");
+            if (!System.IO.File.Exists(filePath)) return null;
+
+            try {
+                string json = System.IO.File.ReadAllText(filePath);
+                JArray array = JArray.Parse(json);
+                var list = new List<CachedMapInfo>();
+
+                foreach (JObject item in array.OfType<JObject>()) {
+                    int id = item.Value<int>("id");
+                    string name = item.Value<string>("name");
+                    int regionId = item.Value<int>("region_id");
+                    string regionName = item.Value<string>("region_name");
+                    int continentId = item.Value<int>("continent_id");
+                    string continentName = item.Value<string>("continent_name");
+                    int defaultFloor = item.Value<int>("default_floor");
+
+                    list.Add(new CachedMapInfo(id, name, regionId, regionName, continentId, continentName,
+                                               Array.Empty<string>(), defaultFloor, challengesLoaded: false));
+                }
+
+                lock (_lock) {
+                    _allMaps = list.ToList();
+                }
+
+                return list;
+            } catch (Exception ex) {
+                _logWarn?.Invoke("Failed to load maps cache: " + ex.GetType().Name);
+                return null;
+            }
+        }
+
+        private void SaveMapsSummaryToDisk(IReadOnlyList<CachedMapInfo> maps) {
+            if (string.IsNullOrEmpty(_cacheDir) || maps == null) return;
+
+            try {
+                Directory.CreateDirectory(_cacheDir);
+                string filePath = Path.Combine(_cacheDir, "maps.json");
+
+                var array = new JArray(maps.Select(m => new JObject {
+                    ["id"]             = m.Id,
+                    ["name"]           = m.Name,
+                    ["region_id"]      = m.RegionId,
+                    ["region_name"]    = m.RegionName,
+                    ["continent_id"]   = m.ContinentId,
+                    ["continent_name"] = m.ContinentName,
+                    ["default_floor"]  = m.DefaultFloor
+                }));
+
+                System.IO.File.WriteAllText(filePath, array.ToString(Formatting.None));
+            } catch (Exception ex) {
+                _logWarn?.Invoke("Failed to save maps cache: " + ex.GetType().Name);
             }
         }
 

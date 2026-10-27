@@ -143,6 +143,49 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("show.grid", resultText);
         }
 
+        [Fact]
+        public async Task Getting_hero_points_progress_when_map_or_floor_fetch_fails_reports_map_counts_unknown_not_zero_of_zero() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.Unknown, ProgressKind.HeroPoints,
+                characterName: "Ranger", mapId: 101, mapName: "Map One", regionName: "Region A",
+                message: "Hero challenge data for this map could not be loaded.");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("unknown", (string)result["status"]);
+            Assert.Null(result["hero_challenges"]);
+            Assert.Contains("could not be loaded", (string)result["message"]);
+        }
+
+        [Fact]
+        public async Task Getting_mastery_progress_when_masteries_fetch_fails_keeps_points_and_marks_tracks_unavailable_not_empty_array() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.Mastery,
+                masteryRegions: new[] {
+                    new MasteryRegionProgress("Central Tyria", spent: 49, earned: 54, unfinishedTracks: null, tracksAvailable: false)
+                });
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            Assert.Equal("ok", (string)result["status"]);
+            JArray regions = (JArray)result["regions"];
+            JObject tyria = (JObject)regions[0];
+            Assert.Equal("Central Tyria", (string)tyria["region"]);
+            Assert.Equal(49, (int)tyria["points_spent"]);
+            Assert.Equal(54, (int)tyria["points_earned"]);
+            Assert.Equal(5, (int)tyria["points_unspent"]);
+
+            // The tracks must be marked unavailable, not an empty list []
+            Assert.NotEqual(JTokenType.Array, tyria["unfinished_tracks"]?.Type);
+            Assert.Equal("unavailable", (string)tyria["tracks_status"]);
+        }
+
         /// <summary>
         /// The tool's JSON. Microsoft.Extensions.AI hands the result back as a JsonElement wrapper
         /// around the string the tool returned, the same way the Chat receives it.

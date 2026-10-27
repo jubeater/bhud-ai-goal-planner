@@ -294,11 +294,14 @@ namespace jubeater.aigoalplanner.Core
 
     public sealed class MasteryRegionProgress
     {
-        public MasteryRegionProgress(string region, int spent, int earned, IReadOnlyList<MasteryTrackProgress> unfinishedTracks) {
+        public MasteryRegionProgress(string region, int spent, int earned,
+                                     IReadOnlyList<MasteryTrackProgress> unfinishedTracks,
+                                     bool tracksAvailable = true) {
             Region           = region ?? string.Empty;
             Spent            = spent;
             Earned           = earned;
             UnfinishedTracks = unfinishedTracks ?? Array.Empty<MasteryTrackProgress>();
+            TracksAvailable  = tracksAvailable && unfinishedTracks != null;
         }
 
         public string                              Region           { get; }
@@ -306,6 +309,7 @@ namespace jubeater.aigoalplanner.Core
         public int                                 Earned           { get; }
         public int                                 Unspent          => Math.Max(0, Earned - Spent);
         public IReadOnlyList<MasteryTrackProgress> UnfinishedTracks { get; }
+        public bool                                TracksAvailable  { get; }
     }
 
     public sealed class HeroChallengeProgress

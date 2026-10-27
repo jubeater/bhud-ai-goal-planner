@@ -115,16 +115,22 @@ namespace jubeater.aigoalplanner.Core
 
                 foreach (MasteryRegionProgress r in result.MasteryRegions) {
                     var rObj = new JObject {
-                        ["region"]            = r.Region,
-                        ["points_earned"]     = r.Earned,
-                        ["points_spent"]      = r.Spent,
-                        ["points_unspent"]    = r.Unspent,
-                        ["unfinished_tracks"] = new JArray(r.UnfinishedTracks.Select(t => new JObject {
+                        ["region"]         = r.Region,
+                        ["points_earned"]  = r.Earned,
+                        ["points_spent"]   = r.Spent,
+                        ["points_unspent"] = r.Unspent
+                    };
+
+                    if (!r.TracksAvailable) {
+                        rObj["unfinished_tracks"] = null;
+                        rObj["tracks_status"]     = "unavailable";
+                    } else {
+                        rObj["unfinished_tracks"] = new JArray(r.UnfinishedTracks.Select(t => new JObject {
                             ["name"]         = t.Name,
                             ["level"]        = t.Level,
                             ["total_levels"] = t.TotalLevels
-                        }))
-                    };
+                        }));
+                    }
 
                     regionsArray.Add(rObj);
                 }
