@@ -1,12 +1,14 @@
 using jubeater.aigoalplanner.Core;
+using jubeater.aigoalplanner.Tests.Fakes;
+using Microsoft.Extensions.AI;
 using Xunit;
 
 namespace jubeater.aigoalplanner.Tests
 {
     /// <summary>
-    /// Tests the identity message the Chat sends ahead of the Player's words: a model that is told
-    /// nothing introduces itself as whatever product it was trained to be, so this has to name this
-    /// module, the model and the Provider, and say what not to claim.
+    /// Tests the system prompt the Chat sends ahead of the Player's words: it says what the model
+    /// is part of, where it runs, what it may talk about, that it only proposes and never changes
+    /// anything, and that it answers in the Player's language.
     /// </summary>
     public class SystemPromptTests
     {
@@ -36,7 +38,35 @@ namespace jubeater.aigoalplanner.Tests
         public void It_tells_the_model_not_to_claim_to_be_ChatGPT_or_another_product() {
             string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
 
-            Assert.EndsWith("Don't claim to be ChatGPT or any other product.", prompt);
+            Assert.Contains("Don't claim to be ChatGPT or any other product.", prompt);
+        }
+
+        [Fact]
+        public void It_confines_the_model_to_Blish_HUD_and_the_game() {
+            string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
+
+            Assert.Contains("Blish HUD", prompt);
+            Assert.Contains("Guild Wars 2", prompt);
+        }
+
+        [Fact]
+        public void It_tells_the_model_what_submit_plan_is_for() {
+            string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
+
+            // From the ticket's second comment: a real model said "I've enabled the Pathing module"
+            // when it had only proposed it, so the prompt has to name the tool that proposes.
+            Assert.Contains("submit_plan", prompt);
+        }
+
+        [Fact]
+        public void It_names_every_Lookup_the_model_can_call() {
+            var registry = Lookups.For(new FakeWorld());
+
+            string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
+
+            foreach (AIFunctionDeclaration lookup in registry.Declarations) {
+                Assert.Contains(lookup.Name, prompt);
+            }
         }
 
         [Theory]

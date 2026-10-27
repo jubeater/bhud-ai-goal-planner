@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Blish_HUD;
 using Blish_HUD.Content;
 using Blish_HUD.Controls;
@@ -52,9 +53,23 @@ namespace jubeater.aigoalplanner.UI
         private readonly Label          _providerLabel;
         private readonly TextBox        _requestBox;
         private readonly StandardButton _sendButton;
+        private readonly StandardButton _cancelButton;
         private readonly StandardButton _newChatButton;
         private readonly StandardButton _providerButton;
         private readonly List<Control>  _messageControls = new List<Control>();
+
+        /// <summary>
+        /// The Request that is on its way right now, so Cancel can stop it. Null when the Player has
+        /// nothing waiting on the Provider; set on the game thread, read wherever Cancel is clicked.
+        /// </summary>
+        private CancellationTokenSource _requestCancellation;
+
+        /// <summary>
+        /// Whether a Request is in flight, shown as Send giving way to Cancel. Touched from threads
+        /// the Request ends on, so it is only applied to the controls in the render pass on the game
+        /// thread.
+        /// </summary>
+        private volatile bool _requestInFlight;
 
         private bool _renderQueued;
         private bool _disposed;
@@ -130,6 +145,17 @@ namespace jubeater.aigoalplanner.UI
             };
             _sendButton.Click += OnSendClicked;
 
+            // Cancel takes Send's place while a Request is running: there is nothing to send until
+            // the AI has answered, but there is something to stop.
+            _cancelButton = new StandardButton {
+                Parent   = content,
+                Location = new Point(RequestBoxWidth + 6, InputRowTop),
+                Size     = new Point(90, StandardButton.STANDARD_CONTROL_HEIGHT),
+                Text     = "Cancel",
+                Visible  = false
+            };
+            _cancelButton.Click += OnCancelClicked;
+
             _newChatButton = new StandardButton {
                 Parent   = content,
                 Location = new Point(RequestBoxWidth + 102, InputRowTop),
@@ -158,6 +184,7 @@ namespace jubeater.aigoalplanner.UI
             };
 
             _chat.MessagesChanged += OnMessagesChanged;
+            _chat.ProgressChanged += OnProgressChanged;
 
             // The Player opens the Chat from the corner icon, so it starts out hidden.
             _window.Visible = false;
@@ -192,10 +219,14 @@ namespace jubeater.aigoalplanner.UI
         public void Dispose() {
             _disposed = true;
 
+            StopRequest();
+
             _chat.MessagesChanged -= OnMessagesChanged;
+            _chat.ProgressChanged -= OnProgressChanged;
 
             _requestBox.EnterPressed -= OnRequestBoxEnterPressed;
             _sendButton.Click        -= OnSendClicked;
+            _cancelButton.Click      -= OnCancelClicked;
             _newChatButton.Click     -= OnNewChatClicked;
             _providerButton.Click    -= OnProviderButtonClicked;
 
@@ -212,6 +243,11 @@ namespace jubeater.aigoalplanner.UI
 
         private void OnNewChatClicked(object sender, MouseEventArgs e) {
             _requestBox.Text = string.Empty;
+
+            // A Request that is still running belongs to the Chat the Player is leaving, so it is
+            // stopped rather than left to finish into a Chat nobody reads.
+            StopRequest();
+
             _chat.StartNewChat();
         }
 
@@ -219,27 +255,60 @@ namespace jubeater.aigoalplanner.UI
             _openProviderSettings();
         }
 
+        private void OnCancelClicked(object sender, MouseEventArgs e) {
+            StopRequest();
+        }
+
+        /// <summary>
+        /// Cancels the Request that is on its way, if there still is one. Whoever swaps the source
+        /// out of the field owns it: exactly one of the Player's Cancel click and the Request's own
+        /// end gets it, so a disposed source is never cancelled.
+        /// </summary>
+        private void StopRequest() {
+            CancellationTokenSource running = Interlocked.Exchange(ref _requestCancellation, null);
+
+            if (running == null) return;
+
+            running.Cancel();
+            running.Dispose();
+        }
+
         private void SendRequest() {
             string request = _requestBox.Text;
 
             if (string.IsNullOrWhiteSpace(request)) return;
+            if (_requestInFlight) return;
 
             // The Player's Request is shown by the Chat, so the box is cleared straight away
             // instead of waiting for the Provider to answer.
             _requestBox.Text = string.Empty;
 
-            SendRequestAsync(request);
+            _requestCancellation = new CancellationTokenSource();
+            _requestInFlight     = true;
+            QueueRender();
+
+            SendRequestAsync(request, _requestCancellation.Token);
         }
 
         /// <summary>
         /// Asks the Chat for a reply. Failures end up in the Chat as a Notice, so the only thing
-        /// left to do here is to keep the game from crashing on an unexpected error.
+        /// left to do here is to keep the game from crashing on an unexpected error, and to hand
+        /// the buttons back when the Request is over, cancelled or not.
         /// </summary>
-        private async void SendRequestAsync(string request) {
+        private async void SendRequestAsync(string request, CancellationToken cancellationToken) {
             try {
-                await _chat.SendAsync(request);
+                await _chat.SendAsync(request, cancellationToken);
+            } catch (OperationCanceledException) {
+                // The Player cancelled this Request; the Chat has nothing more to add to it.
             } catch (Exception exception) {
                 Logger.Warn(exception, "Sending the Request to the Provider failed.");
+            } finally {
+                // Taken out of the field here, so a Cancel click can never reach this source again.
+                CancellationTokenSource finished = Interlocked.Exchange(ref _requestCancellation, null);
+                _requestInFlight = false;
+                QueueRender();
+
+                finished?.Dispose();
             }
         }
 
@@ -248,6 +317,18 @@ namespace jubeater.aigoalplanner.UI
         /// may only be touched from the game's update thread, so painting is queued there.
         /// </summary>
         private void OnMessagesChanged(object sender, EventArgs e) {
+            QueueRender();
+        }
+
+        /// <summary>
+        /// The Chat raises this on whatever thread a Lookup started or ended on; like the messages,
+        /// the progress lines are painted on the game thread.
+        /// </summary>
+        private void OnProgressChanged(object sender, EventArgs e) {
+            QueueRender();
+        }
+
+        private void QueueRender() {
             if (_disposed || _renderQueued) return;
 
             _renderQueued = true;
@@ -264,7 +345,8 @@ namespace jubeater.aigoalplanner.UI
         }
 
         /// <summary>
-        /// Rebuilds the message list from the Chat and keeps the newest message in view.
+        /// Rebuilds the message list from the Chat, shows what the AI is checking right now under
+        /// it, and keeps the newest message in view.
         /// </summary>
         private void RenderMessages() {
             foreach (Control messageControl in _messageControls) {
@@ -277,31 +359,49 @@ namespace jubeater.aigoalplanner.UI
 
             _emptyHint.Visible = messages.Count == 0;
 
+            // Send and Cancel share a spot: while a Request is on its way there is nothing to send,
+            // but there is something to stop. An unavailable Chat keeps the whole input row out of
+            // the Player's way — the Core answers every Request with the failure Notice anyway.
+            _requestBox.Enabled   = !_chat.IsUnavailable;
+            _sendButton.Visible   = !_chat.IsUnavailable && !_requestInFlight;
+            _cancelButton.Visible = !_chat.IsUnavailable && _requestInFlight;
+
             int top = 0;
 
             foreach (ChatMessage message in messages) {
-                var label = new Label {
-                    Parent         = _messageList,
-                    Text           = Format(message),
-                    Font           = GameService.Content.DefaultFont16,
-                    TextColor      = ColorFor(message.Author),
-                    WrapText       = true,
-                    Width          = MessageListWidth,
-                    AutoSizeHeight = true
-                };
+                top = AddLabel(Format(message), ColorFor(message.Author), top);
+            }
 
-                label.RecalculateLayout();
-                label.Location = new Point(0, top);
-
-                _messageControls.Add(label);
-
-                top = label.Bottom + MessageSpacing;
+            foreach (string line in _chat.ProgressLines) {
+                top = AddLabel(line, HintColor, top);
             }
 
             // The scrollbar scrolls the panel, so it has to be told about the new content before it
             // is pushed to the bottom to show the reply that just arrived.
             _scrollbar.RecalculateLayout();
             _scrollbar.ScrollDistance = 1f;
+        }
+
+        /// <summary>
+        /// Adds one line to the message list and says where the next one goes.
+        /// </summary>
+        private int AddLabel(string text, Color color, int top) {
+            var label = new Label {
+                Parent         = _messageList,
+                Text           = text,
+                Font           = GameService.Content.DefaultFont16,
+                TextColor      = color,
+                WrapText       = true,
+                Width          = MessageListWidth,
+                AutoSizeHeight = true
+            };
+
+            label.RecalculateLayout();
+            label.Location = new Point(0, top);
+
+            _messageControls.Add(label);
+
+            return label.Bottom + MessageSpacing;
         }
 
         private static string Format(ChatMessage message) {

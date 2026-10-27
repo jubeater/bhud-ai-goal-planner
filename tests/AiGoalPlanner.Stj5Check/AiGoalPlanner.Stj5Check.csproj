@@ -1,0 +1,136 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>jubeater.aigoalplanner.Stj5Check</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- Binding redirects are written by hand in the target below, pointing every version of the
+         System.Text.Json tree at Blish HUD's embedded copies. Auto-generation would point them at
+         the 10.x tree the module compiles against, which is exactly what must not happen here. -->
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AiGoalPlanner\AiGoalPlanner.csproj" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <!--
+    Blish HUD 1.3.0 embeds System.Text.Json 5.0 in Blish HUD.exe (costura) and loads it before any
+    module, so the module always runs on 5.0 whatever it ships (ADR-0008). This target binds the
+    check's own output to those copies: it deflates the costura.*.dll.compressed resources out of
+    the Blish HUD.exe in the BlishHUD NuGet package, overwrites the overlapping assemblies in the
+    output with them, and writes an .exe.config that redirects every version of each to Blish HUD's
+    copy. Run the built .exe afterwards (not dotnet run, which would rebuild over it).
+
+    The task is inline C# (RoslynCodeTaskFactory): unpacking DLLs out of an executable is exactly
+    what antivirus heuristics flag in a PowerShell script, so the build carries no script file and
+    no -ExecutionPolicy anywhere.
+  -->
+  <UsingTask TaskName="BindToBlishHudsAssemblies"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <OutputDir ParameterType="System.String" Required="true" />
+      <BlishExe ParameterType="System.String" Required="false" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.Collections.Generic" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.IO.Compression" />
+      <Using Namespace="System.Linq" />
+      <Using Namespace="System.Reflection" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        // The System.Text.Json tree Blish HUD 1.3.0 embeds and loads before any module (ADR-0008).
+        // Every assembly here that the check's output also carries is overwritten with Blish HUD's
+        // copy.
+        string[] overlappingAssemblies = {
+            "system.text.json",
+            "system.text.encodings.web",
+            "microsoft.bcl.asyncinterfaces",
+            "system.memory",
+            "system.buffers",
+            "system.numerics.vectors",
+            "system.runtime.compilerservices.unsafe",
+            "system.threading.tasks.extensions"
+        };
+
+        string blishExe = BlishExe;
+
+        if (string.IsNullOrEmpty(blishExe) || !File.Exists(blishExe)) {
+            string[] packageRoots = { Environment.GetEnvironmentVariable("NUGET_PACKAGES"),
+                                      Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages") };
+
+            blishExe = packageRoots.Where(root => !string.IsNullOrEmpty(root))
+                                   .Select(root => Path.Combine(root, "blishhud", "1.3.0", "lib", "net472", "Blish HUD.exe"))
+                                   .FirstOrDefault(File.Exists);
+        }
+
+        if (blishExe == null || !File.Exists(blishExe)) {
+            Log.LogError("Blish HUD.exe from the BlishHUD 1.3.0 NuGet package was not found.");
+            return false;
+        }
+
+        Log.LogMessage(MessageImportance.High, "Binding to Blish HUD's own assemblies from: {0}", blishExe);
+
+        // Only the resource streams are read; nothing in Blish HUD.exe is executed.
+        byte[] blishBytes = File.ReadAllBytes(blishExe);
+        Assembly blish = Assembly.Load(blishBytes);
+
+        var redirects = new List<string>();
+
+        foreach (string name in overlappingAssemblies) {
+            using (Stream resource = blish.GetManifestResourceStream("costura." + name + ".dll.compressed")) {
+                if (resource == null) {
+                    Log.LogError("Blish HUD.exe does not embed costura.{0}.dll.compressed.", name);
+                    return false;
+                }
+
+                string dllPath = Path.Combine(OutputDir, name + ".dll");
+
+                using (var deflated = new MemoryStream())
+                using (var decompressor = new DeflateStream(resource, CompressionMode.Decompress)) {
+                    decompressor.CopyTo(deflated);
+                    File.WriteAllBytes(dllPath, deflated.ToArray());
+                }
+
+                AssemblyName assemblyName = AssemblyName.GetAssemblyName(dllPath);
+                string publicKeyToken = string.Concat(assemblyName.GetPublicKeyToken().Select(b => b.ToString("x2")));
+
+                redirects.Add(
+                    "      <dependentAssembly>\n" +
+                    "        <assemblyIdentity name=\"" + assemblyName.Name + "\" publicKeyToken=\"" + publicKeyToken + "\" culture=\"neutral\" />\n" +
+                    "        <bindingRedirect oldVersion=\"0.0.0.0-999.0.0.0\" newVersion=\"" + assemblyName.Version + "\" />\n" +
+                    "      </dependentAssembly>");
+
+                Log.LogMessage(MessageImportance.High, "  {0} -> {1} (Blish HUD's copy)", assemblyName.Name, assemblyName.Version);
+            }
+        }
+
+        string config =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+            "<configuration>\n" +
+            "  <runtime>\n" +
+            "    <assemblyBinding xmlns=\"urn:schemas-microsoft-com:asm.v1\">\n" +
+            string.Join("\n", redirects) + "\n" +
+            "    </assemblyBinding>\n" +
+            "  </runtime>\n" +
+            "</configuration>\n";
+
+        File.WriteAllText(Path.Combine(OutputDir, "AiGoalPlanner.Stj5Check.exe.config"), config);
+
+        return true;
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="BindToBlishHudsAssemblies" AfterTargets="Build">
+    <BindToBlishHudsAssemblies
+      OutputDir="$(MSBuildProjectDirectory)\$(OutputPath)"
+      BlishExe="$(NuGetPackageRoot)blishhud\1.3.0\lib\net472\Blish HUD.exe" />
+  </Target>
+
+</Project>

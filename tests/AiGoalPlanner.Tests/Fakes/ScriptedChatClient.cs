@@ -38,6 +38,35 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             });
         }
 
+        /// <summary>
+        /// Makes the next reply a call to <paramref name="toolName"/>, the way a model asks to run a
+        /// tool before it gives its answer. <paramref name="finishReason"/> forces the reason the
+        /// reply ends with, the way a Provider that cut the reply off would report it.
+        /// </summary>
+        public void WillCallTool(string toolName = "test_tool", string callId = "call_0", IDictionary<string, object> arguments = null, string text = "",
+                                 ChatFinishReason? finishReason = null) {
+            var contents = new List<AIContent>();
+
+            if (text.Length > 0) contents.Add(new TextContent(text));
+
+            contents.Add(new FunctionCallContent(callId, toolName, arguments));
+
+            _script.Enqueue(new ChatResponse(new Microsoft.Extensions.AI.ChatMessage(ChatRole.Assistant, contents)) {
+                FinishReason = finishReason ?? ChatFinishReason.ToolCalls
+            });
+        }
+
+        /// <summary>
+        /// Makes the next reply several tool calls in one turn, the way a model that wants more than
+        /// one thing checked asks.
+        /// </summary>
+        public void WillCallTools(params FunctionCallContent[] calls) {
+            _script.Enqueue(new ChatResponse(new Microsoft.Extensions.AI.ChatMessage(ChatRole.Assistant,
+                                                                                     calls.Cast<AIContent>().ToList())) {
+                FinishReason = ChatFinishReason.ToolCalls
+            });
+        }
+
         public void WillFail(ProviderFailure failure) {
             _script.Enqueue(new ProviderException(failure));
         }
@@ -48,14 +77,6 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 
         public void WillFail(Exception exception) {
             _script.Enqueue(exception);
-        }
-
-        public void WillCallTool(string toolName = "test_tool") {
-            _script.Enqueue(new ChatResponse(new Microsoft.Extensions.AI.ChatMessage(ChatRole.Assistant, new AIContent[] {
-                new FunctionCallContent("call_0", toolName)
-            })) {
-                FinishReason = ChatFinishReason.ToolCalls
-            });
         }
 
         /// <summary>
