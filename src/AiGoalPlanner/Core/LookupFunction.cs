@@ -20,13 +20,13 @@ namespace jubeater.aigoalplanner.Core
     /// Every Lookup is timed and logged here, once, so a slow or odd Request can be diagnosed from
     /// the Blish HUD log and no Lookup added later has to remember to do it. The line holds the
     /// Lookup's name, its duration, what it read and how big its answer is; what it read comes from
-    /// <see cref="LookupAnswer.Detail"/>, which carries names and counts, never a Setting's value.
+    /// <see cref="LookupAnswer.LogDetail"/>, which carries names and counts, never a Setting's value.
     /// </remarks>
     public abstract class LookupFunction : AIFunction
     {
-        private readonly string       _name;
-        private readonly string       _description;
-        private readonly JsonDocument _schema;
+        private readonly string         _name;
+        private readonly string         _description;
+        private readonly JsonDocument   _schema;
         private readonly Action<string> _logDebug;
 
         /// <summary>
