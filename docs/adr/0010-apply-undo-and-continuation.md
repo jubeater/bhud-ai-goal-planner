@@ -43,7 +43,9 @@ sees after an Apply.
 - **What Auto-apply did belongs to the Review it came with.** That outcome is given to the model
   exactly once, when that Review is resolved, and cleared then. A Review is resolved when the Player
   applies it — with Actions ticked or with none, since choosing nothing is still a decision — when the
-  Player dismisses it, or when a new Plan replaces it. Resolving it is what starts the Continuation,
+  Player dismisses it, or when a new Plan replaces it. Only a Plan the validator could check replaces
+  one: when it throws, the Review and the outcome behind it stay open, because nothing was proposed
+  against the state that could not be read. Resolving the Review is what starts the Continuation,
   and the message carries everything applied in that Request, so the model sees the state it made
   either way. A new Request that leaves the Review open does not resolve it: asking a question is not
   a decision about the Plan. A dismiss does not spend a turn of its own: the outcome travels in the

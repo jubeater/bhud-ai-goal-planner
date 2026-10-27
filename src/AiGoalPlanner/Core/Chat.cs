@@ -675,11 +675,6 @@ namespace jubeater.aigoalplanner.Core
                 return false;
             }
 
-            // This Plan replaces whatever Review is open, so the outcome of an Auto-apply that came
-            // with that Review is resolved here: the model is told what was applied and that the rest
-            // of the old Plan was set aside, and it is not told again later (ADR-0010).
-            if (!TryAppendPlanSetAside(generation)) return false;
-
             PlanReview review;
 
             try {
@@ -689,13 +684,20 @@ namespace jubeater.aigoalplanner.Core
             } catch (Exception exception) {
                 // The Player's installation could not be read — a Module that fails while its
                 // Settings are read is the usual cause. Nothing is proposed against state that
-                // could not be checked.
+                // could not be checked: the Review already open, and what Auto-apply did of the Plan
+                // behind it, both stay where they are.
                 if (_logDebug != null) _logDebug("Plan could not be checked: " + exception.GetType().Name);
 
                 TryAppendNotice(generation, "The plan could not be checked against your installation. Try again.");
 
                 return false;
             }
+
+            // Only a Plan that can be checked replaces the open Review, so this is where the outcome
+            // of an Auto-apply that came with that Review is resolved: the model is told what was
+            // applied and that the rest of the old Plan was set aside, and it is not told again
+            // afterwards (ADR-0010).
+            if (!TryAppendPlanSetAside(generation)) return false;
 
             IReadOnlyList<int> autoApplied = _plans.AutoApplies ? AutoApplyable(review) : new int[0];
 

@@ -944,6 +944,51 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("Icon size", history);
         }
 
+        [Fact]
+        public async Task A_plan_that_cannot_be_checked_leaves_the_open_Review_and_what_Auto_apply_did_alone() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool(SubmitPlanTool.Name, "call_1",
+                               Plan("Hiding the markers and shrinking the icons.",
+                                    Action("set_setting", "bh.mounts", key: "Show markers", value: "false", reason: "You asked."),
+                                    Action("set_setting", "bh.mounts", key: "Icon size", value: "1",
+                                           reason: "Smaller icons read better.", sideEffect: true)));
+
+            // The Player asks for a second Plan, and this one cannot be checked at all: reading the
+            // Player's settings fails, so the validator cannot say what the Plan would do.
+            model.WillCallTool(SubmitPlanTool.Name, "call_2",
+                               Plan("Turning off the event table as well.",
+                                    Action("set_setting", "bh.eventtable", key: "Show all events", value: "false",
+                                           reason: "You asked.")),
+                               text: "One moment.");
+            model.WillReply("The markers are off; I left the icons as they were.");
+
+            var world = PlayerWorld();
+            var chat  = NewChat(model, world, autoApply: true);
+
+            await chat.SendAsync("hide the mount markers");
+
+            world.AnswerGetModuleSettings = (module, cancellationToken) => Task.FromException<ModuleSettingsResult>(
+                new InvalidOperationException("The module could not be read."));
+
+            await chat.SendAsync("turn off the event table as well");
+
+            // Nothing was replaced: the Review the Player was looking at is still open, and so is
+            // what Auto-apply did of the Plan behind it.
+            Assert.Equal("Icon size", Assert.Single(chat.Review.Actions).TargetName);
+            Assert.Contains(chat.Messages, message => message.Text.Contains("could not be checked"));
+
+            // Deciding on that Review still tells the model what Auto-apply did for it, and still
+            // carries on from there.
+            await chat.ApplyAsync(new int[0]);
+
+            Assert.Equal(3, model.Requests.Count);
+
+            string history = string.Join(" ", model.Requests.Last().Select(message => message.Text));
+
+            Assert.Contains("Show markers", history);
+            Assert.Contains("chose none of the other actions", history);
+        }
+
         /// <summary>
         /// The world a test plays in: three Modules, one of them disabled, and enough kinds of Setting
         /// to try a boolean, a number with a range and a list of choices.
