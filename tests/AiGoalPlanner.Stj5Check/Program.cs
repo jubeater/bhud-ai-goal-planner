@@ -145,6 +145,18 @@ internal static class Program
             return Task.FromResult(result);
         }
 
+        public Task<PlayerLocationResult> GetLocationAsync(CancellationToken cancellationToken) {
+            return Task.FromResult(new PlayerLocationResult(LocationStatus.Ok, new PlayerLocation("Test Character", 1205, "Domain of Vabbi", 10, "Crystal Desert")));
+        }
+
+        public Task<AccountAccessResult> GetAccountAccessAsync(CancellationToken cancellationToken) {
+            return Task.FromResult(new AccountAccessResult(AccountAccessStatus.Ok, new[] { "GuildWars2", "HeartOfThorns", "PathOfFire" }));
+        }
+
+        public Task<ProgressResult> GetProgressAsync(ProgressKind kind, CancellationToken cancellationToken) {
+            return Task.FromResult(new ProgressResult(ProgressStatus.Ok, kind));
+        }
+
         // The check only reads, so a write is never asked for. It answers "not changed" rather than
         // pretending it did something.
         public Task<ModuleChange> SetModuleEnabledAsync(string @namespace, bool enabled, CancellationToken cancellationToken) {

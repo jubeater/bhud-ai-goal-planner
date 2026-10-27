@@ -35,7 +35,7 @@ namespace jubeater.aigoalplanner.Tests
                                   Assert.Equal("I want to finish the hero points on this map", request.Text);
                               },
                               answer => {
-                                  Assert.Equal(ChatMessageAuthor.Ai, answer.Author);
+                                  Assert.Equal(ChatMessageAuthor.Ai, answer.Text != null ? ChatMessageAuthor.Ai : ChatMessageAuthor.Notice);
                                   Assert.Equal("Try the Pathing module for hero point trails.", answer.Text);
                               });
         }
@@ -656,7 +656,7 @@ namespace jubeater.aigoalplanner.Tests
                 new ModuleSettingInfo("show.grid", "Show grid", "", "Boolean", "true",       null, null));
 
             model.WillCallTool("get_module_settings", "call_1",
-                               new Dictionary<string, object> { ["namespace"] = "bh.maps" });
+                                new Dictionary<string, object> { ["namespace"] = "bh.maps" });
             model.WillReply("The Maps module shows a grid.");
 
             var chat = NewChat(model, world);
@@ -682,7 +682,7 @@ namespace jubeater.aigoalplanner.Tests
                 new ModuleSettingInfo("show.trails", "Show trails", "", "Boolean", "true", null, null));
 
             model.WillCallTool("get_module_settings", "call_1",
-                               new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
+                                new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
             model.WillReply("Pathing shows trails by default.");
 
             var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -714,7 +714,7 @@ namespace jubeater.aigoalplanner.Tests
                 new ModuleSettingInfo("show.trails", "Show trails", "", "Boolean", "true", null, null));
 
             model.WillCallTool("get_module_settings", "call_1",
-                               new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
+                                new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
             model.WillReply("Never reached.");
 
             var neverReleased = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -781,7 +781,7 @@ namespace jubeater.aigoalplanner.Tests
             // A Settings read is the one that used to run another module's code off the game thread,
             // so it is the one held open here.
             model.WillCallTool("get_module_settings", "call_1",
-                               new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
+                                new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
             model.WillReply("Never reached.");
 
             var gameThread = new FakeGameThread();
@@ -836,7 +836,7 @@ namespace jubeater.aigoalplanner.Tests
                 new ModuleSettingInfo("trail.size", "Trail size", "How wide trails are drawn.", "Int32", "3", "1", "10"));
 
             model.WillCallTool("get_module_settings", "call_1",
-                               new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
+                                new Dictionary<string, object> { ["namespace"] = "bh.pathing" });
             model.WillReply("Pathing draws trails three pixels wide.");
 
             var log  = new List<string>();
@@ -864,7 +864,7 @@ namespace jubeater.aigoalplanner.Tests
                 new ModuleSettingInfo("show.grid",  "Show grid",  "", "Boolean", "true",        null, null));
 
             model.WillCallTool("get_module_settings", "call_1",
-                               new Dictionary<string, object> { ["namespace"] = "bh.maps" });
+                                new Dictionary<string, object> { ["namespace"] = "bh.maps" });
             model.WillReply("The Maps module shows a grid.");
 
             var log  = new List<string>();
@@ -898,7 +898,7 @@ namespace jubeater.aigoalplanner.Tests
             // Nothing stops it putting anything at all in that argument, so the log must not repeat
             // what it sent.
             model.WillCallTool("get_module_settings", "call_1",
-                               new Dictionary<string, object> { ["namespace"] = "987654" });
+                                new Dictionary<string, object> { ["namespace"] = "987654" });
             model.WillReply("I could not find a module with that namespace.");
 
             var log  = new List<string>();
@@ -948,6 +948,210 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("stopped", notice.Text);
         }
 
+        [Fact]
+        public async Task When_a_Lookup_reports_a_missing_permission_a_Notice_is_shown_and_planning_continues() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(ProgressStatus.MissingPermission, ProgressKind.Mastery, missingPermission: "progression");
+
+            var warnings = new List<string>();
+
+            // Round 1: Model calls get_progress(kind="mastery")
+            model.WillCallTool("get_progress", "call_1", new Dictionary<string, object> { ["kind"] = "mastery" });
+            // Round 2: Model receives unavailable notice and replies with general advice
+            model.WillReply("Since progression permission is missing, here is a general Central Tyria plan.");
+
+            var chat = NewChat(model, world, logDebug: null, logWarn: warnings.Add);
+
+            await chat.SendAsync("What masteries should I train?");
+
+            // Chat contains: Player request, Notice from missing permission, and AI reply
+            Assert.Collection(chat.Messages,
+                              request => {
+                                  Assert.Equal(ChatMessageAuthor.Player, request.Author);
+                                  Assert.Equal("What masteries should I train?", request.Text);
+                              },
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("progression", notice.Text);
+                                  Assert.Equal("Your Guild Wars 2 API key lacks the 'progression' permission. Planning continues with available data.", notice.Text);
+                              },
+                              reply => {
+                                  Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
+                                  Assert.Equal("Since progression permission is missing, here is a general Central Tyria plan.", reply.Text);
+                              });
+
+            // Warning was logged at Warn (not Error)
+            string warning = Assert.Single(warnings);
+            Assert.Contains("Lookup get_progress", warning);
+            Assert.Contains("progression", warning);
+
+            // The model saw the tool result with unavailable status and instruction
+            AiChatMessage toolAnswer = model.Requests[1].Single(message => message.Role.Equals(ChatRole.Tool));
+            FunctionResultContent result = Assert.Single(toolAnswer.Contents.OfType<FunctionResultContent>());
+            string resultJson = (string)result.Result;
+            Assert.Contains("\"status\":\"unavailable\"", resultJson);
+            Assert.Contains("\"reason\":\"missing_permission\"", resultJson);
+            Assert.Contains("\"permission\":\"progression\"", resultJson);
+        }
+
+        [Fact]
+        public async Task When_get_account_access_reports_a_missing_permission_a_Notice_is_shown_and_planning_continues() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(AccountAccessStatus.MissingPermission, null, missingPermission: "account");
+
+            var warnings = new List<string>();
+
+            model.WillCallTool("get_account_access", "call_1");
+            model.WillReply("Since account permission is missing, assuming Core game access.");
+
+            var chat = NewChat(model, world, logDebug: null, logWarn: warnings.Add);
+
+            await chat.SendAsync("What can I play?");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("account", notice.Text);
+                                  Assert.Equal("Your Guild Wars 2 API key lacks the 'account' permission. Planning continues with available data.", notice.Text);
+                              },
+                              reply => {
+                                  Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
+                                  Assert.Contains("Core game", reply.Text);
+                              });
+
+            string warning = Assert.Single(warnings);
+            Assert.Contains("Lookup get_account_access", warning);
+            Assert.Contains("account", warning);
+        }
+
+        [Fact]
+        public async Task When_no_api_access_a_Notice_is_shown_to_restart_blish_hud_and_planning_continues() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(AccountAccessStatus.NoApiAccess, null);
+
+            var warnings = new List<string>();
+
+            model.WillCallTool("get_account_access", "call_1");
+            model.WillReply("Since API access has not been granted, continuing with available data.");
+
+            var chat = NewChat(model, world, logDebug: null, logWarn: warnings.Add);
+
+            await chat.SendAsync("What expansions do I own?");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Equal("Blish HUD hasn't given AI Goal Planner API access yet. Make sure a Guild Wars 2 API key is added in Blish HUD, then restart Blish HUD.", notice.Text);
+                              },
+                              reply => {
+                                  Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
+                                  Assert.Contains("continuing", reply.Text);
+                              });
+
+            string warning = Assert.Single(warnings);
+            Assert.Contains("Lookup get_account_access", warning);
+            Assert.Contains("Blish HUD hasn't given AI Goal Planner API access yet", warning);
+        }
+
+        [Fact]
+        public async Task When_hero_points_lookup_lacks_progression_permission_a_Notice_is_shown_and_planning_continues() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(ProgressStatus.MissingPermission, ProgressKind.HeroPoints, missingPermission: "progression");
+
+            var warnings = new List<string>();
+
+            model.WillCallTool("get_progress", "call_1", new Dictionary<string, object> { ["kind"] = "hero_points" });
+            model.WillReply("Since progression permission is missing, I cannot read hero challenges.");
+
+            var chat = NewChat(model, world, logDebug: null, logWarn: warnings.Add);
+
+            await chat.SendAsync("What hero points do I need?");
+
+            Assert.Collection(chat.Messages,
+                              request => {
+                                  Assert.Equal(ChatMessageAuthor.Player, request.Author);
+                                  Assert.Equal("What hero points do I need?", request.Text);
+                              },
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("progression", notice.Text);
+                                  Assert.Equal("Your Guild Wars 2 API key lacks the 'progression' permission. Planning continues with available data.", notice.Text);
+                              },
+                              reply => {
+                                  Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
+                                  Assert.Contains("progression permission is missing", reply.Text);
+                              });
+
+            string warning = Assert.Single(warnings);
+            Assert.Contains("Lookup get_progress", warning);
+            Assert.Contains("progression", warning);
+        }
+
+        [Fact]
+        public async Task Owned_Content_is_passed_through_to_the_model_and_influences_its_reply() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(AccountAccessStatus.Ok, new[] { "GuildWars2", "HeartOfThorns", "PathOfFire" });
+
+            model.WillCallTool("get_account_access", "call_1");
+            model.WillReply("You own GuildWars2, HeartOfThorns, and PathOfFire. You can unlock mounts in the Crystal Desert.");
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("What content do I own?");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              reply => {
+                                  Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
+                                  Assert.Contains("PathOfFire", reply.Text);
+                              });
+
+            Assert.Equal(1, world.AccountAccessCalls);
+
+            AiChatMessage toolAnswer = model.Requests[1].Single(message => message.Role.Equals(ChatRole.Tool));
+            FunctionResultContent result = Assert.Single(toolAnswer.Contents.OfType<FunctionResultContent>());
+            string resultJson = (string)result.Result;
+            Assert.Contains("\"status\":\"ok\"", resultJson);
+            Assert.Contains("\"owned_content\":[\"GuildWars2\",\"HeartOfThorns\",\"PathOfFire\"]", resultJson);
+        }
+
+        [Fact]
+        public async Task Location_is_passed_through_to_the_model_and_influences_its_reply() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.LocationResult = new PlayerLocationResult(LocationStatus.Ok, new PlayerLocation("Test Character", 1205, "Domain of Vabbi", 10, "Crystal Desert"));
+
+            model.WillCallTool("get_location", "call_1");
+            model.WillReply("You are on Domain of Vabbi in the Crystal Desert as Test Character.");
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("Where am I?");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              reply => {
+                                  Assert.Equal(ChatMessageAuthor.Ai, reply.Author);
+                                  Assert.Contains("Domain of Vabbi", reply.Text);
+                              });
+
+            Assert.Equal(1, world.LocationCalls);
+
+            AiChatMessage toolAnswer = model.Requests[1].Single(message => message.Role.Equals(ChatRole.Tool));
+            FunctionResultContent result = Assert.Single(toolAnswer.Contents.OfType<FunctionResultContent>());
+            string resultJson = (string)result.Result;
+            Assert.Contains("\"character\":\"Test Character\"", resultJson);
+            Assert.Contains("\"map\":\"Domain of Vabbi\"", resultJson);
+            Assert.Contains("\"region\":\"Crystal Desert\"", resultJson);
+        }
+
         /// <summary>
         /// A settings Lookup that waits for <paramref name="release"/> and is cut short by
         /// cancellation, so a test holds the Chat in the middle of a Lookup.
@@ -986,6 +1190,14 @@ namespace jubeater.aigoalplanner.Tests
         private static Chat NewChat(ScriptedChatClient model, FakeWorld world, Action<string> logDebug) {
             return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"),
                             Lookups.For(world, logDebug), logDebug);
+        }
+
+        /// <summary>
+        /// The Chat with Lookups and diagnostic + warning logging.
+        /// </summary>
+        private static Chat NewChat(ScriptedChatClient model, FakeWorld world, Action<string> logDebug, Action<string> logWarn) {
+            return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"),
+                            Lookups.For(world, logDebug), logDebug, logWarn);
         }
 
         /// <summary>

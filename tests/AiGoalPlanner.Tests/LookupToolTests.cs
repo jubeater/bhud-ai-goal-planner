@@ -163,6 +163,59 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("show.grid", resultText);
         }
 
+        [Fact]
+        public async Task Getting_hero_points_progress_when_map_or_floor_fetch_fails_reports_map_counts_unknown_not_zero_of_zero() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.Unknown, ProgressKind.HeroPoints,
+                characterName: "Ranger", mapId: 101, mapName: "Map One", regionName: "Region A",
+                message: "Hero challenge data for this map could not be loaded.");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("unknown", (string)result["status"]);
+            Assert.Null(result["hero_challenges"]);
+            Assert.Contains("could not be loaded", (string)result["message"]);
+        }
+
+        [Fact]
+        public async Task Getting_mastery_progress_when_masteries_fetch_fails_keeps_points_and_marks_tracks_unavailable_not_empty_array() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.Mastery,
+                masteryPoints: new[] {
+                    new MasteryPointRegion("Central Tyria", spent: 49, earned: 54)
+                },
+                masteryTracks: new[] {
+                    new MasteryTrackRegion("Tyria", unfinishedTracks: null, tracksAvailable: false)
+                },
+                tracksAvailable: false);
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            Assert.Equal("ok", (string)result["status"]);
+            JArray points = (JArray)result["points"];
+            JObject tyria = (JObject)points[0];
+            Assert.Equal("Central Tyria", (string)tyria["region"]);
+            Assert.Equal(49, (int)tyria["points_spent"]);
+            Assert.Equal(54, (int)tyria["points_earned"]);
+            Assert.Equal(5, (int)tyria["points_unspent"]);
+
+            JArray tracks = (JArray)result["track_regions"];
+            JObject tyriaTracks = (JObject)tracks[0];
+            Assert.Equal("Tyria", (string)tyriaTracks["region"]);
+            Assert.Null(tyriaTracks["unfinished_tracks"]);
+            Assert.Null(tyriaTracks["tracks"]);
+            Assert.Equal("unavailable", (string)tyriaTracks["tracks_status"]);
+            Assert.Equal("unavailable", (string)result["tracks_status"]);
+            Assert.Null(result["tracks"]);
+            Assert.Null(result["point_totals"]);
+        }
+
         /// <summary>
         /// The tool's JSON. Microsoft.Extensions.AI hands the result back as a JsonElement wrapper
         /// around the string the tool returned, the same way the Chat receives it.
@@ -276,6 +329,314 @@ namespace jubeater.aigoalplanner.Tests
 
             Assert.Contains("module=bh.pathing", line);
             Assert.DoesNotContain("BH.Pathing", line);
+        }
+
+        [Fact]
+        public async Task Getting_location_returns_character_map_and_region() {
+            var world = new FakeWorld();
+            world.LocationResult = new PlayerLocationResult(
+                LocationStatus.Ok,
+                new PlayerLocation("Elementalist", 1205, "Domain of Vabbi", 10, "Crystal Desert"));
+
+            AIFunction tool = GetLocationTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("ok", (string)result["status"]);
+            Assert.Equal("Elementalist", (string)result["character"]);
+            Assert.Equal(1205, (int)result["map_id"]);
+            Assert.Equal("Domain of Vabbi", (string)result["map"]);
+            Assert.Equal(10, (int)result["region_id"]);
+            Assert.Equal("Crystal Desert", (string)result["region"]);
+        }
+
+        [Fact]
+        public async Task Getting_location_when_unavailable_returns_reason() {
+            var world = new FakeWorld();
+            world.LocationResult = new PlayerLocationResult(LocationStatus.Unavailable, null, "Mumble Link is not running.");
+
+            AIFunction tool = GetLocationTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("Mumble Link is not running.", (string)result["reason"]);
+        }
+
+        [Fact]
+        public async Task Getting_account_access_returns_owned_content() {
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(
+                AccountAccessStatus.Ok,
+                new[] { "GuildWars2", "HeartOfThorns", "PathOfFire", "EndOfDragons" });
+
+            AIFunction tool = GetAccountAccessTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("ok", (string)result["status"]);
+
+            JArray content = (JArray)result["owned_content"];
+            Assert.Equal(4, content.Count);
+            Assert.Contains("HeartOfThorns", content.Select(c => (string)c));
+            Assert.Contains("EndOfDragons", content.Select(c => (string)c));
+        }
+
+        [Fact]
+        public async Task Getting_account_access_when_permission_missing_returns_missing_permission_notice() {
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(
+                AccountAccessStatus.MissingPermission,
+                new string[0],
+                missingPermission: "account");
+
+            AIFunction tool = GetAccountAccessTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("missing_permission", (string)result["reason"]);
+            Assert.Equal("account", (string)result["permission"]);
+            Assert.Equal("Your Guild Wars 2 API key lacks the 'account' permission. Planning continues with available data.", (string)result["notice"]);
+        }
+
+        [Fact]
+        public async Task Getting_account_access_when_no_api_access_returns_no_api_access_notice() {
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(AccountAccessStatus.NoApiAccess, null);
+
+            AIFunction tool = GetAccountAccessTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("no_api_access", (string)result["reason"]);
+            Assert.Equal("Blish HUD hasn't given AI Goal Planner API access yet. Make sure a Guild Wars 2 API key is added in Blish HUD, then restart Blish HUD.", (string)result["notice"]);
+        }
+
+        [Fact]
+        public async Task Getting_mastery_progress_returns_separate_points_and_tracks_lists() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.Mastery,
+                masteryPoints: new[] {
+                    new MasteryPointRegion("Path of Fire", spent: 1, earned: 3),
+                    new MasteryPointRegion("Central Tyria", spent: 49, earned: 54)
+                },
+                masteryTracks: new[] {
+                    new MasteryTrackRegion("Desert", new[] {
+                        new MasteryTrackProgress(14, "Raptor Mount", "Desert", 1, 4),
+                        new MasteryTrackProgress(17, "Springer Mount", "Desert", 0, 4),
+                        new MasteryTrackProgress(15, "Skimmer Mount", "Desert", 0, 5),
+                        new MasteryTrackProgress(18, "Jackal Mount", "Desert", 0, 4),
+                        new MasteryTrackProgress(20, "Roller Beetle Mount", "Desert", 0, 3),
+                        new MasteryTrackProgress(19, "Crystal Champion", "Desert", 0, 4)
+                    }),
+                    new MasteryTrackRegion("Magic", new[] {
+                        new MasteryTrackProgress(45, "Castoran Survivalist", "Magic", 1, 3)
+                    })
+                });
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            Assert.Equal("ok", (string)result["status"]);
+            Assert.Equal("mastery", (string)result["kind"]);
+
+            JArray points = (JArray)result["points"];
+            Assert.Equal(2, points.Count);
+            Assert.Equal("Path of Fire", (string)points[0]["region"]);
+            Assert.Equal(3, (int)points[0]["points_earned"]);
+            Assert.Equal(1, (int)points[0]["points_spent"]);
+            Assert.Equal(2, (int)points[0]["points_unspent"]);
+
+            JArray tracks = (JArray)result["track_regions"];
+            Assert.Equal(2, tracks.Count);
+
+            JObject desert = (JObject)tracks[0];
+            Assert.Equal("Desert", (string)desert["region"]);
+            JArray desertTracks = (JArray)desert["unfinished_tracks"];
+            Assert.Equal(6, desertTracks.Count);
+            Assert.Equal("Raptor Mount", (string)desertTracks[0]["name"]);
+            Assert.Equal(1, (int)desertTracks[0]["unlocked"]);
+            Assert.Null(desertTracks[0]["level"]);
+            Assert.Equal(4, (int)desertTracks[0]["total_levels"]);
+
+            JObject magic = (JObject)tracks[1];
+            Assert.Equal("Magic", (string)magic["region"]);
+            JArray magicTracks = (JArray)magic["unfinished_tracks"];
+            Assert.Single(magicTracks);
+            Assert.Equal("Castoran Survivalist", (string)magicTracks[0]["name"]);
+            Assert.Equal(1, (int)magicTracks[0]["unlocked"]);
+            Assert.Null(magicTracks[0]["level"]);
+        }
+
+        [Fact]
+        public async Task Each_track_name_appears_exactly_once_in_the_answer() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.Mastery,
+                masteryPoints: new[] {
+                    new MasteryPointRegion("Path of Fire", spent: 1, earned: 3)
+                },
+                masteryTracks: new[] {
+                    new MasteryTrackRegion("Desert", new[] {
+                        new MasteryTrackProgress(14, "Raptor Mount", "Desert", 1, 4),
+                        new MasteryTrackProgress(17, "Springer Mount", "Desert", 0, 4)
+                    })
+                });
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            string json = Assert.IsType<string>(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            // Each track name must appear exactly once in the serialized JSON
+            Assert.Single(System.Text.RegularExpressions.Regex.Matches(json, "Raptor Mount"));
+            Assert.Single(System.Text.RegularExpressions.Regex.Matches(json, "Springer Mount"));
+
+            // Redundant arrays and fields must be removed
+            JObject parsed = JObject.Parse(json);
+            Assert.Null(parsed["point_totals"]);
+            Assert.Null(parsed["tracks"]);
+            Assert.NotNull(parsed["points"]);
+            Assert.NotNull(parsed["track_regions"]);
+
+            JObject desert = (JObject)((JArray)parsed["track_regions"])[0];
+            Assert.NotNull(desert["unfinished_tracks"]);
+            Assert.Null(desert["tracks"]);
+
+            JObject raptor = (JObject)((JArray)desert["unfinished_tracks"])[0];
+            Assert.NotNull(raptor["unlocked"]);
+            Assert.Null(raptor["level"]);
+        }
+
+        [Fact]
+        public async Task Getting_hero_points_progress_returns_map_and_region_hero_challenges() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.HeroPoints,
+                heroChallenges: new HeroChallengeProgress(mapTotal: 14, mapCompleted: 7, regionMissing: 42),
+                characterName: "Ranger", mapId: 1205, mapName: "Domain of Vabbi", regionName: "Crystal Desert");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("ok", (string)result["status"]);
+            Assert.Equal("hero_points", (string)result["kind"]);
+            Assert.Equal("Ranger", (string)result["character"]);
+            Assert.Equal("Domain of Vabbi", (string)result["map"]);
+            Assert.Equal(1205, (int)result["map_id"]);
+            Assert.Equal("Crystal Desert", (string)result["region"]);
+
+            JObject hc = (JObject)result["hero_challenges"];
+            Assert.Equal(14, (int)hc["map_total"]);
+            Assert.Equal(7, (int)hc["map_completed"]);
+            Assert.Equal(7, (int)hc["map_missing"]);
+            Assert.Equal(42, (int)hc["region_missing"]);
+        }
+
+        [Fact]
+        public async Task Getting_progress_when_permission_missing_returns_missing_permission_notice() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(
+                ProgressStatus.MissingPermission, ProgressKind.Mastery,
+                missingPermission: "progression");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("missing_permission", (string)result["reason"]);
+            Assert.Equal("progression", (string)result["permission"]);
+            Assert.Equal("Your Guild Wars 2 API key lacks the 'progression' permission. Planning continues with available data.", (string)result["notice"]);
+        }
+
+        [Fact]
+        public async Task Getting_progress_when_no_api_access_returns_no_api_access_notice() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(ProgressStatus.NoApiAccess, ProgressKind.Mastery);
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("no_api_access", (string)result["reason"]);
+            Assert.Equal("Blish HUD hasn't given AI Goal Planner API access yet. Make sure a Guild Wars 2 API key is added in Blish HUD, then restart Blish HUD.", (string)result["notice"]);
+        }
+
+        [Fact]
+        public async Task Getting_progress_with_invalid_kind_returns_instruction() {
+            var world = new FakeWorld();
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "unknown" }));
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Contains("mastery", (string)result["instruction"]);
+            Assert.Contains("hero_points", (string)result["instruction"]);
+        }
+
+        [Fact]
+        public async Task Getting_hero_points_progress_when_api_response_is_empty_returns_unknown_status_not_a_count() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.Unknown, ProgressKind.HeroPoints,
+                characterName: "Ranger", mapId: 1205, mapName: "Domain of Vabbi", regionName: "Crystal Desert",
+                message: "This is a known Guild Wars 2 API issue where hero-point data is missing for some characters. The Player can check the in-game Hero panel.");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("unknown", (string)result["status"]);
+            Assert.Equal("hero_points", (string)result["kind"]);
+            Assert.Equal("Ranger", (string)result["character"]);
+            Assert.Null(result["hero_challenges"]);
+            Assert.Contains("known", (string)result["message"], System.StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Hero panel", (string)result["message"], System.StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Hero panel", (string)result["instruction"], System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Getting_hero_points_progress_when_region_is_incomplete_reports_incomplete_region_instead_of_count() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.HeroPoints,
+                heroChallenges: new HeroChallengeProgress(mapTotal: 14, mapCompleted: 7, regionMissing: null, regionIncomplete: true),
+                characterName: "Ranger", mapId: 1205, mapName: "Domain of Vabbi", regionName: "Crystal Desert");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("ok", (string)result["status"]);
+            JObject hc = (JObject)result["hero_challenges"];
+            Assert.Equal(14, (int)hc["map_total"]);
+            Assert.Equal(7, (int)hc["map_completed"]);
+            Assert.Equal(JTokenType.Null, hc["region_missing"].Type);
+            Assert.True((bool)hc["region_incomplete"]);
+            Assert.NotNull(hc["region_note"]);
+        }
+
+        [Fact]
+        public async Task Getting_hero_points_progress_when_progression_permission_missing_returns_missing_permission_notice() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.MissingPermission, ProgressKind.HeroPoints,
+                missingPermission: "progression");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("missing_permission", (string)result["reason"]);
+            Assert.Equal("progression", (string)result["permission"]);
+            Assert.Equal("Your Guild Wars 2 API key lacks the 'progression' permission. Planning continues with available data.", (string)result["notice"]);
         }
 
         /// <summary>

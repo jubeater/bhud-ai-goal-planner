@@ -110,11 +110,13 @@ namespace jubeater.aigoalplanner
             try {
                 // The world is built once: reads and writes both go through it, so every one of
                 // them happens on the game thread (ADR-0009).
-                _world = new GameThreadWorld(new BlishHudWorld(), new OverlayGameThread());
+                var cache = new Gw2StaticDataCache(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"), LogWarn);
+                var blishWorld = new BlishHudWorld(Gw2ApiManager, cache, LogWarn);
+                _world = new GameThreadWorld(blishWorld, new OverlayGameThread());
 
                 _plans = new Plans(_world, () => _autoApplySetting.Value, LogDebug);
 
-                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug, _plans);
+                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug, LogWarn, _plans);
             } catch (Exception exception) {
                 Logger.Error(exception, "AI Goal Planner failed to load its planning core. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
@@ -148,6 +150,10 @@ namespace jubeater.aigoalplanner
         /// </summary>
         private static void LogDebug(string message) {
             Logger.Debug(message);
+        }
+
+        private static void LogWarn(string message) {
+            Logger.Warn(message);
         }
 
         private void DefineProviderSettings() {

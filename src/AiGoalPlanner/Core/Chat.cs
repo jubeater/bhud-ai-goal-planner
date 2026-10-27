@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
+using Newtonsoft.Json.Linq;
 using AiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 namespace jubeater.aigoalplanner.Core
@@ -60,6 +61,13 @@ namespace jubeater.aigoalplanner.Core
         private readonly Action<string> _logDebug;
 
         /// <summary>
+        /// Where warnings from the Chat or Lookups go — such as missing API permissions or lookup
+        /// execution warnings — or null when nobody is listening. The module hands in its warn log;
+        /// tests hand in a list.
+        /// </summary>
+        private readonly Action<string> _logWarn;
+
+        /// <summary>
         /// Why this Chat cannot be used, e.g. that the module failed to load, or null when it can.
         /// An unavailable Chat has no client at all: nothing can reach a Provider.
         /// </summary>
@@ -110,15 +118,20 @@ namespace jubeater.aigoalplanner.Core
         /// Settings takes effect without losing the conversation. <paramref name="tools"/> holds the
         /// Lookups the model may call; without it the Chat simply has none to offer.
         /// <paramref name="logDebug"/> receives one line per Provider round trip; without it the
-        /// Chat logs nothing. <paramref name="plans"/> is what turns a proposal into a Plan the Player
-        /// can Review and Apply; without it the Chat can only repeat what the model said about one.
+        /// Chat logs nothing. <paramref name="logWarn"/> receives warnings, such as notices from Lookups.
+        /// <paramref name="plans"/> is what turns a proposal into a Plan the Player can Review and
+        /// Apply; without it the Chat can only repeat what the model said about one.
         /// </summary>
         public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools = null,
-                    Action<string> logDebug = null, Plans plans = null)
-            : this(chatClient, systemPrompt, tools, logDebug, plans, unavailableReason: null) { }
+                    Action<string> logDebug = null, Action<string> logWarn = null, Plans plans = null)
+            : this(chatClient, systemPrompt, tools, logDebug, logWarn, plans, unavailableReason: null) { }
+
+        public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools,
+                    Action<string> logDebug, Plans plans)
+            : this(chatClient, systemPrompt, tools, logDebug, logWarn: null, plans, unavailableReason: null) { }
 
         private Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools,
-                     Action<string> logDebug, Plans plans, string unavailableReason) {
+                     Action<string> logDebug, Action<string> logWarn, Plans plans, string unavailableReason) {
             _unavailableReason = unavailableReason;
 
             if (_unavailableReason == null) {
@@ -133,6 +146,7 @@ namespace jubeater.aigoalplanner.Core
             _tools    = tools;
             _plans    = plans;
             _logDebug = logDebug;
+            _logWarn  = logWarn;
         }
 
         /// <summary>
@@ -143,7 +157,7 @@ namespace jubeater.aigoalplanner.Core
         /// starting a new Chat shows it again, so it cannot be cleared away.
         /// </summary>
         public static Chat Unavailable(string reason) {
-            return new Chat(null, null, null, null, null, reason ?? throw new ArgumentNullException(nameof(reason)));
+            return new Chat(null, null, null, null, null, null, reason ?? throw new ArgumentNullException(nameof(reason)));
         }
 
         /// <summary>
@@ -552,10 +566,16 @@ namespace jubeater.aigoalplanner.Core
                                               .InvokeAsync(new AIFunctionArguments(call.Arguments), cancellationToken)
                                               .ConfigureAwait(false);
 
+                    if (result is string jsonString && TryExtractNotice(jsonString, out string notice)) {
+                        TryAppendNotice(generation, notice);
+                        _logWarn?.Invoke("Lookup " + call.Name + ": " + notice);
+                    }
+
                     results.Add(new FunctionResultContent(call.CallId, result));
                 } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
                     throw;
                 } catch (Exception exception) {
+                    _logWarn?.Invoke("Lookup " + call.Name + " failed: " + exception.GetType().Name);
                     results.Add(new FunctionResultContent(call.CallId, null) {
                         Exception = exception
                     });
@@ -563,6 +583,23 @@ namespace jubeater.aigoalplanner.Core
             }
 
             return results;
+        }
+
+        private static bool TryExtractNotice(string json, out string notice) {
+            notice = null;
+            if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith("{")) return false;
+
+            try {
+                var obj = JObject.Parse(json);
+                if (obj.TryGetValue("notice", out JToken token) && token != null) {
+                    notice = token.ToString();
+                    return !string.IsNullOrWhiteSpace(notice);
+                }
+            } catch {
+                // Not a valid JSON object or syntax error.
+            }
+
+            return false;
         }
 
         /// <summary>

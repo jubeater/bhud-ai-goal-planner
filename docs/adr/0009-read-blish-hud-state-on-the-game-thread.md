@@ -20,9 +20,10 @@ every read is now handed there first.
   and completes a `TaskCompletionSource`.
 - The Chat stays off the game thread. Only the read runs there, and the wait happens where the Chat
   is, so a Lookup never blocks the update loop.
-- A read answers from live state and never waits for anything: the whole read happens inside the
-  queued call. A read that awaited something would finish wherever that await completed, off the
-  game thread, and the problem would be back without a test to see it.
+- Lookups read game state (Mumble Link, module settings) on the game thread first, then await
+  GW2 API calls off it. HTTP and anything after an await must not touch Blish HUD state: every
+  value needed after an await (such as character name, map ID, or CurrentMumbleMapName) is
+  captured before any await.
 - Cancelling a Request while a read waits its turn ends the wait; the queued call still runs later
   and finds nobody waiting, so it reads nothing.
 - A new Lookup gets this for free: the wrapper is around the world, not around each tool.

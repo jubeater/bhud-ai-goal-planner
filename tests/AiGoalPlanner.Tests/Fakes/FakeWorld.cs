@@ -8,9 +8,10 @@ using jubeater.aigoalplanner.Core;
 namespace jubeater.aigoalplanner.Tests.Fakes
 {
     /// <summary>
-    /// An in-memory world for tests: the Player's modules and their settings are whatever the test
-    /// puts in, and a change made through it really changes them. A test can also take over
-    /// answering a Lookup or a write itself, to hold it open, fail it or count it.
+    /// An in-memory world for tests: the Player's modules and their settings, location, owned
+    /// content and progress are whatever the test puts in, and a change made through it really
+    /// changes them. A test can also take over answering a Lookup or a write itself, to hold it open,
+    /// fail it or count it.
     /// </summary>
     internal sealed partial class FakeWorld : IBlishHudWorld
     {
@@ -29,6 +30,30 @@ namespace jubeater.aigoalplanner.Tests.Fakes
         /// </summary>
         public Func<string, CancellationToken, Task<ModuleSettingsResult>> AnswerGetModuleSettings;
 
+        public PlayerLocationResult LocationResult { get; set; } =
+            new PlayerLocationResult(LocationStatus.Ok, new PlayerLocation("Test Character", 1205, "Domain of Vabbi", 10, "Crystal Desert"));
+
+        public AccountAccessResult AccountAccessResult { get; set; } =
+            new AccountAccessResult(AccountAccessStatus.Ok, new[] { "GuildWars2", "HeartOfThorns", "PathOfFire" });
+
+        public ProgressResult MasteryProgressResult { get; set; } =
+            new ProgressResult(ProgressStatus.Ok, ProgressKind.Mastery,
+                               masteryRegions: new[] {
+                                   new MasteryRegionProgress("Tyria", 49, 54, new[] {
+                                       new MasteryTrackProgress(1, "Pact Commander", "Tyria", 4, 5)
+                                   }),
+                                   new MasteryRegionProgress("Maguuma", 150, 163, new[] {
+                                       new MasteryTrackProgress(2, "Gliding", "Maguuma", 5, 6)
+                                   })
+                               });
+
+        public ProgressResult HeroPointsProgressResult { get; set; } =
+            new ProgressResult(ProgressStatus.Ok, ProgressKind.HeroPoints,
+                               heroChallenges: new HeroChallengeProgress(mapTotal: 14, mapCompleted: 7, regionMissing: 42),
+                               characterName: "Test Character", mapId: 1205, mapName: "Domain of Vabbi", regionName: "Crystal Desert");
+
+        public Func<ProgressKind, CancellationToken, Task<ProgressResult>> AnswerGetProgress { get; set; }
+
         /// <summary>
         /// When set, answers every module state change instead of changing one, so a test can make
         /// a write fail without breaking anything else.
@@ -44,10 +69,13 @@ namespace jubeater.aigoalplanner.Tests.Fakes
         /// </summary>
         public List<string> Writes { get; } = new List<string>();
 
-        public int ListCalls      { get; private set; }
-        public int SettingsCalls  { get; private set; }
-        public int ModuleWrites   { get; private set; }
-        public int SettingWrites  { get; private set; }
+        public int ListCalls          { get; private set; }
+        public int SettingsCalls      { get; private set; }
+        public int LocationCalls      { get; private set; }
+        public int AccountAccessCalls { get; private set; }
+        public int ProgressCalls      { get; private set; }
+        public int ModuleWrites       { get; private set; }
+        public int SettingWrites      { get; private set; }
 
         public Task<IReadOnlyList<InstalledModuleInfo>> ListInstalledModulesAsync(CancellationToken cancellationToken) {
             ListCalls++;
@@ -71,6 +99,28 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             return Task.FromResult(WithTheModulesOwnNamespace(result, @namespace));
         }
 
+        public Task<PlayerLocationResult> GetLocationAsync(CancellationToken cancellationToken) {
+            LocationCalls++;
+
+            return Task.FromResult(LocationResult);
+        }
+
+        public Task<AccountAccessResult> GetAccountAccessAsync(CancellationToken cancellationToken) {
+            AccountAccessCalls++;
+
+            return Task.FromResult(AccountAccessResult);
+        }
+
+        public Task<ProgressResult> GetProgressAsync(ProgressKind kind, CancellationToken cancellationToken) {
+            ProgressCalls++;
+
+            if (AnswerGetProgress != null) return AnswerGetProgress(kind, cancellationToken);
+
+            ProgressResult result = kind == ProgressKind.Mastery ? MasteryProgressResult : HeroPointsProgressResult;
+
+            return Task.FromResult(result);
+        }
+
         /// <summary>
         /// Names the Installed Module that matched, the way the real world does, so a test can tell
         /// that the log never repeats the spelling the model asked with.
@@ -86,12 +136,12 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 
         public static ModuleSettingsResult NotInstalled(string @namespace) {
             return new ModuleSettingsResult(ModuleSettingsStatus.ModuleNotInstalled, @namespace,
-                                            Array.Empty<ModuleSettingInfo>());
+                                             Array.Empty<ModuleSettingInfo>());
         }
 
         public static ModuleSettingsResult Disabled(string moduleName) {
             return new ModuleSettingsResult(ModuleSettingsStatus.ModuleDisabled, moduleName,
-                                            Array.Empty<ModuleSettingInfo>());
+                                             Array.Empty<ModuleSettingInfo>());
         }
 
         public static ModuleSettingsResult Ok(string moduleName, params ModuleSettingInfo[] settings) {
