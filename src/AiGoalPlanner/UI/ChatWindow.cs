@@ -360,9 +360,11 @@ namespace jubeater.aigoalplanner.UI
             _emptyHint.Visible = messages.Count == 0;
 
             // Send and Cancel share a spot: while a Request is on its way there is nothing to send,
-            // but there is something to stop.
-            _sendButton.Visible   = !_requestInFlight;
-            _cancelButton.Visible = _requestInFlight;
+            // but there is something to stop. An unavailable Chat keeps the whole input row out of
+            // the Player's way — the Core answers every Request with the failure Notice anyway.
+            _requestBox.Enabled   = !_chat.IsUnavailable;
+            _sendButton.Visible   = !_chat.IsUnavailable && !_requestInFlight;
+            _cancelButton.Visible = !_chat.IsUnavailable && _requestInFlight;
 
             int top = 0;
 

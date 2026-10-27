@@ -439,6 +439,51 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task An_unavailable_Chat_never_reaches_a_Provider_and_answers_every_Request_with_its_reason() {
+            // There is no client to call: Chat.Unavailable takes none, so a Provider cannot be
+            // reached by construction.
+            var chat = Chat.Unavailable("AI Goal Planner failed to load and cannot answer this session.");
+
+            await chat.SendAsync("What modules do I have?");
+            await chat.SendAsync("And now?");
+
+            Assert.Collection(chat.Messages,
+                              request => {
+                                  Assert.Equal(ChatMessageAuthor.Player, request.Author);
+                                  Assert.Equal("What modules do I have?", request.Text);
+                              },
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("failed to load", notice.Text);
+                              },
+                              request => {
+                                  Assert.Equal(ChatMessageAuthor.Player, request.Author);
+                                  Assert.Equal("And now?", request.Text);
+                              },
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("failed to load", notice.Text);
+                              });
+        }
+
+        [Fact]
+        public async Task Starting_over_on_an_unavailable_Chat_shows_the_reason_again() {
+            var chat = Chat.Unavailable("AI Goal Planner failed to load and cannot answer this session.");
+
+            await chat.SendAsync("Hello");
+
+            chat.StartNewChat();
+
+            // The fresh Chat is empty of conversation, but the failure is not cleared away.
+            ChatMessage notice = Assert.Single(chat.Messages);
+
+            Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+            Assert.Equal("AI Goal Planner failed to load and cannot answer this session.", notice.Text);
+
+            Assert.True(chat.IsUnavailable);
+        }
+
+        [Fact]
         public async Task A_Lookup_runs_and_its_result_goes_back_to_the_model_before_the_reply() {
             var model = new ScriptedChatClient();
             var world = new FakeWorld();

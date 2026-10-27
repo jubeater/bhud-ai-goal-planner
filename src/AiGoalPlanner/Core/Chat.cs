@@ -32,6 +32,12 @@ namespace jubeater.aigoalplanner.Core
         private readonly Func<string>       _systemPrompt;
         private readonly ToolRegistry       _tools;
 
+        /// <summary>
+        /// Why this Chat cannot be used, e.g. that the module failed to load, or null when it can.
+        /// An unavailable Chat has no client at all: nothing can reach a Provider.
+        /// </summary>
+        private readonly string _unavailableReason;
+
         private readonly List<ChatMessage> _messages     = new List<ChatMessage>();
         private readonly object            _messagesLock = new object();
         private readonly SemaphoreSlim     _sendLock     = new SemaphoreSlim(1, 1);
@@ -63,11 +69,36 @@ namespace jubeater.aigoalplanner.Core
         /// Settings takes effect without losing the conversation. <paramref name="tools"/> holds the
         /// Lookups the model may call; without it the Chat simply has none to offer.
         /// </summary>
-        public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools = null) {
-            _chatClient   = chatClient   ?? throw new ArgumentNullException(nameof(chatClient));
-            _systemPrompt = systemPrompt ?? throw new ArgumentNullException(nameof(systemPrompt));
-            _tools        = tools;
+        public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools = null)
+            : this(chatClient, systemPrompt, tools, unavailableReason: null) { }
+
+        private Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools, string unavailableReason) {
+            _unavailableReason = unavailableReason;
+
+            if (_unavailableReason == null) {
+                _chatClient   = chatClient   ?? throw new ArgumentNullException(nameof(chatClient));
+                _systemPrompt = systemPrompt ?? throw new ArgumentNullException(nameof(systemPrompt));
+            }
+
+            _tools = tools;
         }
+
+        /// <summary>
+        /// Makes a Chat that cannot be used, e.g. because the module failed to load (ADR-0008). It
+        /// has no client at all, so nothing is ever sent to a Provider: every Request shows the
+        /// Player's words followed by <paramref name="reason"/> as a Notice, and starting a new Chat
+        /// shows the reason again, so it cannot be cleared away.
+        /// </summary>
+        public static Chat Unavailable(string reason) {
+            return new Chat(null, null, null, reason ?? throw new ArgumentNullException(nameof(reason)));
+        }
+
+        /// <summary>
+        /// Whether this Chat cannot be used, e.g. because the module failed to load. A Request to an
+        /// unavailable Chat is answered with the reason as a Notice, and the Chat window keeps the
+        /// input out of the Player's way.
+        /// </summary>
+        public bool IsUnavailable => _unavailableReason != null;
 
         /// <summary>
         /// Raised whenever what the Player sees in the Chat changes, so the Chat window can redraw.
@@ -124,21 +155,39 @@ namespace jubeater.aigoalplanner.Core
         public async Task SendAsync(string request, CancellationToken cancellationToken = default) {
             if (string.IsNullOrWhiteSpace(request)) return;
 
+            // An unavailable Chat has no client to reach, so the Request is shown and its whole
+            // answer is the reason for the failure, whatever was asked.
+            if (_unavailableReason != null) {
+                int generation = Volatile.Read(ref _generation);
+
+                await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+                try {
+                    if (TryBeginRequest(generation, request.Trim())) {
+                        TryAppendNotice(generation, _unavailableReason);
+                    }
+                } finally {
+                    _sendLock.Release();
+                }
+
+                return;
+            }
+
             // Read before waiting for the lock: a Request belongs to the Chat the Player sent it
             // in, not to whatever Chat is current by the time the model is free to answer it.
-            int generation = Volatile.Read(ref _generation);
+            int currentGeneration = Volatile.Read(ref _generation);
 
             await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
             try {
                 // The Player started a new Chat while this Request was queued: it is dropped
                 // before it is shown and before the model sees it.
-                if (!TryBeginRequest(generation, request.Trim())) return;
+                if (!TryBeginRequest(currentGeneration, request.Trim())) return;
 
                 try {
-                    await RunRequest(generation, cancellationToken).ConfigureAwait(false);
+                    await RunRequest(currentGeneration, cancellationToken).ConfigureAwait(false);
                 } finally {
-                    ClearProgress(generation);
+                    ClearProgress(currentGeneration);
                 }
             } finally {
                 _sendLock.Release();
@@ -173,6 +222,12 @@ namespace jubeater.aigoalplanner.Core
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
             ProgressChanged?.Invoke(this, EventArgs.Empty);
+
+            // Starting over is not a way to clear the failure away: an unavailable Chat shows its
+            // reason again in the fresh Chat.
+            if (_unavailableReason != null) {
+                TryAppendNotice(Volatile.Read(ref _generation), _unavailableReason);
+            }
         }
 
         /// <summary>
