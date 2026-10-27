@@ -885,6 +885,52 @@ namespace jubeater.aigoalplanner.Tests
             Assert.DoesNotContain("show.grid",   everything);
         }
 
+        [Fact]
+        public async Task A_namespace_the_model_made_up_never_reaches_the_log() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.maps", "Maps", "1.0.0", "", enabled: true));
+            world.SettingsByNamespace["bh.maps"] = FakeWorld.Ok(
+                "Maps",
+                new ModuleSettingInfo("trail.size", "Trail size", "", "Int32", "987654", "1", "999999"));
+
+            // The model asks for a module whose namespace is a Setting value it has just been shown.
+            // Nothing stops it putting anything at all in that argument, so the log must not repeat
+            // what it sent.
+            model.WillCallTool("get_module_settings", "call_1",
+                               new Dictionary<string, object> { ["namespace"] = "987654" });
+            model.WillReply("I could not find a module with that namespace.");
+
+            var log  = new List<string>();
+            var chat = NewChat(model, world, log.Add);
+
+            await chat.SendAsync("Try that setting again");
+
+            string everything = string.Join("\n", log);
+
+            Assert.Contains("module=<unknown>", everything);
+            Assert.DoesNotContain("987654",      everything);
+        }
+
+        [Fact]
+        public async Task A_finish_reason_the_Provider_made_up_never_reaches_the_log() {
+            var model = new ScriptedChatClient();
+
+            // A finish reason is whatever text the endpoint sends back, and an endpoint that is not
+            // really a Provider can put an API key there.
+            model.WillStop(new ChatFinishReason("sk-test-1234567890abcdef"), "A reply.");
+
+            var log  = new List<string>();
+            var chat = NewChat(model, new FakeWorld(), log.Add);
+
+            await chat.SendAsync("Hello");
+
+            string everything = string.Join("\n", log);
+
+            Assert.Contains("finish_reason=other",          everything);
+            Assert.DoesNotContain("sk-test-1234567890abcdef", everything);
+        }
+
         /// <summary>
         /// A settings Lookup that waits for <paramref name="release"/> and is cut short by
         /// cancellation, so a test holds the Chat in the middle of a Lookup.

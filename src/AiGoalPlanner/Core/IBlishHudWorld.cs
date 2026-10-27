@@ -83,15 +83,24 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     public sealed class ModuleSettingsResult
     {
-        public ModuleSettingsResult(ModuleSettingsStatus status, string moduleName, IReadOnlyList<ModuleSettingInfo> settings) {
+        public ModuleSettingsResult(ModuleSettingsStatus status, string moduleName, IReadOnlyList<ModuleSettingInfo> settings,
+                                    string @namespace = null) {
             Status     = status;
             ModuleName = moduleName ?? string.Empty;
             Settings   = settings ?? throw new ArgumentNullException(nameof(settings));
+            Namespace  = @namespace;
         }
 
         public ModuleSettingsStatus Status { get; }
 
         public string ModuleName { get; }
+
+        /// <summary>
+        /// The Installed Module's own namespace, when one matched; null when none did. This is the
+        /// only module name a Lookup may repeat in its log: the namespace it was asked with is the
+        /// model's own text, and the model can put anything there, a Setting's value included.
+        /// </summary>
+        public string Namespace { get; }
 
         /// <summary>Empty unless <see cref="Status"/> is <see cref="ModuleSettingsStatus.Ok"/>.</summary>
         public IReadOnlyList<ModuleSettingInfo> Settings { get; }

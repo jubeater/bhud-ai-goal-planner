@@ -236,6 +236,28 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Null(result["note"]);
         }
 
+        [Fact]
+        public async Task A_settings_Lookup_is_logged_with_the_Installed_Modules_own_namespace() {
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.pathing", "Pathing", "3.2.1", "", enabled: true));
+            world.SettingsByNamespace["bh.pathing"] = FakeWorld.Ok(
+                "Pathing",
+                new ModuleSettingInfo("trail.size", "Trail size", "", "Int32", "3", "1", "10"));
+
+            var log = new List<string>();
+
+            AIFunction tool = GetModuleSettingsTool.Create(world, log.Add);
+
+            // The model spells the namespace its own way; the log names the Module it matched, not
+            // the spelling the model sent.
+            await tool.InvokeAsync(new AIFunctionArguments { ["namespace"] = "BH.Pathing" });
+
+            string line = Assert.Single(log);
+
+            Assert.Contains("module=bh.pathing", line);
+            Assert.DoesNotContain("BH.Pathing", line);
+        }
+
         /// <summary>
         /// The tool's JSON. A hand-written Lookup returns its result string as it is, the way the
         /// Chat receives it.

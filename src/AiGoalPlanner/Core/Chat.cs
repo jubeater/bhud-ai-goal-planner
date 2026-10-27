@@ -533,7 +533,29 @@ namespace jubeater.aigoalplanner.Core
             if (_logDebug == null) return;
 
             _logDebug("Provider round trip " + round + ": " + clock.ElapsedMilliseconds + " ms, finish_reason="
-                    + (response.FinishReason?.Value ?? "none") + ", tool_calls=" + toolCalls);
+                    + FinishReasonText(response.FinishReason) + ", tool_calls=" + toolCalls);
+        }
+
+        /// <summary>
+        /// The finish reason as the log may say it: one of the reasons the Chat knows by name, and
+        /// "other" for anything else, "none" when the reply carried none.
+        /// </summary>
+        /// <remarks>
+        /// The value arrives from the Provider as free text — a finish reason is whatever the
+        /// endpoint wrote in the reply — so an endpoint that is not really a Provider can put an API
+        /// key there, and the log must not repeat it (ADR-0006).
+        /// </remarks>
+        private static string FinishReasonText(ChatFinishReason? finishReason) {
+            if (!finishReason.HasValue) return "none";
+
+            ChatFinishReason reason = finishReason.Value;
+
+            if (reason.Equals(ChatFinishReason.Stop))          return "stop";
+            if (reason.Equals(ChatFinishReason.Length))        return "length";
+            if (reason.Equals(ChatFinishReason.ToolCalls))     return "tool_calls";
+            if (reason.Equals(ChatFinishReason.ContentFilter)) return "content_filter";
+
+            return "other";
         }
 
         /// <summary>

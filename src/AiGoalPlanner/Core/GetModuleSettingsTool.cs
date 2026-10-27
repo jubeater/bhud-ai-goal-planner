@@ -84,7 +84,7 @@ namespace jubeater.aigoalplanner.Core
                                          Array.Empty<ModuleSettingInfo>(), totalSettings: 0);
 
                 return new LookupAnswer(refusal.ToString(Formatting.None),
-                                        Detail(wanted, ModuleSettingsStatus.ThisModule, shown: 0, total: 0));
+                                        Detail(ModuleSettingsStatus.ThisModule, ThisModuleNamespace, shown: 0, total: 0));
             }
 
             ModuleSettingsResult result = await world.GetModuleSettingsAsync(@namespace, cancellationToken)
@@ -100,21 +100,30 @@ namespace jubeater.aigoalplanner.Core
 
             string answer = Answer(result.Status, result.ModuleName, settings, total).ToString(Formatting.None);
 
-            return new LookupAnswer(answer, Detail(wanted, result.Status, settings.Count, total));
+            return new LookupAnswer(answer, Detail(result.Status, result.Namespace, settings.Count, total));
         }
 
         /// <summary>
-        /// What the debug log may say about this Lookup: which module, what came of it, and how many
-        /// Settings the answer carries out of how many the module holds. Never a Setting's value.
+        /// What the debug log may say about this Lookup: which Module matched, what came of it, and
+        /// how many Settings the answer carries out of how many the module holds. Never a Setting's
+        /// value.
         /// </summary>
-        private static string Detail(string @namespace, ModuleSettingsStatus status, int shown, int total) {
+        /// <remarks>
+        /// The Module is named by the namespace the world matched, never by the one the model asked
+        /// with: that argument is the model's own text, and the model can put anything in it — a
+        /// Setting's value it has just read, or the Player's words. A Lookup that matched nothing
+        /// names no Module at all.
+        /// </remarks>
+        private static string Detail(ModuleSettingsStatus status, string moduleNamespace, int shown, int total) {
+            string module = string.IsNullOrEmpty(moduleNamespace) ? "<unknown>" : moduleNamespace;
+
             string counts = status != ModuleSettingsStatus.Ok
                                 ? "settings=0"
                                 : shown < total
                                     ? "settings=" + shown + " of " + total
                                     : "settings=" + shown;
 
-            return "module=" + @namespace + ", status=" + StatusText(status) + ", " + counts;
+            return "module=" + module + ", status=" + StatusText(status) + ", " + counts;
         }
 
         /// <summary>
