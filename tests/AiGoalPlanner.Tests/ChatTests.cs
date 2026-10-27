@@ -931,6 +931,23 @@ namespace jubeater.aigoalplanner.Tests
             Assert.DoesNotContain("sk-test-1234567890abcdef", everything);
         }
 
+        [Fact]
+        public async Task A_finish_reason_the_Provider_made_up_never_reaches_the_Player() {
+            var model = new ScriptedChatClient();
+            model.WillStop(new ChatFinishReason("sk-test-1234567890abcdef"), "A reply.");
+
+            var chat = NewChat(model);
+
+            await chat.SendAsync("Hello");
+
+            // The same text would otherwise reach the Notice: the Player reads that like any other
+            // line in the Chat, so it says what happened in words of this module's own.
+            ChatMessage notice = Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Notice);
+
+            Assert.DoesNotContain("sk-test-1234567890abcdef", notice.Text);
+            Assert.Contains("stopped", notice.Text);
+        }
+
         /// <summary>
         /// A settings Lookup that waits for <paramref name="release"/> and is cut short by
         /// cancellation, so a test holds the Chat in the middle of a Lookup.

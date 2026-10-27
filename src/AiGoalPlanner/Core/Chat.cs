@@ -656,7 +656,9 @@ namespace jubeater.aigoalplanner.Core
                 return "The model stopped mid-thought to check something, but the check never arrived. Try again.";
             }
 
-            return "The model stopped before finishing (" + finishReason.Value + ").";
+            // The reason is whatever text the endpoint sent, so it is not repeated here either: the
+            // log says "other", and the Player gets words of this module's own.
+            return "The model stopped before finishing. Try again.";
         }
     }
 }
