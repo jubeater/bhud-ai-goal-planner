@@ -545,7 +545,7 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
-        public async Task Auto_apply_takes_the_Setting_change_and_still_asks_about_the_rest() {
+        public async Task Auto_apply_takes_the_Setting_change_and_leaves_the_rest_for_Review() {
             var model = new ScriptedChatClient();
             model.WillCallTool(SubmitPlanTool.Name, "call_1",
                                Plan("Hiding the markers and shrinking the icons.",
@@ -560,6 +560,9 @@ namespace jubeater.aigoalplanner.Tests
             await chat.SendAsync("hide the mount markers");
 
             Assert.Equal(new[] { "set bh.mounts/Show markers=false" }, world.Writes.ToArray());
+
+            // There is no Continuation while the Player still has an Action to decide on.
+            Assert.Single(model.Requests);
 
             PlanReview review = Assert.IsType<PlanReview>(chat.Review);
             ReviewedAction left = Assert.Single(review.Actions);
@@ -686,6 +689,150 @@ namespace jubeater.aigoalplanner.Tests
 
             // Undo is about the Player's configuration, not the conversation, so it survives.
             Assert.True(chat.CanUndo);
+        }
+
+        [Fact]
+        public async Task Cancelling_an_Apply_partway_keeps_what_was_applied_and_undoable() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool(SubmitPlanTool.Name, "call_1",
+                               Plan("Three changes.",
+                                    Action("set_setting", "bh.mounts", key: "Show markers", value: "false", reason: "One."),
+                                    Action("set_setting", "bh.mounts", key: "Icon size", value: "1", reason: "Two."),
+                                    Action("set_setting", "bh.mounts", key: "Marker style", value: "Circle", reason: "Three.")));
+
+            var world      = PlayerWorld();
+            var gameThread = new FakeGameThread();
+            var chat       = NewChat(model, world, autoApply: false, gameThread: gameThread);
+
+            await PumpUntil(chat.SendAsync("do three things"), gameThread);
+
+            using (var cancellation = new CancellationTokenSource()) {
+                Task applying = chat.ApplyAsync(new[] { 0, 1, 2 }, cancellation.Token);
+
+                // The first write runs; the second is waiting its turn when the Player cancels.
+                await WaitUntil(() => gameThread.WaitingCount > 0);
+                gameThread.Pump();
+
+                await WaitUntil(() => gameThread.WaitingCount > 0);
+                cancellation.Cancel();
+
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => applying);
+            }
+
+            // What was written stays written, and it can be undone: the record is not lost with the
+            // Request that was cancelled.
+            Assert.Equal(new[] { "set bh.mounts/Show markers=false" }, world.Writes.ToArray());
+            Assert.True(chat.CanUndo);
+
+            ChatMessage report = chat.Messages.Last(message => message.Author == ChatMessageAuthor.Report);
+
+            Assert.Contains("Applied 1 change", report.Text);
+
+            await PumpUntil(chat.UndoAsync(), gameThread);
+
+            Assert.Equal("true", await SettingValueAsync(world, "bh.mounts", "Show markers"));
+            Assert.False(chat.CanUndo);
+        }
+
+        [Fact]
+        public async Task An_Apply_that_changes_nothing_does_not_take_a_place_in_the_journal() {
+            var model = new ScriptedChatClient();
+            var world = PlayerWorld();
+            var chat  = NewChat(model, world);
+
+            // One real change…
+            model.WillCallTool(SubmitPlanTool.Name, "call_0",
+                               Plan("Turning the markers off.",
+                                    Action("set_setting", "bh.mounts", key: "Show markers", value: "false", reason: "You asked.")));
+            model.WillReply("Done.");
+
+            await chat.SendAsync("turn the markers off");
+            await chat.ApplyAsync(new[] { 0 });
+
+            // …and then ten Applies that ask for the value the Setting already has.
+            for (int round = 1; round <= 10; round++) {
+                model.WillCallTool(SubmitPlanTool.Name, "call_" + round,
+                                   Plan("Turning the markers off again.",
+                                        Action("set_setting", "bh.mounts", key: "Show markers", value: "false", reason: "You asked.")));
+                model.WillReply("They are already off.");
+
+                await chat.SendAsync("turn the markers off again, " + round);
+                await chat.ApplyAsync(new[] { 0 });
+            }
+
+            // The real change is the one Undo still puts back: the ten that changed nothing were
+            // never recorded, so they cannot push it out of the ten-entry journal.
+            Assert.True(chat.CanUndo);
+
+            await chat.UndoAsync();
+
+            Assert.False(chat.CanUndo);
+            Assert.Equal("true", await SettingValueAsync(world, "bh.mounts", "Show markers"));
+        }
+
+        [Fact]
+        public async Task An_Action_that_does_not_say_it_is_not_a_Side_Effect_waits_for_Review() {
+            var action = Action("set_setting", "bh.mounts", key: "Show markers", value: "false", reason: "You asked.");
+            action.Remove("is_side_effect");
+
+            var model = new ScriptedChatClient();
+            model.WillCallTool(SubmitPlanTool.Name, "call_1", Plan("Turning the markers off.", action));
+
+            var world = PlayerWorld();
+            var chat  = NewChat(model, world, autoApply: true);
+
+            await chat.SendAsync("turn off the mount markers");
+
+            // Auto-apply takes only what the AI says the Player asked for, and a flag it never sent
+            // is not a "no": the Action waits for Review instead of being applied unasked.
+            Assert.Empty(world.Writes);
+
+            PlanReview review = Assert.IsType<PlanReview>(chat.Review);
+            ReviewedAction waiting = Assert.Single(review.Actions);
+
+            Assert.True(waiting.Action.IsSideEffect);
+            Assert.True(waiting.CanApply);
+        }
+
+        [Fact]
+        public async Task A_Continuation_never_takes_away_a_Review_the_Player_has_not_decided_on() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool(SubmitPlanTool.Name, "call_1",
+                               Plan("Hiding the markers and shrinking the icons.",
+                                    Action("set_setting", "bh.mounts", key: "Show markers", value: "false", reason: "You asked."),
+                                    Action("set_setting", "bh.mounts", key: "Icon size", value: "1",
+                                           reason: "Smaller icons read better.", sideEffect: true)));
+
+            // If the module asked for a Continuation now, this Plan would replace the Review.
+            model.WillCallTool(SubmitPlanTool.Name, "call_2",
+                               Plan("While I am here: ask a friend if you want them smaller still.",
+                                    Action("advice", reason: "Only the Player can decide.")));
+            model.WillReply("Both changes are in.");
+
+            var world = PlayerWorld();
+            var chat  = NewChat(model, world, autoApply: true);
+
+            await chat.SendAsync("hide the mount markers");
+
+            // Auto-apply took one Action and the other waits for the Player, so there is no
+            // Continuation yet, and the Review is still the one with an Action to decide on.
+            Assert.Single(model.Requests);
+            Assert.Equal(new[] { "set bh.mounts/Show markers=false" }, world.Writes.ToArray());
+
+            PlanReview review = Assert.IsType<PlanReview>(chat.Review);
+            ReviewedAction waiting = Assert.Single(review.Actions);
+
+            Assert.Equal("Icon size", waiting.TargetName);
+
+            // Once the Player decides, the Continuation carries everything this Request applied.
+            await chat.ApplyAsync(new[] { 0 });
+
+            Assert.Equal(2, model.Requests.Count);
+
+            string history = string.Join(" ", model.Requests.Last().Select(message => message.Text));
+
+            Assert.Contains("Show markers", history);
+            Assert.Contains("Icon size", history);
         }
 
         /// <summary>

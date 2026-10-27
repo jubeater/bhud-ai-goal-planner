@@ -15,10 +15,10 @@ namespace jubeater.aigoalplanner.Core
             "In a plan, the actions are enable_module or disable_module, which name a module by its "
           + "namespace; set_setting, which names the module, the setting key and the new value as text, "
           + "written the way get_module_settings showed it; and advice, for what you cannot do yourself. "
-          + "Every action carries a reason the Player can read, and is_side_effect is true only for a "
-          + "change the Player did not ask for. Leave out the fields a kind does not use: a module "
-          + "action has no setting key, and an advice has no module. A disabled module's settings "
-          + "cannot be read, so propose enabling it on its own, and configure it once the Player has "
-          + "applied that.";
+          + "Every action carries a reason the Player can read, and is_side_effect, which is false only "
+          + "when the Player asked for that change: send it every time. Leave out the fields a kind "
+          + "does not use: a module action has no setting key, and an advice has no module. A disabled "
+          + "module's settings cannot be read, so propose enabling it on its own, and configure it once "
+          + "the Player has applied that.";
     }
 }

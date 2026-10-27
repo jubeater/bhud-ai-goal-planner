@@ -97,6 +97,14 @@ namespace jubeater.aigoalplanner.Core
         private PlanReview _review;
 
         /// <summary>
+        /// What Auto-apply already applied of the Plan that is waiting in the Review. The Review keeps
+        /// the Player's remaining Actions, so the Continuation waits for them; when it comes, it
+        /// carries this outcome as well as the Player's, and the model sees everything this Request
+        /// did (ADR-0010).
+        /// </summary>
+        private AppliedPlan _appliedBeforeReview;
+
+        /// <summary>
         /// A Chat talks to the model <paramref name="chatClient"/> builds and is told what it is by
         /// <paramref name="systemPrompt"/>. Both are asked again for every Request, so a change of
         /// Settings takes effect without losing the conversation. <paramref name="tools"/> holds the
@@ -283,7 +291,8 @@ namespace jubeater.aigoalplanner.Core
         /// The Review closes before anything is written, so a second click cannot apply the same plan
         /// twice. A Chat the Player has left mid-Apply does not get the report, but the change itself
         /// is the Player's configuration and still happened; its Undo record is in the journal either
-        /// way.
+        /// way. An Apply the Player cancels part-way reports and records what it got through, and
+        /// then ends the Request as cancelled: the Continuation belongs to an Apply that finished.
         /// </remarks>
         public async Task ApplyAsync(IEnumerable<int> actionIndexes, CancellationToken cancellationToken = default) {
             if (_plans == null) return;
@@ -309,6 +318,10 @@ namespace jubeater.aigoalplanner.Core
 
                 if (!TryAppendApplyOutcome(generation, applied)) return;
 
+                // The Player stopped this Apply part-way. What was applied is reported and in the
+                // journal, and the Request ends as any cancelled Request does.
+                cancellationToken.ThrowIfCancellationRequested();
+
                 try {
                     await RunRequest(generation, cancellationToken).ConfigureAwait(false);
                 } finally {
@@ -320,8 +333,10 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
-        /// The Player dismissed the open Review: nothing in it is applied. The model is told, so its
-        /// next answer does not assume the changes it proposed are in place.
+        /// The Player dismissed the open Review: nothing left in it is applied. The model is told, so
+        /// its next answer does not assume the changes it proposed are in place — and when
+        /// Auto-apply had already applied some of them, it is told that too, rather than being told
+        /// the whole Plan was dropped.
         /// </summary>
         public void CancelReview() {
             int generation = Volatile.Read(ref _generation);
@@ -329,10 +344,15 @@ namespace jubeater.aigoalplanner.Core
             lock (_messagesLock) {
                 if (generation != Volatile.Read(ref _generation) || _review == null) return;
 
-                _review = null;
+                AppliedPlan earlier = _appliedBeforeReview;
+
+                _review              = null;
+                _appliedBeforeReview = null;
 
                 _modelHistory.Add(new AiChatMessage(ChatRole.User,
-                                                    "The Player dismissed the plan. Nothing in it was applied."));
+                                                    earlier == null
+                                                        ? "The Player dismissed the plan. Nothing in it was applied."
+                                                        : "The Player dismissed the rest of the plan. " + earlier.Describe()));
             }
 
             ReviewChanged?.Invoke(this, EventArgs.Empty);
@@ -378,7 +398,8 @@ namespace jubeater.aigoalplanner.Core
                 _messages.Clear();
                 _modelHistory.Clear();
                 _progressLines.Clear();
-                _review = null;
+                _review              = null;
+                _appliedBeforeReview = null;
                 Interlocked.Increment(ref _generation);
             }
 
@@ -396,8 +417,8 @@ namespace jubeater.aigoalplanner.Core
         /// <summary>
         /// One Request, from the model's first answer to the Chat's last word: tool rounds as long as
         /// the model calls read-only tools, then the reply — or a Plan, which ends the Request with
-        /// the Review open, unless Auto-apply already carried some of it out and the model is asked
-        /// to carry on from there. Everything it shows or tells the model is gated on
+        /// the Review open, unless Auto-apply carried all of it out and the model is asked to carry
+        /// on from there. Everything it shows or tells the model is gated on
         /// <paramref name="generation"/>, so nothing lands in a Chat the Player has left.
         /// </summary>
         private async Task RunRequest(int generation, CancellationToken cancellationToken) {
@@ -582,6 +603,10 @@ namespace jubeater.aigoalplanner.Core
 
                 _messages.Add(new ChatMessage(ChatMessageAuthor.Player, request));
                 _modelHistory.Add(new AiChatMessage(ChatRole.User, request));
+
+                // A new Request is a new turn of the conversation: what an earlier one left applied
+                // for a Review that is still open does not belong to its Continuation.
+                _appliedBeforeReview = null;
             }
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
@@ -689,6 +714,15 @@ namespace jubeater.aigoalplanner.Core
 
             ShowReport(generation, applied.Describe());
 
+            // The Player still has Actions to decide on, so the Continuation waits: the model's next
+            // Plan would replace the Review it has not answered yet. What Auto-apply did is
+            // remembered, and goes to the model with the rest once the Player decides (ADR-0010).
+            if (!remaining.IsEmpty) {
+                SetAppliedBeforeReview(generation, applied);
+
+                return false;
+            }
+
             return TryAppendApplyOutcome(generation, applied);
         }
 
@@ -728,6 +762,18 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         private void ShowReport(int generation, string text) {
             TryAppend(generation, new ChatMessage(ChatMessageAuthor.Report, text));
+        }
+
+        /// <summary>
+        /// Remembers what Auto-apply applied of the Plan the Review still holds, so the Continuation
+        /// can carry it when the Player has finished with the rest.
+        /// </summary>
+        private void SetAppliedBeforeReview(int generation, AppliedPlan applied) {
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return;
+
+                _appliedBeforeReview = applied;
+            }
         }
 
         /// <summary>
@@ -797,15 +843,25 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>
         /// Tells the model what the Apply came to, as one message of its own, so its next turn works
-        /// from the state the Apply made. It holds what was applied and what failed and nothing else:
-        /// no undo record, no earlier Chat, and no value the Player did not see in the Review.
+        /// from the state the Apply made. When Auto-apply had already applied part of this Plan while
+        /// the Player decided the rest, that outcome travels with this one, so the Continuation sees
+        /// everything the Request applied. It holds what was applied and what failed and nothing
+        /// else: no undo record, no earlier Chat, and no value the Player did not see in the Review.
         /// </summary>
         private bool TryAppendApplyOutcome(int generation, AppliedPlan applied) {
             lock (_messagesLock) {
                 if (generation != Volatile.Read(ref _generation)) return false;
 
+                AppliedPlan earlier = _appliedBeforeReview;
+
+                _appliedBeforeReview = null;
+
+                string text = "The Player applied the plan you proposed. ";
+
+                if (earlier != null) text += earlier.Describe() + " ";
+
                 _modelHistory.Add(new AiChatMessage(ChatRole.User,
-                                                    "The Player applied the plan you proposed. " + applied.Describe()
+                                                    text + applied.Describe()
                                                   + " Look up anything you now need to, and tell the Player what you suggest next."));
             }
 

@@ -29,6 +29,11 @@ namespace jubeater.aigoalplanner.Core
         /// Review never offered it, and applying it would be applying something the Player did not
         /// approve.
         /// </summary>
+        /// <remarks>
+        /// A cancellation part-way does not throw away what was already done: the outcomes and their
+        /// Undo steps come back in the answer, marked <see cref="AppliedPlan.Cancelled"/>, so the
+        /// caller can record and report them before the Request ends (ADR-0010).
+        /// </remarks>
         public async Task<AppliedPlan> ApplyAsync(PlanReview review, IEnumerable<int> actionIndexes,
                                                   CancellationToken cancellationToken) {
             if (review == null) throw new ArgumentNullException(nameof(review));
@@ -37,7 +42,12 @@ namespace jubeater.aigoalplanner.Core
             var undo     = new List<UndoStep>();
 
             foreach (ReviewedAction action in Chosen(review, actionIndexes)) {
-                outcomes.Add(await ApplyOneAsync(action, undo, cancellationToken).ConfigureAwait(false));
+                try {
+                    outcomes.Add(await ApplyOneAsync(action, undo, cancellationToken).ConfigureAwait(false));
+                } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                    // What is done is done, and the Player can still undo it.
+                    return new AppliedPlan(outcomes, undo, cancelled: true);
+                }
             }
 
             return new AppliedPlan(outcomes, undo);
@@ -117,6 +127,9 @@ namespace jubeater.aigoalplanner.Core
                 return new ApplyOutcome(action, false, ProblemOr(change.Problem, "the module did not accept the change"));
             }
 
+            // A Module that already had the state asked for is done, but there is nothing to undo.
+            if (!change.Changed) return new ApplyOutcome(action, true, changed: false);
+
             // Undo is the state the Module had before: whatever that was, not the opposite of what
             // was asked for.
             undo.Add(new UndoStep(change.WasEnabled ? PlanActionKind.EnableModule : PlanActionKind.DisableModule,
@@ -134,6 +147,9 @@ namespace jubeater.aigoalplanner.Core
             if (!change.Applied) {
                 return new ApplyOutcome(action, false, ProblemOr(change.Problem, "the setting did not accept the value"));
             }
+
+            // The Setting already holds that value: nothing to write back, so no Undo step.
+            if (!change.Changed) return new ApplyOutcome(action, true, changed: false);
 
             undo.Add(new UndoStep(PlanActionKind.SetSetting, action.ModuleNamespace, action.ModuleName,
                                   action.SettingKey, action.TargetName, change.PreviousValue));

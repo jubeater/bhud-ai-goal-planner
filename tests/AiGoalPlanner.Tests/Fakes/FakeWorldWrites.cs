@@ -31,6 +31,8 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             InstalledModuleInfo module     = Modules[index];
             bool                wasEnabled = module.Enabled;
 
+            if (wasEnabled == enabled) return Task.FromResult(new ModuleChange(true, wasEnabled, changed: false));
+
             Modules[index] = new InstalledModuleInfo(module.Namespace, module.Name, module.Version, module.Description, enabled);
 
             return Task.FromResult(new ModuleChange(true, wasEnabled));
@@ -53,6 +55,12 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 
             if (!TryWrite(result.Settings, string.Empty, key, value, out string previous, out IReadOnlyList<ModuleSettingInfo> updated)) {
                 return Task.FromResult(new ModuleSettingChange(false, null, "That module has no such setting."));
+            }
+
+            // The same no-op the real world makes: a Setting that already holds the value is not a
+            // change, so it leaves no record for Undo.
+            if (string.Equals(previous, value, StringComparison.Ordinal)) {
+                return Task.FromResult(new ModuleSettingChange(true, previous, changed: false));
             }
 
             SettingsByNamespace[@namespace] = new ModuleSettingsResult(result.Status, result.ModuleName, updated,

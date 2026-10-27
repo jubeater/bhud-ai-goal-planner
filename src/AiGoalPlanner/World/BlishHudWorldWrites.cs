@@ -41,7 +41,8 @@ namespace jubeater.aigoalplanner.World
 
             bool wasEnabled = manager.Enabled;
 
-            if (wasEnabled == enabled) return Task.FromResult(new ModuleChange(true, wasEnabled));
+            // Already in the state the Action asks for: nothing to do, and nothing to undo.
+            if (wasEnabled == enabled) return Task.FromResult(new ModuleChange(true, wasEnabled, changed: false));
 
             try {
                 if (enabled) {
@@ -86,12 +87,26 @@ namespace jubeater.aigoalplanner.World
 
             string previous = ValueTextOf(entry);
 
+            PropertyInfo valueProperty = entry.GetType().GetProperty("Value");
+
+            if (valueProperty == null) return NotApplied("That setting cannot be written.");
+
+            object newValue;
+
             try {
-                PropertyInfo valueProperty = entry.GetType().GetProperty("Value");
+                newValue = AsValueOf(entry.SettingType, value);
+            } catch (Exception exception) {
+                return NotApplied("The module did not accept the value (" + exception.GetType().Name + ").");
+            }
 
-                if (valueProperty == null) return NotApplied("That setting cannot be written.");
+            // A Setting that already holds that value is not a change: nothing is written, and
+            // nothing goes into the Undo journal (ADR-0010).
+            if (Equals(ValueOf(entry), newValue)) {
+                return Task.FromResult(new ModuleSettingChange(true, previous, changed: false));
+            }
 
-                valueProperty.SetValue(entry, AsValueOf(entry.SettingType, value), null);
+            try {
+                valueProperty.SetValue(entry, newValue, null);
             } catch (Exception exception) {
                 // The type, not the message: a message can carry a Setting's value back out.
                 return NotApplied("The module did not accept the value (" + exception.GetType().Name + ").");

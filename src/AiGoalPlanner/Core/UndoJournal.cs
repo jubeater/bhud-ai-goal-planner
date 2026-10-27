@@ -31,11 +31,13 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
-        /// Remembers one Apply. An Apply that changed nothing — a plan the validator rejected, or a
-        /// Player who approved nothing — is not worth an Undo, so it is not recorded.
+        /// Remembers one Apply. An Apply that changed nothing — a plan the validator rejected, a
+        /// Player who approved nothing, or a run of Actions that asked for the values already in
+        /// place — has nothing to put back, so it is not recorded and cannot push a real Undo out of
+        /// the journal (ADR-0010).
         /// </summary>
         public void Record(AppliedPlan applied) {
-            if (applied == null || !applied.AnyApplied) return;
+            if (applied == null || !applied.AnyChanged) return;
 
             lock (_lock) {
                 _applied.Add(applied);

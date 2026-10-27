@@ -70,7 +70,7 @@ namespace jubeater.aigoalplanner.Core
 
             _journal.Record(applied);
             Log("Plan applied: " + applied.AppliedCount + " of " + applied.Outcomes.Count + " actions, "
-                  + applied.FailedCount + " failed");
+                  + applied.FailedCount + " failed" + (applied.Cancelled ? ", cancelled part-way" : string.Empty));
 
             return applied;
         }

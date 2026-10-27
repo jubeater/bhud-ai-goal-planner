@@ -12,13 +12,21 @@ namespace jubeater.aigoalplanner.Core
     /// </remarks>
     public sealed class ModuleChange
     {
-        public ModuleChange(bool applied, bool wasEnabled, string problem = null) {
+        public ModuleChange(bool applied, bool wasEnabled, string problem = null, bool changed = true) {
             Applied    = applied;
             WasEnabled = wasEnabled;
             Problem    = problem ?? string.Empty;
+            Changed    = changed && applied;
         }
 
         public bool Applied { get; }
+
+        /// <summary>
+        /// Whether the Module is now in a different state than it was. A Module that was already in
+        /// the state the Action asked for is applied but unchanged, and an Apply that changed nothing
+        /// is not worth an Undo step (ADR-0010).
+        /// </summary>
+        public bool Changed { get; }
 
         /// <summary>The state before the change, whether or not it happened.</summary>
         public bool WasEnabled { get; }
@@ -33,13 +41,20 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     public sealed class ModuleSettingChange
     {
-        public ModuleSettingChange(bool applied, string previousValue, string problem = null) {
+        public ModuleSettingChange(bool applied, string previousValue, string problem = null, bool changed = true) {
             Applied       = applied;
             PreviousValue = previousValue ?? string.Empty;
             Problem       = problem      ?? string.Empty;
+            Changed       = changed && applied;
         }
 
         public bool Applied { get; }
+
+        /// <summary>
+        /// Whether the Setting holds a different value than it did. A Setting that already had the
+        /// value the Action asked for is applied but unchanged, and nothing is written for it.
+        /// </summary>
+        public bool Changed { get; }
 
         /// <summary>The value before the change, in the same text form a Lookup would read.</summary>
         public string PreviousValue { get; }

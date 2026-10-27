@@ -44,8 +44,8 @@ namespace jubeater.aigoalplanner.Core
           + "\"key\":{\"type\":\"string\",\"description\":\"The setting key, for set_setting.\"},"
           + "\"value\":{\"type\":\"string\",\"description\":\"The setting's new value as text, for set_setting.\"},"
           + "\"reason\":{\"type\":\"string\",\"description\":\"Why you propose this, for the Player to read.\"},"
-          + "\"is_side_effect\":{\"type\":\"boolean\",\"description\":\"True when the Player did not ask for this change.\"}"
-          + "},\"required\":[\"kind\",\"reason\"]}}"
+          + "\"is_side_effect\":{\"type\":\"boolean\",\"description\":\"True when the Player did not ask for this change. Always send it.\"}"
+          + "},\"required\":[\"kind\",\"reason\",\"is_side_effect\"]}}"
           + "},\"required\":[\"reply\",\"actions\"]}";
 
         private static readonly JsonDocument Schema = JsonDocument.Parse(SchemaJson);
@@ -94,7 +94,7 @@ namespace jubeater.aigoalplanner.Core
             PlanActionKind kind = KindOf(kindText);
 
             string reason       = TextOf(Value(action, "reason")).Trim();
-            bool   isSideEffect = FlagOf(Value(action, "is_side_effect"));
+            bool   isSideEffect = SideEffectOf(Value(action, "is_side_effect"));
 
             switch (kind) {
                 case PlanActionKind.EnableModule:
@@ -149,11 +149,17 @@ namespace jubeater.aigoalplanner.Core
             }
         }
 
-        private static bool FlagOf(object value) {
+        /// <summary>
+        /// Whether an Action is a Side Effect: a change the Player did not ask for. It is the one flag
+        /// Auto-apply turns on, so only a clear "no" is read as one — a <c>false</c>, or the text
+        /// "false". A flag that is missing, or that is not a boolean at all, is read as a Side Effect,
+        /// so the Action waits for Review instead of being applied unasked (ADR-0005).
+        /// </summary>
+        private static bool SideEffectOf(object value) {
             switch (value) {
                 case bool flag:   return flag;
-                case string text: return bool.TryParse(text.Trim(), out bool parsed) && parsed;
-                default:          return false;
+                case string text: return !bool.TryParse(text.Trim(), out bool parsed) || parsed;
+                default:          return true;
             }
         }
 
