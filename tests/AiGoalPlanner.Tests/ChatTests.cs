@@ -439,6 +439,18 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void A_freshly_made_unavailable_Chat_shows_its_reason_from_the_start() {
+            var chat = Chat.Unavailable("AI Goal Planner failed to load and cannot answer this session.");
+
+            // The Player sees why the Chat is dead the first time the window opens, not after a
+            // first Request or a New chat.
+            ChatMessage notice = Assert.Single(chat.Messages);
+
+            Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+            Assert.Equal("AI Goal Planner failed to load and cannot answer this session.", notice.Text);
+        }
+
+        [Fact]
         public async Task An_unavailable_Chat_never_reaches_a_Provider_and_answers_every_Request_with_its_reason() {
             // There is no client to call: Chat.Unavailable takes none, so a Provider cannot be
             // reached by construction.
@@ -448,6 +460,10 @@ namespace jubeater.aigoalplanner.Tests
             await chat.SendAsync("And now?");
 
             Assert.Collection(chat.Messages,
+                              notice => {
+                                  Assert.Equal(ChatMessageAuthor.Notice, notice.Author);
+                                  Assert.Contains("failed to load", notice.Text);
+                              },
                               request => {
                                   Assert.Equal(ChatMessageAuthor.Player, request.Author);
                                   Assert.Equal("What modules do I have?", request.Text);

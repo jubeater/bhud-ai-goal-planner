@@ -30,6 +30,14 @@ namespace jubeater.aigoalplanner
         private static readonly Logger Logger = Logger.GetLogger<AiGoalPlannerModule>();
 
         /// <summary>
+        /// The one line the Player is told when the module failed to load: the Chat cannot answer
+        /// this session, and the log says why. The failure Notice the Chat carries, whatever catch
+        /// shows it.
+        /// </summary>
+        private const string LoadFailureNotice =
+            "AI Goal Planner failed to load and cannot answer this session. Check the Blish HUD log for the error, then re-enable the module.";
+
+        /// <summary>
         /// A constant, so this module's corner icon keeps its place in the Player's row of icons
         /// instead of moving around between sessions.
         /// </summary>
@@ -89,7 +97,7 @@ namespace jubeater.aigoalplanner
             } catch (Exception exception) {
                 Logger.Error(exception, "AI Goal Planner failed to load its planning core. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
-                _chat = Chat.Unavailable("AI Goal Planner failed to load and cannot answer this session. Check the Blish HUD log for the error, then re-enable the module.");
+                _chat = Chat.Unavailable(LoadFailureNotice);
             }
         }
 
@@ -151,7 +159,7 @@ namespace jubeater.aigoalplanner
                 Logger.Error(exception, "AI Goal Planner failed to load. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
                 if (_chat != null && !_chat.IsUnavailable) {
-                    _chat.ShowNotice("AI Goal Planner failed to load and cannot answer this session. Check the Blish HUD log for the error, then re-enable the module.");
+                    _chat.ShowNotice(LoadFailureNotice);
                 }
 
                 return Task.CompletedTask;
@@ -173,7 +181,7 @@ namespace jubeater.aigoalplanner
                 Logger.Error(exception, "AI Goal Planner failed to finish loading. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
                 if (_chat != null && !_chat.IsUnavailable) {
-                    _chat.ShowNotice("AI Goal Planner failed to load and cannot answer this session. Check the Blish HUD log for the error, then re-enable the module.");
+                    _chat.ShowNotice(LoadFailureNotice);
                 }
             }
         }

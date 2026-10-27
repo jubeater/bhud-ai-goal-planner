@@ -78,6 +78,10 @@ namespace jubeater.aigoalplanner.Core
             if (_unavailableReason == null) {
                 _chatClient   = chatClient   ?? throw new ArgumentNullException(nameof(chatClient));
                 _systemPrompt = systemPrompt ?? throw new ArgumentNullException(nameof(systemPrompt));
+            } else {
+                // The failure is visible the first time the window opens, the same Notice that
+                // New chat restores.
+                _messages.Add(new ChatMessage(ChatMessageAuthor.Notice, _unavailableReason));
             }
 
             _tools = tools;
@@ -85,9 +89,10 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>
         /// Makes a Chat that cannot be used, e.g. because the module failed to load (ADR-0008). It
-        /// has no client at all, so nothing is ever sent to a Provider: every Request shows the
-        /// Player's words followed by <paramref name="reason"/> as a Notice, and starting a new Chat
-        /// shows the reason again, so it cannot be cleared away.
+        /// has no client at all, so nothing is ever sent to a Provider. It starts with
+        /// <paramref name="reason"/> as a Notice, so the Player sees it from the first time the
+        /// window opens; every Request shows the Player's words followed by the reason again, and
+        /// starting a new Chat shows it again, so it cannot be cleared away.
         /// </summary>
         public static Chat Unavailable(string reason) {
             return new Chat(null, null, null, reason ?? throw new ArgumentNullException(nameof(reason)));
