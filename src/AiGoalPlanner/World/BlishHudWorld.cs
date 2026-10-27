@@ -23,7 +23,7 @@ namespace jubeater.aigoalplanner.World
     /// touches no control, so it changes nothing the Player can see; it only has to happen on the
     /// right thread.
     /// </remarks>
-    public sealed class BlishHudWorld : IBlishHudWorld
+    public sealed partial class BlishHudWorld : IBlishHudWorld
     {
         private static readonly IReadOnlyList<ModuleSettingInfo> NoSettings = new ModuleSettingInfo[0];
 
@@ -137,7 +137,8 @@ namespace jubeater.aigoalplanner.World
                                              TypeNameOf(entry),
                                              ValueTextOf(entry),
                                              RangeBoundOf(entry, "MinValue"),
-                                             RangeBoundOf(entry, "MaxValue"));
+                                             RangeBoundOf(entry, "MaxValue"),
+                                             AllowedValuesOf(entry));
             } catch (Exception) {
                 return null;
             }

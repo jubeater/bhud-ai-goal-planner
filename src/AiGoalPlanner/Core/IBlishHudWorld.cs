@@ -29,6 +29,25 @@ namespace jubeater.aigoalplanner.Core
         /// enabled; its result says so.
         /// </summary>
         Task<ModuleSettingsResult> GetModuleSettingsAsync(string @namespace, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Enables or disables one Installed Module, the way the Player's own module list does. It
+        /// answers whether it happened, the state before, and — when it did not — why.
+        /// </summary>
+        /// <remarks>
+        /// This is the one write a Lookup never makes. Only Apply and Undo call it, and both go
+        /// through the same decorator the reads do, so it happens on the game thread (ADR-0009). A
+        /// write answers from live state and, like a read, must not wait for anything: everything it
+        /// touches happens inside the queued call.
+        /// </remarks>
+        Task<ModuleChange> SetModuleEnabledAsync(string @namespace, bool enabled, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Changes one Setting of one enabled Module. <paramref name="value"/> is the text form the
+        /// Lookups hand out: <c>true</c>/<c>false</c>, an invariant number, or an enum's name. It
+        /// answers whether it happened, the value before, and — when it did not — why.
+        /// </summary>
+        Task<ModuleSettingChange> SetSettingAsync(string @namespace, string key, string value, CancellationToken cancellationToken);
     }
 
     /// <summary>
@@ -115,9 +134,10 @@ namespace jubeater.aigoalplanner.Core
     public sealed class ModuleSettingInfo
     {
         private static readonly IReadOnlyList<ModuleSettingInfo> NoChildren = new ModuleSettingInfo[0];
+        private static readonly IReadOnlyList<string>            NoAllowed  = new string[0];
 
         public ModuleSettingInfo(string key, string displayName, string description, string typeName, string value,
-                                 string min, string max) {
+                                 string min, string max, IReadOnlyList<string> allowedValues = null) {
             if (key == null) throw new ArgumentNullException(nameof(key));
 
             Key         = key;
@@ -128,6 +148,7 @@ namespace jubeater.aigoalplanner.Core
             Min         = min;
             Max         = max;
             Children    = NoChildren;
+            AllowedValues = allowedValues ?? NoAllowed;
         }
 
         private ModuleSettingInfo(string key, string displayName, string description, IReadOnlyList<ModuleSettingInfo> children) {
@@ -142,6 +163,7 @@ namespace jubeater.aigoalplanner.Core
             Max            = null;
             Children       = children ?? NoChildren;
             IsSubcollection = true;
+            AllowedValues  = NoAllowed;
         }
 
         /// <summary>
@@ -166,6 +188,13 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>The largest value a range Setting accepts, or null when it has no range.</summary>
         public string Max { get; }
+
+        /// <summary>
+        /// The values an enumerated Setting accepts, in its own order, or empty for any other kind
+        /// of Setting. A Plan can only set one of these, so the AI is told the list instead of
+        /// guessing at a name.
+        /// </summary>
+        public IReadOnlyList<string> AllowedValues { get; }
 
         /// <summary>The Settings inside a subcollection, empty for a Setting.</summary>
         public IReadOnlyList<ModuleSettingInfo> Children { get; }

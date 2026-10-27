@@ -35,6 +35,17 @@ namespace jubeater.aigoalplanner.Core
             return ReadAsync(() => _world.GetModuleSettingsAsync(@namespace, cancellationToken), cancellationToken);
         }
 
+        public Task<ModuleChange> SetModuleEnabledAsync(string @namespace, bool enabled, CancellationToken cancellationToken) {
+            // A write is handed to the game thread exactly like a read is, and answers the same way.
+            return ReadAsync(() => _world.SetModuleEnabledAsync(@namespace, enabled, cancellationToken), cancellationToken);
+        }
+
+        public Task<ModuleSettingChange> SetSettingAsync(string @namespace, string key, string value,
+                                                         CancellationToken cancellationToken) {
+            // A write is handed to the game thread exactly like a read is, and answers the same way.
+            return ReadAsync(() => _world.SetSettingAsync(@namespace, key, value, cancellationToken), cancellationToken);
+        }
+
         /// <summary>
         /// Hands one read to the game thread and carries its answer back. The read itself is the
         /// queued call: a world read answers from live state, so its task is already complete when
@@ -49,3 +60,4 @@ namespace jubeater.aigoalplanner.Core
         }
     }
 }
+

@@ -5,9 +5,12 @@ modules to reach a goal you describe in chat. The design is tracked as GitHub is
 `GLOSSARY.md` and `docs/adr/` explain the terms and the decisions behind it.
 
 **Status:** the Chat talks to a real Provider and answers from the Player's real setup: the AI can
-list the installed modules and read one module's settings. A corner icon opens the Chat window,
-**Provider settings** stores the endpoint, the model and (optionally) the API key, and a Send comes
-back as a real AI reply. There are no Plans yet, so the AI can only answer in words.
+list the installed modules and read one module's settings, and it proposes changes as a Plan through
+`submit_plan`. The Review under the conversation shows each Action with the value it would change,
+why, and a badge when it is a Side Effect; **Apply** changes what the Player approved and enables or
+disables Modules, **Undo** puts the last ten Applies back, and Auto-apply (off by default) may take
+Setting changes on its own. A corner icon opens the Chat window and **Provider settings** stores the
+endpoint, the model and (optionally) the API key.
 
 ## Build
 
