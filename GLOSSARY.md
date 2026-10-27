@@ -26,7 +26,8 @@ _Avoid_: Error, warning, system message
 **System Prompt**:
 The fixed message the Chat sends ahead of the Player's words on every Request: the Identity message,
 then what the AI may talk about, that it only proposes changes and never makes them, and that it
-answers from the Player's real setup in the language the Player wrote in. The Player never sees it.
+answers from the Player's real setup in the language of the Player's most recent message. The Player
+never sees it.
 _Avoid_: Instruction, preamble, personality
 
 **Identity message**:

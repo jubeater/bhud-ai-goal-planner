@@ -1,3 +1,5 @@
+using System;
+
 namespace jubeater.aigoalplanner.Core
 {
     /// <summary>
@@ -8,13 +10,15 @@ namespace jubeater.aigoalplanner.Core
     {
         /// <summary>
         /// A registry of this version's Lookups against <paramref name="world"/>, the host that
-        /// answers them.
+        /// answers them. <paramref name="logDebug"/> is where each Lookup's one line of diagnostics
+        /// goes — its name, how long it took, what it read and how big the answer is — or null when
+        /// nobody is listening.
         /// </summary>
-        public static ToolRegistry For(IBlishHudWorld world) {
+        public static ToolRegistry For(IBlishHudWorld world, Action<string> logDebug = null) {
             var tools = new ToolRegistry();
 
-            tools.Register(ToolAccess.ReadOnly, ListInstalledModulesTool.Create(world), ListInstalledModulesTool.Progress);
-            tools.Register(ToolAccess.ReadOnly, GetModuleSettingsTool.Create(world), GetModuleSettingsTool.Progress);
+            tools.Register(ToolAccess.ReadOnly, ListInstalledModulesTool.Create(world, logDebug), ListInstalledModulesTool.Progress);
+            tools.Register(ToolAccess.ReadOnly, GetModuleSettingsTool.Create(world, logDebug), GetModuleSettingsTool.Progress);
 
             return tools;
         }

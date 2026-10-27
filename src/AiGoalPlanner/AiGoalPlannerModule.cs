@@ -93,7 +93,7 @@ namespace jubeater.aigoalplanner
             // says what happened, and nothing reaches a Provider. New chat shows the reason again,
             // so it cannot be cleared away.
             try {
-                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools());
+                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug);
             } catch (Exception exception) {
                 Logger.Error(exception, "AI Goal Planner failed to load its planning core. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
@@ -105,8 +105,24 @@ namespace jubeater.aigoalplanner
         /// The Lookups the model may call, against the real Blish HUD host. The world reads live
         /// state on every Lookup, so a module enabled mid-session is seen from its next Lookup on.
         /// </summary>
+        /// <remarks>
+        /// The Chat thinks on a thread-pool thread, and Blish HUD and the Modules only expect their
+        /// state to be read on the game thread, so every read is handed to Blish HUD's update loop
+        /// first. Reading another module's Settings anywhere else makes that module run its
+        /// compliance code off the game thread, which is what made Event Table log a resolution
+        /// warning during the in-game test of #5.
+        /// </remarks>
         private ToolRegistry BuildTools() {
-            return Lookups.For(new BlishHudWorld());
+            return Lookups.For(new GameThreadWorld(new BlishHudWorld(), new OverlayGameThread()), LogDebug);
+        }
+
+        /// <summary>
+        /// Where the Chat and the Lookups put their one line of diagnostics per Request: the Blish
+        /// HUD log, at debug level. It holds timing, finish reasons and counts, never a Setting's
+        /// value and never anything a Provider sent back.
+        /// </summary>
+        private static void LogDebug(string message) {
+            Logger.Debug(message);
         }
 
         private void DefineProviderSettings() {

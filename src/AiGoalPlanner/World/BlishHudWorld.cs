@@ -17,9 +17,11 @@ namespace jubeater.aigoalplanner.World
     /// settings of the ones that are enabled.
     /// </summary>
     /// <remarks>
-    /// The Lookups run while the model thinks, so on a thread that is not the game's update thread.
-    /// Everything read here is a snapshot of what Blish HUD holds, and reading it touches no control,
-    /// so it is safe to ask for it off the game thread.
+    /// The Lookups run while the model thinks, on a thread that is not the game's update thread, so
+    /// this is never called from there: <see cref="GameThreadWorld"/> queues each read on the game
+    /// thread first, because Blish HUD and the Modules expect their state to be read on it. Reading
+    /// touches no control, so it changes nothing the Player can see; it only has to happen on the
+    /// right thread.
     /// </remarks>
     public sealed class BlishHudWorld : IBlishHudWorld
     {
@@ -52,7 +54,8 @@ namespace jubeater.aigoalplanner.World
             // The Lookup refuses this module's own settings already; the world refuses them too, so
             // they stay private even if a second reader ever skips the Lookup.
             if (string.Equals(wanted, GetModuleSettingsTool.ThisModuleNamespace, StringComparison.OrdinalIgnoreCase)) {
-                return Task.FromResult(new ModuleSettingsResult(ModuleSettingsStatus.ThisModule, "AI Goal Planner", NoSettings));
+                return Task.FromResult(new ModuleSettingsResult(ModuleSettingsStatus.ThisModule, "AI Goal Planner", NoSettings,
+                                                                GetModuleSettingsTool.ThisModuleNamespace));
             }
 
             ModuleManager manager = GameService.Module.Modules
@@ -68,7 +71,8 @@ namespace jubeater.aigoalplanner.World
             // states answer "enable it first" — the Enabled check has to come first, because there
             // is nothing to reflect on for a module that is not running.
             if (!manager.Enabled) {
-                return Task.FromResult(new ModuleSettingsResult(ModuleSettingsStatus.ModuleDisabled, manager.Manifest.Name, NoSettings));
+                return Task.FromResult(new ModuleSettingsResult(ModuleSettingsStatus.ModuleDisabled, manager.Manifest.Name, NoSettings,
+                                                                manager.Manifest.Namespace));
             }
 
             SettingCollection settings = SettingsOf(manager);
@@ -76,7 +80,8 @@ namespace jubeater.aigoalplanner.World
             if (settings == null) {
                 // Enabled, but its instance is not running yet (still loading), so its settings are
                 // not readable either. The same answer applies until it is.
-                return Task.FromResult(new ModuleSettingsResult(ModuleSettingsStatus.ModuleDisabled, manager.Manifest.Name, NoSettings));
+                return Task.FromResult(new ModuleSettingsResult(ModuleSettingsStatus.ModuleDisabled, manager.Manifest.Name, NoSettings,
+                                                                manager.Manifest.Namespace));
             }
 
             var entries = new List<ModuleSettingInfo>();
@@ -87,7 +92,8 @@ namespace jubeater.aigoalplanner.World
                 if (info != null) entries.Add(info);
             }
 
-            return Task.FromResult(new ModuleSettingsResult(ModuleSettingsStatus.Ok, manager.Manifest.Name, entries));
+            return Task.FromResult(new ModuleSettingsResult(ModuleSettingsStatus.Ok, manager.Manifest.Name, entries,
+                                                            manager.Manifest.Namespace));
         }
 
         /// <summary>
