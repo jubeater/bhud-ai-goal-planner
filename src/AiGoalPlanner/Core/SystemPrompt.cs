@@ -4,8 +4,9 @@ namespace jubeater.aigoalplanner.Core
 {
     /// <summary>
     /// The fixed system prompt the Chat sends ahead of the Player's words: which product the model
-    /// is part of, what it may talk about, that it only proposes changes and never makes them, and
-    /// that it answers from the Player's real setup in the Player's language.
+    /// is part of, what it may talk about, that it only proposes changes and never makes them, that
+    /// it answers from the Player's real setup in the Player's language, and that it writes in
+    /// plain text.
     /// </summary>
     /// <remarks>
     /// The prompt is fixed text so the Lookups and the rules stay the same for every Provider and

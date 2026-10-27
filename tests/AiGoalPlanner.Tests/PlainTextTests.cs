@@ -19,6 +19,24 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal(expected, PlainText.Strip(input));
         }
 
+        [Fact]
+        public void Bold_italic_with_triple_markers_is_stripped() {
+            Assert.Equal("bold italic", PlainText.Strip("***bold italic***"));
+            Assert.Equal("bold italic", PlainText.Strip("___bold italic___"));
+        }
+
+        [Fact]
+        public void Nested_bold_and_italic_markers_are_both_stripped() {
+            Assert.Equal("a b c", PlainText.Strip("**a *b* c**"));
+        }
+
+        [Fact]
+        public void Unbalanced_markers_are_left_alone() {
+            Assert.Equal("**x", PlainText.Strip("**x"));
+            Assert.Equal("*x", PlainText.Strip("*x"));
+            Assert.Equal("_x", PlainText.Strip("_x"));
+        }
+
         [Theory]
         [InlineData("italic", "*italic*")]
         [InlineData("italic", "_italic_")]
@@ -35,6 +53,7 @@ namespace jubeater.aigoalplanner.Tests
         [InlineData("get_module_settings")]
         [InlineData("list_installed_modules")]
         [InlineData("user_password_hash")]
+        [InlineData("Hero_Challenge_points")]
         [InlineData("first_word and second_word")]
         public void Snake_case_words_are_not_broken_by_italic_stripping(string word) {
             Assert.Equal(word, PlainText.Strip(word));
@@ -56,12 +75,35 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Theory]
+        [InlineData("2*3*4")]
+        [InlineData("x*y and a*b")]
+        public void Asterisks_between_characters_are_not_eaten_as_italics(string text) {
+            Assert.Equal(text, PlainText.Strip(text));
+        }
+
+        [Fact]
+        public void Underscores_in_file_names_are_not_eaten() {
+            Assert.Equal("__init__.py", PlainText.Strip("__init__.py"));
+        }
+
+        [Fact]
+        public void Underscores_in_bare_urls_are_not_eaten() {
+            Assert.Equal("https://x.com/_private_/y", PlainText.Strip("https://x.com/_private_/y"));
+        }
+
+        [Theory]
         [InlineData("code", "`code`")]
         [InlineData("get_module_settings", "`get_module_settings`")]
         [InlineData("Call func() now", "Call `func()` now")]
         [InlineData("first and second", "`first` and `second`")]
         public void Inline_code_backticks_are_stripped(string expected, string input) {
             Assert.Equal(expected, PlainText.Strip(input));
+        }
+
+        [Fact]
+        public void Inline_code_content_is_preserved_exactly_without_further_emphasis_stripping() {
+            Assert.Equal("a*b*c", PlainText.Strip("`a*b*c`"));
+            Assert.Equal("__init__", PlainText.Strip("`__init__`"));
         }
 
         [Fact]
@@ -95,12 +137,28 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("#21 is the issue", PlainText.Strip("#21 is the issue"));
         }
 
+        [Fact]
+        public void Tags_and_issue_numbers_are_left_alone() {
+            Assert.Equal("#tag and #21 left alone", PlainText.Strip("#tag and #21 left alone"));
+        }
+
         [Theory]
         [InlineData("Verdant Brink", "[Verdant Brink](https://wiki.guildwars2.com/wiki/Verdant_Brink)")]
         [InlineData("See this link for details.", "See [this link](https://example.com) for details.")]
         [InlineData("first and second", "[first](http://a) and [second](http://b)")]
         public void Links_keep_only_the_link_text(string expected, string input) {
             Assert.Equal(expected, PlainText.Strip(input));
+        }
+
+        [Fact]
+        public void Links_with_balanced_parentheses_in_url_keep_only_link_text() {
+            Assert.Equal("wiki", PlainText.Strip("[wiki](https://wiki.guildwars2.com/wiki/Foo_(bar))"));
+        }
+
+        [Fact]
+        public void Images_are_converted_to_alt_text() {
+            Assert.Equal("alt", PlainText.Strip("![alt](https://example.com/image.png)"));
+            Assert.Equal("alt", PlainText.Strip("![alt](https://example.com/image_(1).png)"));
         }
 
         [Theory]
@@ -118,6 +176,12 @@ namespace jubeater.aigoalplanner.Tests
         public void Plus_and_asterisk_without_spaces_are_not_treated_as_list_markers() {
             Assert.Equal("+1 toughness", PlainText.Strip("+1 toughness"));
             Assert.Equal("italic", PlainText.Strip("*italic*"));
+        }
+
+        [Fact]
+        public void Numbered_lists_are_preserved() {
+            string input = "1. First step\n2. Second step";
+            Assert.Equal(input, PlainText.Strip(input));
         }
 
         [Fact]
@@ -157,11 +221,6 @@ namespace jubeater.aigoalplanner.Tests
               + "var plan = submit_plan();";
 
             Assert.Equal(expected, PlainText.Strip(input));
-        }
-
-        [Fact]
-        public void StripMarkdown_is_an_alias_for_Strip() {
-            Assert.Equal("clean text", PlainText.StripMarkdown("**clean text**"));
         }
 
         [Theory]

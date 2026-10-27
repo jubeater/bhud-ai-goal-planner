@@ -8,6 +8,16 @@ namespace jubeater.aigoalplanner.Core
     /// Strips common Markdown markup from AI replies so they draw cleanly as plain text in the Chat
     /// window.
     /// </summary>
+    /// <remarks>
+    /// Two choices are deliberate:
+    ///
+    /// Emphasis markers are only recognized at word boundaries — after the start of a line, whitespace
+    /// or punctuation, and before the end of a line, whitespace or punctuation — so snake_case names,
+    /// __init__ and multiplication like 2*3 survive untouched.
+    ///
+    /// Fenced code blocks drop the fence lines (``` or ```csharp) but keep the content inside, so
+    /// code and structured text remain readable in plain text without raw fence markers.
+    /// </remarks>
     public static class PlainText
     {
         private static readonly Regex CodeFenceRegex =
@@ -23,28 +33,31 @@ namespace jubeater.aigoalplanner.Core
             new Regex(@"^([ \t]*)[*+]([ \t]+)", RegexOptions.Compiled);
 
         private static readonly Regex LinkRegex =
-            new Regex(@"\[([^\]\r\n]+)\]\([^\)\r\n]+\)", RegexOptions.Compiled);
+            new Regex(@"!?\[([^\]\r\n]*)\]\(\s*(?:[^()\s]+|\([^()\s]*\))*(?:\s+[""'][^""']*[""'])?\s*\)", RegexOptions.Compiled);
+
+        private static readonly Regex BareUrlRegex =
+            new Regex(@"https?://\S+", RegexOptions.Compiled);
 
         private static readonly Regex InlineCodeRegex =
             new Regex(@"`([^`\r\n]+)`", RegexOptions.Compiled);
 
         private static readonly Regex BoldItalicAsteriskRegex =
-            new Regex(@"\*{3}(?!\s|\*)([^\r\n]+?)(?<!\s|\*)\*{3}", RegexOptions.Compiled);
+            new Regex(@"(?<![\p{L}\p{N}\*])\*{3}(?!\s|\*)([^\r\n]+?)(?<!\s|\*)\*{3}(?=$|\s|[^\p{L}\p{N}\*](?:[^\p{L}\p{N}]|$))", RegexOptions.Compiled);
 
         private static readonly Regex BoldItalicUnderscoreRegex =
-            new Regex(@"(?<![a-zA-Z0-9_])_{3}(?!\s|_)([^\r\n]+?)(?<!\s|_)_{3}(?![a-zA-Z0-9_])", RegexOptions.Compiled);
+            new Regex(@"(?<![\p{L}\p{N}_])_{3}(?!\s|_)([^\r\n]+?)(?<!\s|_)_{3}(?=$|\s|[^\p{L}\p{N}_](?:[^\p{L}\p{N}]|$))", RegexOptions.Compiled);
 
         private static readonly Regex BoldAsteriskRegex =
-            new Regex(@"\*{2}(?!\s|\*)([^\r\n]+?)(?<!\s|\*)\*{2}", RegexOptions.Compiled);
+            new Regex(@"(?<![\p{L}\p{N}\*])\*{2}(?!\s|\*)([^\r\n]+?)(?<!\s|\*)\*{2}(?=$|\s|[^\p{L}\p{N}\*](?:[^\p{L}\p{N}]|$))", RegexOptions.Compiled);
 
         private static readonly Regex BoldUnderscoreRegex =
-            new Regex(@"(?<![a-zA-Z0-9_])_{2}(?!\s|_)([^\r\n]+?)(?<!\s|_)_{2}(?![a-zA-Z0-9_])", RegexOptions.Compiled);
+            new Regex(@"(?<![\p{L}\p{N}_])_{2}(?!\s|_)([^\r\n]+?)(?<!\s|_)_{2}(?=$|\s|[^\p{L}\p{N}_](?:[^\p{L}\p{N}]|$))", RegexOptions.Compiled);
 
         private static readonly Regex ItalicAsteriskRegex =
-            new Regex(@"(?<!\*)\*(?!\s|\*)([^\r\n*]+?)(?<!\s|\*)\*(?!\*)", RegexOptions.Compiled);
+            new Regex(@"(?<![\p{L}\p{N}\*])\*(?!\s|\*)([^\r\n*]+?)(?<!\s|\*)\*(?=$|\s|[^\p{L}\p{N}\*](?:[^\p{L}\p{N}]|$))", RegexOptions.Compiled);
 
         private static readonly Regex ItalicUnderscoreRegex =
-            new Regex(@"(?<![a-zA-Z0-9_])_(?!\s|_)([^\r\n]+?)(?<!\s|_)_(?![a-zA-Z0-9_])", RegexOptions.Compiled);
+            new Regex(@"(?<![\p{L}\p{N}_])_(?!\s|_)([^\r\n]+?)(?<!\s|_)_(?=$|\s|[^\p{L}\p{N}_](?:[^\p{L}\p{N}]|$))", RegexOptions.Compiled);
 
         /// <summary>
         /// Strips common Markdown markup from text, preserving line breaks and list structure.
@@ -78,11 +91,6 @@ namespace jubeater.aigoalplanner.Core
             return string.Join(newline, processedLines);
         }
 
-        /// <summary>
-        /// Alias for <see cref="Strip"/>.
-        /// </summary>
-        public static string StripMarkdown(string markdown) => Strip(markdown);
-
         private static string StripHeading(string line) {
             if (!line.TrimStart().StartsWith("#")) return line;
 
@@ -92,7 +100,20 @@ namespace jubeater.aigoalplanner.Core
 
         private static string StripInline(string text) {
             text = LinkRegex.Replace(text, "$1");
-            text = InlineCodeRegex.Replace(text, "$1");
+
+            var bareUrls = new List<string>();
+            text = BareUrlRegex.Replace(text, match => {
+                string token = "\u0000URL_" + bareUrls.Count + "\u0000";
+                bareUrls.Add(match.Value);
+                return token;
+            });
+
+            var codeSpans = new List<string>();
+            text = InlineCodeRegex.Replace(text, match => {
+                string token = "\u0000CODE_" + codeSpans.Count + "\u0000";
+                codeSpans.Add(match.Groups[1].Value);
+                return token;
+            });
 
             text = BoldItalicAsteriskRegex.Replace(text, "$1");
             text = BoldItalicUnderscoreRegex.Replace(text, "$1");
@@ -102,6 +123,14 @@ namespace jubeater.aigoalplanner.Core
 
             text = ItalicAsteriskRegex.Replace(text, "$1");
             text = ItalicUnderscoreRegex.Replace(text, "$1");
+
+            for (int i = 0; i < codeSpans.Count; i++) {
+                text = text.Replace("\u0000CODE_" + i + "\u0000", codeSpans[i]);
+            }
+
+            for (int i = 0; i < bareUrls.Count; i++) {
+                text = text.Replace("\u0000URL_" + i + "\u0000", bareUrls[i]);
+            }
 
             return text;
         }
