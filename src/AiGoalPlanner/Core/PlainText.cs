@@ -41,6 +41,9 @@ namespace jubeater.aigoalplanner.Core
         private static readonly Regex InlineCodeRegex =
             new Regex(@"`([^`\r\n]+)`", RegexOptions.Compiled);
 
+        private static readonly Regex EscapeRegex =
+            new Regex(@"\\([\\_*`#\[\]()\-+.\!|{}<>~""])", RegexOptions.Compiled);
+
         private static readonly Regex BoldItalicAsteriskRegex =
             new Regex(@"(?<![\p{L}\p{N}\*])\*{3}(?!\s|\*)([^\r\n]+?)(?<!\s|\*)\*{3}(?=$|\s|[^\p{L}\p{N}\*](?:[^\p{L}\p{N}]|$))", RegexOptions.Compiled);
 
@@ -69,10 +72,19 @@ namespace jubeater.aigoalplanner.Core
             string[] rawLines = markdown.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
 
             var processedLines = new List<string>();
+            bool inFencedBlock = false;
 
             foreach (string rawLine in rawLines) {
                 // Drop fenced code block lines (``` or ```csharp etc.).
-                if (CodeFenceRegex.IsMatch(rawLine)) continue;
+                if (CodeFenceRegex.IsMatch(rawLine)) {
+                    inFencedBlock = !inFencedBlock;
+                    continue;
+                }
+
+                if (inFencedBlock) {
+                    processedLines.Add(rawLine);
+                    continue;
+                }
 
                 string line = rawLine;
 
@@ -99,19 +111,26 @@ namespace jubeater.aigoalplanner.Core
         }
 
         private static string StripInline(string text) {
+            var codeSpans = new List<string>();
+            text = InlineCodeRegex.Replace(text, match => {
+                string token = "\u0000CODE" + codeSpans.Count + "\u0000";
+                codeSpans.Add(match.Groups[1].Value);
+                return token;
+            });
+
+            var escapes = new List<string>();
+            text = EscapeRegex.Replace(text, match => {
+                string token = "\u0000ESC" + escapes.Count + "\u0000";
+                escapes.Add(match.Groups[1].Value);
+                return token;
+            });
+
             text = LinkRegex.Replace(text, "$1");
 
             var bareUrls = new List<string>();
             text = BareUrlRegex.Replace(text, match => {
-                string token = "\u0000URL_" + bareUrls.Count + "\u0000";
+                string token = "\u0000URL" + bareUrls.Count + "\u0000";
                 bareUrls.Add(match.Value);
-                return token;
-            });
-
-            var codeSpans = new List<string>();
-            text = InlineCodeRegex.Replace(text, match => {
-                string token = "\u0000CODE_" + codeSpans.Count + "\u0000";
-                codeSpans.Add(match.Groups[1].Value);
                 return token;
             });
 
@@ -124,12 +143,16 @@ namespace jubeater.aigoalplanner.Core
             text = ItalicAsteriskRegex.Replace(text, "$1");
             text = ItalicUnderscoreRegex.Replace(text, "$1");
 
-            for (int i = 0; i < codeSpans.Count; i++) {
-                text = text.Replace("\u0000CODE_" + i + "\u0000", codeSpans[i]);
+            for (int i = 0; i < bareUrls.Count; i++) {
+                text = text.Replace("\u0000URL" + i + "\u0000", bareUrls[i]);
             }
 
-            for (int i = 0; i < bareUrls.Count; i++) {
-                text = text.Replace("\u0000URL_" + i + "\u0000", bareUrls[i]);
+            for (int i = 0; i < escapes.Count; i++) {
+                text = text.Replace("\u0000ESC" + i + "\u0000", escapes[i]);
+            }
+
+            for (int i = 0; i < codeSpans.Count; i++) {
+                text = text.Replace("\u0000CODE" + i + "\u0000", codeSpans[i]);
             }
 
             return text;

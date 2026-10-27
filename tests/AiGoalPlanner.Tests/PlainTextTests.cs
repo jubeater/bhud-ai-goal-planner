@@ -185,6 +185,41 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void Backslash_before_markdown_punctuation_becomes_the_character_on_its_own() {
+            Assert.Equal("Hero_point", PlainText.Strip(@"Hero\_point"));
+            Assert.Equal(@"\", PlainText.Strip(@"\\"));
+            Assert.Equal("# not a heading", PlainText.Strip(@"\# not a heading"));
+        }
+
+        [Fact]
+        public void Escaped_markers_do_not_open_or_close_emphasis() {
+            Assert.Equal("*not italic*", PlainText.Strip(@"\*not italic\*"));
+        }
+
+        [Fact]
+        public void Escaped_marker_inside_real_emphasis_is_treated_as_literal() {
+            Assert.Equal("a*b", PlainText.Strip(@"**a\*b**"));
+        }
+
+        [Fact]
+        public void Backslash_escapes_inside_bare_urls_are_unescaped() {
+            Assert.Equal("https://wiki.guildwars2.com/wiki/Hero_point",
+                         PlainText.Strip(@"https://wiki.guildwars2.com/wiki/Hero\_point"));
+        }
+
+        [Fact]
+        public void Inline_code_and_fenced_code_keep_backslashes_exactly_as_written() {
+            Assert.Equal(@"a\_b", PlainText.Strip(@"`a\_b`"));
+            string fenced = "```\nfoo\\_bar\n```";
+            Assert.Equal(@"foo\_bar", PlainText.Strip(fenced));
+        }
+
+        [Fact]
+        public void Backslashes_before_non_markdown_characters_are_preserved() {
+            Assert.Equal(@"C:\Users\name\file.txt", PlainText.Strip(@"C:\Users\name\file.txt"));
+        }
+
+        [Fact]
         public void Line_breaks_and_paragraphs_are_kept() {
             string input = "Paragraph 1 line 1\nParagraph 1 line 2\n\nParagraph 2\n\n- item 1\n- item 2";
             Assert.Equal(input, PlainText.Strip(input));
