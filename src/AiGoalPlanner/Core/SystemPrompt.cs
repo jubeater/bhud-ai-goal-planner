@@ -71,7 +71,7 @@ namespace jubeater.aigoalplanner.Core
           + "the tools say over guessing. Call get_location to check the Player's current map, region and "
           + "character. Call get_account_access to check Owned Content: limit suggestions to content the "
           + "account owns, and state when the best option needs an expansion the Player does not own. Call "
-          + "get_progress to check mastery points and unfinished tracks per region, or missing hero challenges "
+          + "get_progress to check mastery points and unfinished tracks (the two lists use different region names; track names show which expansion they belong to), or missing hero challenges "
           + "on the current map and region. If a module is disabled, tell the Player to enable it first. "
           + "Reply in the language of the Player's most recent message, even when earlier messages were in "
           + "another language.";

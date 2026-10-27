@@ -13,9 +13,11 @@ namespace jubeater.aigoalplanner.Core
     /// <remarks>
     /// This is where the two rules meet. The Chat keeps running off the game thread, and Blish HUD
     /// state is only read on it: the read is queued there, the caller awaits the result from
-    /// wherever it is, and a cancellation ends the wait without the read ever running. The world
-    /// underneath (<c>World.BlishHudWorld</c> in the module, a fake in tests) does the reading and
-    /// knows nothing about threads.
+    /// wherever it is, and a cancellation ends the wait without the read ever running. Lookups read
+    /// game state (Mumble Link, settings) on the game thread first, then await GW2 API calls off it.
+    /// HTTP and anything after an await must not touch Blish HUD state, and any values needed after
+    /// an await are captured before it. The world underneath (<c>World.BlishHudWorld</c> in the module,
+    /// a fake in tests) does the reading and knows nothing about threads.
     /// </remarks>
     public sealed class GameThreadWorld : IBlishHudWorld
     {

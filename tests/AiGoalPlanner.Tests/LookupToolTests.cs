@@ -185,25 +185,32 @@ namespace jubeater.aigoalplanner.Tests
             var world = new FakeWorld();
             world.MasteryProgressResult = new ProgressResult(
                 ProgressStatus.Ok, ProgressKind.Mastery,
-                masteryRegions: new[] {
-                    new MasteryRegionProgress("Central Tyria", spent: 49, earned: 54, unfinishedTracks: null, tracksAvailable: false)
-                });
+                masteryPoints: new[] {
+                    new MasteryPointRegion("Central Tyria", spent: 49, earned: 54)
+                },
+                masteryTracks: new[] {
+                    new MasteryTrackRegion("Tyria", unfinishedTracks: null, tracksAvailable: false)
+                },
+                tracksAvailable: false);
 
             AIFunction tool = GetProgressTool.Create(world);
 
             JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
 
             Assert.Equal("ok", (string)result["status"]);
-            JArray regions = (JArray)result["regions"];
-            JObject tyria = (JObject)regions[0];
+            JArray points = (JArray)result["points"];
+            JObject tyria = (JObject)points[0];
             Assert.Equal("Central Tyria", (string)tyria["region"]);
             Assert.Equal(49, (int)tyria["points_spent"]);
             Assert.Equal(54, (int)tyria["points_earned"]);
             Assert.Equal(5, (int)tyria["points_unspent"]);
 
-            // The tracks must be marked unavailable, not an empty list []
-            Assert.NotEqual(JTokenType.Array, tyria["unfinished_tracks"]?.Type);
-            Assert.Equal("unavailable", (string)tyria["tracks_status"]);
+            JArray tracks = (JArray)result["tracks"];
+            JObject tyriaTracks = (JObject)tracks[0];
+            Assert.Equal("Tyria", (string)tyriaTracks["region"]);
+            Assert.NotEqual(JTokenType.Array, tyriaTracks["unfinished_tracks"]?.Type);
+            Assert.Equal("unavailable", (string)tyriaTracks["tracks_status"]);
+            Assert.Equal("unavailable", (string)result["tracks_status"]);
         }
 
         /// <summary>
@@ -405,17 +412,25 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
-        public async Task Getting_mastery_progress_returns_regions_points_and_unfinished_tracks() {
+        public async Task Getting_mastery_progress_returns_separate_points_and_tracks_lists() {
             var world = new FakeWorld();
             world.MasteryProgressResult = new ProgressResult(
                 ProgressStatus.Ok, ProgressKind.Mastery,
-                masteryRegions: new[] {
-                    new MasteryRegionProgress("Central Tyria", 49, 54, new[] {
-                        new MasteryTrackProgress(1, "Pact Commander", "Central Tyria", 4, 5)
+                masteryPoints: new[] {
+                    new MasteryPointRegion("Path of Fire", spent: 1, earned: 3),
+                    new MasteryPointRegion("Central Tyria", spent: 49, earned: 54)
+                },
+                masteryTracks: new[] {
+                    new MasteryTrackRegion("Desert", new[] {
+                        new MasteryTrackProgress(14, "Raptor Mount", "Desert", 1, 4),
+                        new MasteryTrackProgress(17, "Springer Mount", "Desert", 0, 4),
+                        new MasteryTrackProgress(15, "Skimmer Mount", "Desert", 0, 5),
+                        new MasteryTrackProgress(18, "Jackal Mount", "Desert", 0, 4),
+                        new MasteryTrackProgress(20, "Roller Beetle Mount", "Desert", 0, 3),
+                        new MasteryTrackProgress(19, "Crystal Champion", "Desert", 0, 4)
                     }),
-                    new MasteryRegionProgress("Heart of Maguuma", 150, 163, new[] {
-                        new MasteryTrackProgress(2, "Gliding", "Heart of Maguuma", 5, 6),
-                        new MasteryTrackProgress(3, "Itzel Lore", "Heart of Maguuma", 2, 6)
+                    new MasteryTrackRegion("Magic", new[] {
+                        new MasteryTrackProgress(45, "Castoran Survivalist", "Magic", 1, 3)
                     })
                 });
 
@@ -426,20 +441,29 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("ok", (string)result["status"]);
             Assert.Equal("mastery", (string)result["kind"]);
 
-            JArray regions = (JArray)result["regions"];
-            Assert.Equal(2, regions.Count);
+            JArray points = (JArray)result["points"];
+            Assert.Equal(2, points.Count);
+            Assert.Equal("Path of Fire", (string)points[0]["region"]);
+            Assert.Equal(3, (int)points[0]["points_earned"]);
+            Assert.Equal(1, (int)points[0]["points_spent"]);
+            Assert.Equal(2, (int)points[0]["points_unspent"]);
 
-            JObject centralTyria = (JObject)regions[0];
-            Assert.Equal("Central Tyria", (string)centralTyria["region"]);
-            Assert.Equal(54, (int)centralTyria["points_earned"]);
-            Assert.Equal(49, (int)centralTyria["points_spent"]);
-            Assert.Equal(5, (int)centralTyria["points_unspent"]);
+            JArray tracks = (JArray)result["tracks"];
+            Assert.Equal(2, tracks.Count);
 
-            JArray unfinished = (JArray)centralTyria["unfinished_tracks"];
-            Assert.Single(unfinished);
-            Assert.Equal("Pact Commander", (string)((JObject)unfinished[0])["name"]);
-            Assert.Equal(4, (int)((JObject)unfinished[0])["level"]);
-            Assert.Equal(5, (int)((JObject)unfinished[0])["total_levels"]);
+            JObject desert = (JObject)tracks[0];
+            Assert.Equal("Desert", (string)desert["region"]);
+            JArray desertTracks = (JArray)desert["unfinished_tracks"];
+            Assert.Equal(6, desertTracks.Count);
+            Assert.Equal("Raptor Mount", (string)desertTracks[0]["name"]);
+            Assert.Equal(1, (int)desertTracks[0]["level"]);
+            Assert.Equal(4, (int)desertTracks[0]["total_levels"]);
+
+            JObject magic = (JObject)tracks[1];
+            Assert.Equal("Magic", (string)magic["region"]);
+            JArray magicTracks = (JArray)magic["unfinished_tracks"];
+            Assert.Single(magicTracks);
+            Assert.Equal("Castoran Survivalist", (string)magicTracks[0]["name"]);
         }
 
         [Fact]

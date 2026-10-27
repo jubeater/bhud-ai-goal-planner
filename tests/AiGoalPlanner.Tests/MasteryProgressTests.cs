@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using jubeater.aigoalplanner.Core;
 using jubeater.aigoalplanner.World;
@@ -55,23 +57,14 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal(6, track.TotalLevels);
         }
 
-        [Theory]
-        [InlineData("Central Tyria", "Tyria")]
-        [InlineData("Heart of Thorns", "Maguuma")]
-        [InlineData("Path of Fire", "Desert")]
-        [InlineData("Icebrood Saga", "Tundra")]
-        [InlineData("End of Dragons", "Jade")]
-        [InlineData("Secrets of the Obscure", "Sky")]
-        [InlineData("Janthir Wilds", "Wild")]
-        [InlineData("Desert", "Desert")]
-        [InlineData("Tyria", "Tyria")]
-        [InlineData("Magic", "Magic")]
-        public void NormalizeRegionName_maps_account_totals_regions_to_masteries_regions(string input, string expected) {
-            Assert.Equal(expected, MasteryProgressCalculator.NormalizeRegionName(input));
-        }
-
         [Fact]
-        public void Path_of_fire_region_with_desert_masteries_maps_correctly_and_lists_expected_tracks() {
+        public void In_game_mastery_data_shows_totals_under_path_of_fire_and_all_six_tracks_under_desert() {
+            // /v2/account/mastery/points totals gives region "Path of Fire", earned 3, spent 1
+            var pointTotals = new[] {
+                new MasteryPointRegion("Path of Fire", spent: 1, earned: 3)
+            };
+
+            // /v2/masteries gives tracks with region "Desert"
             var tracks = new[] {
                 new CachedMasteryTrack(14, "Raptor Mount", "Desert", 4),
                 new CachedMasteryTrack(17, "Springer Mount", "Desert", 4),
@@ -81,59 +74,125 @@ namespace jubeater.aigoalplanner.Tests
                 new CachedMasteryTrack(19, "Crystal Champion", "Desert", 4)
             };
 
+            // /v2/account/masteries: Raptor Mount level 0 (0 + 1 = 1/4 unlocked)
             var accountLevels = new Dictionary<int, int> {
                 [14] = 0
             };
 
-            string pointsRegion = "Path of Fire";
-            string canonicalRegion = MasteryProgressCalculator.NormalizeRegionName(pointsRegion);
-            Assert.Equal("Desert", canonicalRegion);
+            // Tracks are grouped by the "region" field of /v2/masteries
+            var tracksByRegion = tracks
+                .GroupBy(m => m.Region, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
-            var masteriesByRegion = tracks
-                .GroupBy(m => MasteryProgressCalculator.NormalizeRegionName(m.Region), System.StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.ToList(), System.StringComparer.OrdinalIgnoreCase);
+            Assert.True(tracksByRegion.TryGetValue("Desert", out var desertTracks));
 
-            Assert.True(masteriesByRegion.TryGetValue(canonicalRegion, out var regionTracks));
+            var unfinished = MasteryProgressCalculator.CalculateUnfinishedTracks(desertTracks, accountLevels);
 
-            var unfinished = MasteryProgressCalculator.CalculateUnfinishedTracks(regionTracks, accountLevels);
+            var trackRegion = new MasteryTrackRegion("Desert", unfinished, tracksAvailable: true);
 
-            var regionProgress = new MasteryRegionProgress(pointsRegion, spent: 1, earned: 3, unfinished, tracksAvailable: true);
+            Assert.Equal("Path of Fire", pointTotals[0].Region);
+            Assert.Equal(3, pointTotals[0].Earned);
+            Assert.Equal(1, pointTotals[0].Spent);
+            Assert.Equal(2, pointTotals[0].Unspent);
 
-            Assert.Equal(2, regionProgress.Unspent);
-            Assert.True(regionProgress.TracksAvailable);
-            Assert.Equal(6, regionProgress.UnfinishedTracks.Count);
+            Assert.Equal("Desert", trackRegion.Region);
+            Assert.True(trackRegion.TracksAvailable);
+            Assert.Equal(6, trackRegion.UnfinishedTracks.Count);
 
-            Assert.Equal("Raptor Mount", regionProgress.UnfinishedTracks[0].Name);
-            Assert.Equal(1, regionProgress.UnfinishedTracks[0].Level);
-            Assert.Equal(4, regionProgress.UnfinishedTracks[0].TotalLevels);
+            Assert.Equal("Raptor Mount", trackRegion.UnfinishedTracks[0].Name);
+            Assert.Equal(1, trackRegion.UnfinishedTracks[0].Level);
+            Assert.Equal(4, trackRegion.UnfinishedTracks[0].TotalLevels);
 
-            Assert.Equal("Springer Mount", regionProgress.UnfinishedTracks[1].Name);
-            Assert.Equal(0, regionProgress.UnfinishedTracks[1].Level);
-            Assert.Equal(4, regionProgress.UnfinishedTracks[1].TotalLevels);
+            Assert.Equal("Springer Mount", trackRegion.UnfinishedTracks[1].Name);
+            Assert.Equal(0, trackRegion.UnfinishedTracks[1].Level);
+            Assert.Equal(4, trackRegion.UnfinishedTracks[1].TotalLevels);
 
-            Assert.Equal("Skimmer Mount", regionProgress.UnfinishedTracks[2].Name);
-            Assert.Equal(0, regionProgress.UnfinishedTracks[2].Level);
-            Assert.Equal(5, regionProgress.UnfinishedTracks[2].TotalLevels);
+            Assert.Equal("Skimmer Mount", trackRegion.UnfinishedTracks[2].Name);
+            Assert.Equal(0, trackRegion.UnfinishedTracks[2].Level);
+            Assert.Equal(5, trackRegion.UnfinishedTracks[2].TotalLevels);
 
-            Assert.Equal("Jackal Mount", regionProgress.UnfinishedTracks[3].Name);
-            Assert.Equal(0, regionProgress.UnfinishedTracks[3].Level);
-            Assert.Equal(4, regionProgress.UnfinishedTracks[3].TotalLevels);
+            Assert.Equal("Jackal Mount", trackRegion.UnfinishedTracks[3].Name);
+            Assert.Equal(0, trackRegion.UnfinishedTracks[3].Level);
+            Assert.Equal(4, trackRegion.UnfinishedTracks[3].TotalLevels);
 
-            Assert.Equal("Roller Beetle Mount", regionProgress.UnfinishedTracks[4].Name);
-            Assert.Equal(0, regionProgress.UnfinishedTracks[4].Level);
-            Assert.Equal(3, regionProgress.UnfinishedTracks[4].TotalLevels);
+            Assert.Equal("Roller Beetle Mount", trackRegion.UnfinishedTracks[4].Name);
+            Assert.Equal(0, trackRegion.UnfinishedTracks[4].Level);
+            Assert.Equal(3, trackRegion.UnfinishedTracks[4].TotalLevels);
 
-            Assert.Equal("Crystal Champion", regionProgress.UnfinishedTracks[5].Name);
-            Assert.Equal(0, regionProgress.UnfinishedTracks[5].Level);
-            Assert.Equal(4, regionProgress.UnfinishedTracks[5].TotalLevels);
+            Assert.Equal("Crystal Champion", trackRegion.UnfinishedTracks[5].Name);
+            Assert.Equal(0, trackRegion.UnfinishedTracks[5].Level);
+            Assert.Equal(4, trackRegion.UnfinishedTracks[5].TotalLevels);
         }
 
         [Fact]
-        public void Region_with_no_matching_mastery_tracks_marks_tracks_unavailable_not_empty_list() {
-            var regionProgress = new MasteryRegionProgress("Unknown Region", spent: 0, earned: 2, unfinishedTracks: null, tracksAvailable: false);
+        public void Track_region_never_seen_by_code_such_as_magic_is_listed_like_any_other() {
+            var tracks = new[] {
+                new CachedMasteryTrack(45, "Castoran Survivalist", "Magic", 3),
+                new CachedMasteryTrack(46, "Wild Castoran Magic", "Magic", 4)
+            };
 
-            Assert.False(regionProgress.TracksAvailable);
-            Assert.Empty(regionProgress.UnfinishedTracks);
+            var accountLevels = new Dictionary<int, int> {
+                [45] = 0 // raw level 0 = 1/3 unlocked
+            };
+
+            var tracksByRegion = tracks
+                .GroupBy(m => m.Region, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+            Assert.True(tracksByRegion.TryGetValue("Magic", out var magicTracks));
+
+            var unfinished = MasteryProgressCalculator.CalculateUnfinishedTracks(magicTracks, accountLevels);
+            var trackRegion = new MasteryTrackRegion("Magic", unfinished, tracksAvailable: true);
+
+            Assert.Equal("Magic", trackRegion.Region);
+            Assert.Equal(2, trackRegion.UnfinishedTracks.Count);
+            Assert.Equal("Castoran Survivalist", trackRegion.UnfinishedTracks[0].Name);
+            Assert.Equal(1, trackRegion.UnfinishedTracks[0].Level);
+            Assert.Equal(3, trackRegion.UnfinishedTracks[0].TotalLevels);
+            Assert.Equal("Wild Castoran Magic", trackRegion.UnfinishedTracks[1].Name);
+            Assert.Equal(0, trackRegion.UnfinishedTracks[1].Level);
+            Assert.Equal(4, trackRegion.UnfinishedTracks[1].TotalLevels);
+        }
+
+        [Fact]
+        public void No_region_name_literals_in_src() {
+            string dir = AppDomain.CurrentDomain.BaseDirectory;
+            while (!string.IsNullOrEmpty(dir) && !Directory.Exists(Path.Combine(dir, "src", "AiGoalPlanner"))) {
+                dir = Path.GetDirectoryName(dir);
+            }
+            Assert.False(string.IsNullOrEmpty(dir), "Could not locate repo root containing src/AiGoalPlanner");
+
+            string srcDir = Path.Combine(dir, "src");
+            string[] forbiddenLiterals = new[] {
+                "\"Central Tyria\"",
+                "\"Heart of Thorns\"",
+                "\"Path of Fire\"",
+                "\"Icebrood Saga\"",
+                "\"End of Dragons\"",
+                "\"Secrets of the Obscure\"",
+                "\"Janthir Wilds\"",
+                "\"Maguuma\"",
+                "\"Desert\"",
+                "\"Tundra\"",
+                "\"Jade\"",
+                "\"Sky\"",
+                "\"Wild\"",
+                "\"Magic\""
+            };
+
+            var csFiles = Directory.GetFiles(srcDir, "*.cs", SearchOption.AllDirectories);
+            var violations = new List<string>();
+
+            foreach (string file in csFiles) {
+                string content = File.ReadAllText(file);
+                foreach (string literal in forbiddenLiterals) {
+                    if (content.Contains(literal)) {
+                        violations.Add(Path.GetFileName(file) + " contains " + literal);
+                    }
+                }
+            }
+
+            Assert.Empty(violations);
         }
     }
 }

@@ -14,10 +14,9 @@ namespace jubeater.aigoalplanner.Core
     /// Lookups with an in-memory world.
     /// </summary>
     /// <remarks>
-    /// A read answers from live state: it takes the state as Blish HUD holds it right now and never
-    /// waits for anything else, which is what lets the decorator run the whole read on the game
-    /// thread. A read that awaited something would finish somewhere else, and Blish HUD would be
-    /// read off its own update thread again.
+    /// Lookups read game state (Mumble Link, settings) on the game thread first, then await GW2 API
+    /// calls off it. HTTP and anything after an await must not touch Blish HUD state, and any values
+    /// needed after an await are captured before it.
     /// </remarks>
     public interface IBlishHudWorld
     {
@@ -323,10 +322,39 @@ namespace jubeater.aigoalplanner.Core
         public int    TotalLevels { get; }
     }
 
+    public sealed class MasteryPointRegion
+    {
+        public MasteryPointRegion(string region, int spent, int earned) {
+            Region = region ?? string.Empty;
+            Spent  = spent;
+            Earned = earned;
+        }
+
+        public string Region  { get; }
+        public int    Spent   { get; }
+        public int    Earned  { get; }
+        public int    Unspent => Math.Max(0, Earned - Spent);
+    }
+
+    public sealed class MasteryTrackRegion
+    {
+        public MasteryTrackRegion(string region,
+                                  IReadOnlyList<MasteryTrackProgress> unfinishedTracks,
+                                  bool tracksAvailable = true) {
+            Region           = region ?? string.Empty;
+            UnfinishedTracks = unfinishedTracks ?? Array.Empty<MasteryTrackProgress>();
+            TracksAvailable  = tracksAvailable && unfinishedTracks != null;
+        }
+
+        public string                              Region           { get; }
+        public IReadOnlyList<MasteryTrackProgress> UnfinishedTracks { get; }
+        public bool                                TracksAvailable  { get; }
+    }
+
     public sealed class MasteryRegionProgress
     {
         public MasteryRegionProgress(string region, int spent, int earned,
-                                     IReadOnlyList<MasteryTrackProgress> unfinishedTracks,
+                                     IReadOnlyList<MasteryTrackProgress> unfinishedTracks = null,
                                      bool tracksAvailable = true) {
             Region           = region ?? string.Empty;
             Spent            = spent;
@@ -366,13 +394,16 @@ namespace jubeater.aigoalplanner.Core
     public sealed class ProgressResult
     {
         public ProgressResult(ProgressStatus status, ProgressKind kind,
-                              IReadOnlyList<MasteryRegionProgress> masteryRegions = null,
+                              IReadOnlyList<MasteryPointRegion> masteryPoints = null,
+                              IReadOnlyList<MasteryTrackRegion> masteryTracks = null,
                               HeroChallengeProgress heroChallenges = null,
                               string characterName = null, int mapId = 0, string mapName = null, string regionName = null,
-                              string message = null, string missingPermission = null) {
+                              string message = null, string missingPermission = null,
+                              bool tracksAvailable = true,
+                              IReadOnlyList<MasteryRegionProgress> masteryRegions = null) {
             Status            = status;
             Kind              = kind;
-            MasteryRegions    = masteryRegions ?? Array.Empty<MasteryRegionProgress>();
+            TracksAvailable   = tracksAvailable;
             HeroChallenges    = heroChallenges;
             CharacterName     = characterName ?? string.Empty;
             MapId             = mapId;
@@ -380,10 +411,32 @@ namespace jubeater.aigoalplanner.Core
             RegionName        = regionName ?? string.Empty;
             Message           = message ?? string.Empty;
             MissingPermission = missingPermission ?? string.Empty;
+
+            if (masteryPoints != null || masteryTracks != null) {
+                MasteryPoints = masteryPoints ?? Array.Empty<MasteryPointRegion>();
+                MasteryTracks = masteryTracks ?? Array.Empty<MasteryTrackRegion>();
+            } else if (masteryRegions != null) {
+                var pList = new List<MasteryPointRegion>();
+                var tList = new List<MasteryTrackRegion>();
+                foreach (var r in masteryRegions) {
+                    pList.Add(new MasteryPointRegion(r.Region, r.Spent, r.Earned));
+                    tList.Add(new MasteryTrackRegion(r.Region, r.UnfinishedTracks, r.TracksAvailable));
+                }
+                MasteryPoints = pList;
+                MasteryTracks = tList;
+            } else {
+                MasteryPoints = Array.Empty<MasteryPointRegion>();
+                MasteryTracks = Array.Empty<MasteryTrackRegion>();
+            }
+
+            MasteryRegions = masteryRegions ?? Array.Empty<MasteryRegionProgress>();
         }
 
         public ProgressStatus                       Status            { get; }
         public ProgressKind                         Kind              { get; }
+        public IReadOnlyList<MasteryPointRegion>    MasteryPoints     { get; }
+        public IReadOnlyList<MasteryTrackRegion>    MasteryTracks     { get; }
+        public bool                                 TracksAvailable   { get; }
         public IReadOnlyList<MasteryRegionProgress> MasteryRegions    { get; }
         public HeroChallengeProgress                HeroChallenges    { get; }
         public string                               CharacterName     { get; }

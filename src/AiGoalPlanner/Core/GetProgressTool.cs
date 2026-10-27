@@ -21,8 +21,9 @@ namespace jubeater.aigoalplanner.Core
         public const string KindArgument = "kind";
 
         private const string Description =
-            "Reads the Player's progress in Guild Wars 2. Pass kind='mastery' to see earned, spent and unspent "
-          + "mastery points per region and unfinished tracks, or kind='hero_points' to see missing hero challenges "
+            "Reads the Player's progress in Guild Wars 2. Pass kind='mastery' to see point totals per region "
+          + "and unfinished tracks grouped by region (the two lists use different region names; track names "
+          + "show which expansion they belong to), or kind='hero_points' to see missing hero challenges "
           + "on the current map and region.";
 
         private const string SchemaJson =
@@ -116,37 +117,58 @@ namespace jubeater.aigoalplanner.Core
             }
 
             if (kind == ProgressKind.Mastery) {
-                var regionsArray = new JArray();
+                var pointsArray = new JArray();
+                foreach (MasteryPointRegion p in result.MasteryPoints) {
+                    pointsArray.Add(new JObject {
+                        ["region"]         = p.Region,
+                        ["earned"]         = p.Earned,
+                        ["spent"]          = p.Spent,
+                        ["unspent"]        = p.Unspent,
+                        ["points_earned"]  = p.Earned,
+                        ["points_spent"]   = p.Spent,
+                        ["points_unspent"] = p.Unspent
+                    });
+                }
 
-                foreach (MasteryRegionProgress r in result.MasteryRegions) {
-                    var rObj = new JObject {
-                        ["region"]         = r.Region,
-                        ["points_earned"]  = r.Earned,
-                        ["points_spent"]   = r.Spent,
-                        ["points_unspent"] = r.Unspent
+                var tracksArray = new JArray();
+                foreach (MasteryTrackRegion tr in result.MasteryTracks) {
+                    var trObj = new JObject {
+                        ["region"] = tr.Region
                     };
 
-                    if (!r.TracksAvailable) {
-                        rObj["unfinished_tracks"] = null;
-                        rObj["tracks_status"]     = "unavailable";
+                    if (!tr.TracksAvailable) {
+                        trObj["tracks_status"]     = "unavailable";
+                        trObj["unfinished_tracks"] = null;
+                        trObj["tracks"]            = null;
                     } else {
-                        rObj["unfinished_tracks"] = new JArray(r.UnfinishedTracks.Select(t => new JObject {
+                        var trackItems = new JArray(tr.UnfinishedTracks.Select(t => new JObject {
                             ["name"]         = t.Name,
                             ["level"]        = t.Level,
-                            ["total_levels"] = t.TotalLevels
+                            ["total_levels"] = t.TotalLevels,
+                            ["unlocked"]     = t.Level
                         }));
+                        trObj["unfinished_tracks"] = trackItems;
+                        trObj["tracks"]            = trackItems;
                     }
 
-                    regionsArray.Add(rObj);
+                    tracksArray.Add(trObj);
                 }
 
                 var json = new JObject {
-                    ["status"]  = "ok",
-                    ["kind"]    = "mastery",
-                    ["regions"] = regionsArray
+                    ["status"]        = "ok",
+                    ["kind"]          = "mastery",
+                    ["points"]        = pointsArray,
+                    ["point_totals"]  = pointsArray,
+                    ["tracks"]        = tracksArray,
+                    ["track_regions"] = tracksArray
                 };
 
-                return new LookupAnswer(json.ToString(Formatting.None), "regions=" + result.MasteryRegions.Count);
+                if (!result.TracksAvailable) {
+                    json["tracks_status"] = "unavailable";
+                }
+
+                return new LookupAnswer(json.ToString(Formatting.None),
+                                        "points=" + result.MasteryPoints.Count + ", tracks=" + result.MasteryTracks.Count);
             }
 
             // Hero points

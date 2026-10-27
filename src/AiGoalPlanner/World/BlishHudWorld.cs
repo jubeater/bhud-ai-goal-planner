@@ -202,38 +202,31 @@ namespace jubeater.aigoalplanner.World
 
                     bool tracksAvailable = masteries != null;
 
-                    var accountMasteryMap = (accountMasteries ?? Enumerable.Empty<AccountMastery>())
-                        .ToDictionary(m => m.Id, m => m.Level);
-
-                    Dictionary<string, List<CachedMasteryTrack>> masteriesByRegion = null;
-                    if (tracksAvailable) {
-                        masteriesByRegion = masteries
-                            .GroupBy(m => MasteryProgressCalculator.NormalizeRegionName(m.Region), StringComparer.OrdinalIgnoreCase)
-                            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
-                    }
-
-                    var regions = new List<MasteryRegionProgress>();
-
+                    var pointsList = new List<MasteryPointRegion>();
                     if (points?.Totals != null) {
                         foreach (AccountMasteryPointsRegion regionTotal in points.Totals) {
-                            string regionName = regionTotal.Region;
-                            string canonicalRegion = MasteryProgressCalculator.NormalizeRegionName(regionName);
-                            List<MasteryTrackProgress> unfinished = null;
-                            bool regionTracksAvailable = false;
-
-                            if (tracksAvailable && masteriesByRegion != null &&
-                                masteriesByRegion.TryGetValue(canonicalRegion, out List<CachedMasteryTrack> tracks) &&
-                                tracks != null && tracks.Count > 0) {
-                                regionTracksAvailable = true;
-                                unfinished = new List<MasteryTrackProgress>(
-                                    MasteryProgressCalculator.CalculateUnfinishedTracks(tracks, accountMasteryMap));
-                            }
-
-                            regions.Add(new MasteryRegionProgress(regionName, regionTotal.Spent, regionTotal.Earned, unfinished, regionTracksAvailable));
+                            pointsList.Add(new MasteryPointRegion(regionTotal.Region, regionTotal.Spent, regionTotal.Earned));
                         }
                     }
 
-                    return new ProgressResult(ProgressStatus.Ok, kind, masteryRegions: regions);
+                    var tracksList = new List<MasteryTrackRegion>();
+                    if (tracksAvailable) {
+                        var accountMasteryMap = (accountMasteries ?? Enumerable.Empty<AccountMastery>())
+                            .ToDictionary(m => m.Id, m => m.Level);
+
+                        var masteriesByRegion = masteries
+                            .GroupBy(m => m.Region ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+
+                        foreach (var group in masteriesByRegion) {
+                            var unfinished = MasteryProgressCalculator.CalculateUnfinishedTracks(group, accountMasteryMap);
+                            tracksList.Add(new MasteryTrackRegion(group.Key, unfinished, tracksAvailable: true));
+                        }
+                    }
+
+                    return new ProgressResult(ProgressStatus.Ok, kind,
+                                              masteryPoints: pointsList,
+                                              masteryTracks: tracksList,
+                                              tracksAvailable: tracksAvailable);
                 } catch (Exception ex) {
                     _logWarn?.Invoke("GW2 API mastery progress call failed: " + ex.GetType().Name);
                     return new ProgressResult(ProgressStatus.Unavailable, kind, message: "Could not retrieve mastery progress from Guild Wars 2 API.");
