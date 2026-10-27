@@ -39,14 +39,20 @@ namespace jubeater.aigoalplanner.World
 
         private readonly Gw2ApiManager       _gw2ApiManager;
         private readonly IGw2StaticDataCache _cache;
-        private readonly Action<string>      _logWarn;
+        private readonly Action<string>           _logWarn;
+        private readonly IGw2HeroChallengeApi     _challengeApi;
+        private readonly Gw2HeroChallengeResolver _resolver;
 
-        public BlishHudWorld() : this(null, null, null) { }
+        public BlishHudWorld() : this(null, null, null, null) { }
 
-        public BlishHudWorld(Gw2ApiManager gw2ApiManager, IGw2StaticDataCache cache = null, Action<string> logWarn = null) {
+        public BlishHudWorld(Gw2ApiManager gw2ApiManager, IGw2StaticDataCache cache = null, Action<string> logWarn = null, IGw2HeroChallengeApi challengeApi = null) {
             _gw2ApiManager = gw2ApiManager;
             _cache         = cache;
             _logWarn       = logWarn;
+            _challengeApi  = challengeApi ?? (gw2ApiManager != null ? new Gw2SharpHeroChallengeApi(gw2ApiManager) : null);
+            if (_cache != null && _challengeApi != null) {
+                _resolver = new Gw2HeroChallengeResolver(_cache, _challengeApi, _logWarn);
+            }
         }
 
         public Task<IReadOnlyList<InstalledModuleInfo>> ListInstalledModulesAsync(CancellationToken cancellationToken) {
@@ -376,7 +382,7 @@ namespace jubeater.aigoalplanner.World
                 var list = new List<CachedMapInfo>();
                 foreach (Gw2Sharp.WebApi.V2.Models.Map m in all) {
                     string mapType = m.Type?.RawValue ?? m.Type?.Value.ToString() ?? string.Empty;
-                    list.Add(new CachedMapInfo(m.Id, m.Name, m.RegionId, m.RegionName, m.ContinentId, m.ContinentName, Array.Empty<string>(), m.DefaultFloor, challengesLoaded: false, type: mapType));
+                    list.Add(new CachedMapInfo(m.Id, m.Name, m.RegionId, m.RegionName, m.ContinentId, m.ContinentName, Array.Empty<string>(), m.DefaultFloor, challengesLoaded: false, type: mapType, floors: m.Floors));
                 }
                 _cache?.SaveAllMaps(list);
                 return list;
@@ -397,34 +403,25 @@ namespace jubeater.aigoalplanner.World
                 if (map == null) return null;
 
                 string mapType = map.Type?.RawValue ?? map.Type?.Value.ToString() ?? string.Empty;
-                bool challengesLoaded = false;
-                IReadOnlyList<string> skillChallenges = Array.Empty<string>();
-                try {
-                    ContinentFloorRegionMap floorMap = await _gw2ApiManager.Gw2ApiClient.V2.Continents[map.ContinentId]
-                        .Floors[map.DefaultFloor]
-                        .Regions[map.RegionId]
-                        .Maps[map.Id]
-                        .GetAsync(cancellationToken)
-                        .ConfigureAwait(false);
+                var initial = new CachedMapInfo(
+                    map.Id,
+                    map.Name,
+                    map.RegionId,
+                    map.RegionName,
+                    map.ContinentId,
+                    map.ContinentName,
+                    Array.Empty<string>(),
+                    map.DefaultFloor,
+                    challengesLoaded: false,
+                    type: mapType,
+                    floors: map.Floors,
+                    workingFloor: cached?.WorkingFloor);
 
-                    if (floorMap?.SkillChallenges != null) {
-                        skillChallenges = floorMap.SkillChallenges.Select(sc => sc.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
-                    }
-                    challengesLoaded = true;
-                } catch (Exception ex) {
-                    if (IsNotFound(ex)) {
-                        skillChallenges = Array.Empty<string>();
-                        challengesLoaded = true;
-                    } else {
-                        _logWarn?.Invoke("Could not fetch floor map for map " + map.Id + " from GW2 API: " + ex.GetType().Name);
-                    }
+                if (_resolver != null) {
+                    return await _resolver.ResolveMapAsync(initial, cancellationToken).ConfigureAwait(false);
                 }
 
-                var info = new CachedMapInfo(map.Id, map.Name, map.RegionId, map.RegionName, map.ContinentId, map.ContinentName, skillChallenges, map.DefaultFloor, challengesLoaded, type: mapType);
-                if (challengesLoaded) {
-                    _cache?.SaveMap(info);
-                }
-                return info;
+                return initial;
             } catch (Exception ex) {
                 _logWarn?.Invoke("Could not fetch map " + mapId + " from GW2 API: " + ex.GetType().Name);
                 return null;
@@ -436,70 +433,61 @@ namespace jubeater.aigoalplanner.World
 
             try {
                 await GetAllMapsAsync(cancellationToken).ConfigureAwait(false);
-                IReadOnlyList<CachedMapInfo> regionMaps = _cache?.GetMapsInRegion(regionId) ?? Array.Empty<CachedMapInfo>();
-                if (regionMaps.Count == 0) return false;
-
-                var floorsToFetch = regionMaps
-                    .Where(m => {
-                        CachedMapInfo c = _cache?.GetMap(m.Id);
-                        return c == null || !c.ChallengesLoaded;
-                    })
-                    .Select(m => m.DefaultFloor)
-                    .Distinct()
-                    .ToList();
-
-                foreach (int floor in floorsToFetch) {
-                    try {
-                        ContinentFloorRegion region = await _gw2ApiManager.Gw2ApiClient.V2.Continents[continentId]
-                            .Floors[floor]
-                            .Regions[regionId]
-                            .GetAsync(cancellationToken)
-                            .ConfigureAwait(false);
-
-                        if (region?.Maps != null) {
-                            foreach (CachedMapInfo m in regionMaps.Where(rm => rm.DefaultFloor == floor)) {
-                                if (region.Maps.TryGetValue(m.Id, out ContinentFloorRegionMap rMap)) {
-                                    IReadOnlyList<string> sc = Array.Empty<string>();
-                                    if (rMap.SkillChallenges != null) {
-                                        sc = rMap.SkillChallenges.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
-                                    }
-                                    var cachedMap = new CachedMapInfo(rMap.Id, rMap.Name, regionId, region.Name ?? m.RegionName, continentId, m.ContinentName, sc, floor, challengesLoaded: true, type: m.Type);
-                                    _cache?.SaveMap(cachedMap);
-                                }
-                            }
-                        }
-                    } catch (Exception ex) {
-                        if (IsNotFound(ex)) {
-                            // A 404 from a map's floor-region endpoint means that map has no hero challenges.
-                            // Cache it as loaded with 0 challenges; it's not a failure.
-                            foreach (CachedMapInfo m in regionMaps.Where(rm => rm.DefaultFloor == floor)) {
-                                var cachedMap = new CachedMapInfo(m.Id, m.Name, regionId, m.RegionName, continentId, m.ContinentName, Array.Empty<string>(), floor, challengesLoaded: true, type: m.Type);
-                                _cache?.SaveMap(cachedMap);
-                            }
-                        } else {
-                            _logWarn?.Invoke("Could not fetch floor " + floor + " region " + regionId + " from GW2 API: " + ex.GetType().Name);
-                        }
-                    }
+                if (_resolver != null) {
+                    return await _resolver.EnsureRegionMapsAsync(continentId, regionId, cancellationToken).ConfigureAwait(false);
                 }
-
-                bool allLoaded = true;
-                foreach (CachedMapInfo m in regionMaps) {
-                    CachedMapInfo loaded = _cache?.GetMap(m.Id);
-                    if (loaded == null || !loaded.ChallengesLoaded) {
-                        allLoaded = false;
-                        break;
-                    }
-                }
-
-                if (allLoaded) {
-                    _cache?.SaveRegion(regionId, regionMaps.Select(m => m.Id).ToList());
-                    return true;
-                }
-
                 return false;
             } catch (Exception ex) {
                 _logWarn?.Invoke("Could not ensure region maps for region " + regionId + " from GW2 API: " + ex.GetType().Name);
                 return false;
+            }
+        }
+
+        private sealed class Gw2SharpHeroChallengeApi : IGw2HeroChallengeApi
+        {
+            private readonly Gw2ApiManager _gw2ApiManager;
+
+            public Gw2SharpHeroChallengeApi(Gw2ApiManager gw2ApiManager) {
+                _gw2ApiManager = gw2ApiManager;
+            }
+
+            public async Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> FetchFloorRegionChallengesAsync(int continentId, int floor, int regionId, CancellationToken cancellationToken) {
+                if (_gw2ApiManager?.Gw2ApiClient == null) return new Dictionary<int, IReadOnlyList<string>>();
+
+                ContinentFloorRegion region = await _gw2ApiManager.Gw2ApiClient.V2.Continents[continentId]
+                    .Floors[floor]
+                    .Regions[regionId]
+                    .GetAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                var dict = new Dictionary<int, IReadOnlyList<string>>();
+                if (region?.Maps != null) {
+                    foreach (var kvp in region.Maps) {
+                        IReadOnlyList<string> sc = kvp.Value.SkillChallenges != null
+                            ? kvp.Value.SkillChallenges.Select(s => s.Id).Where(id => !string.IsNullOrEmpty(id)).ToList()
+                            : (IReadOnlyList<string>)Array.Empty<string>();
+                        dict[kvp.Key] = sc;
+                    }
+                }
+
+                return dict;
+            }
+
+            public async Task<IReadOnlyList<string>> FetchMapChallengesAsync(int continentId, int floor, int regionId, int mapId, CancellationToken cancellationToken) {
+                if (_gw2ApiManager?.Gw2ApiClient == null) return Array.Empty<string>();
+
+                ContinentFloorRegionMap floorMap = await _gw2ApiManager.Gw2ApiClient.V2.Continents[continentId]
+                    .Floors[floor]
+                    .Regions[regionId]
+                    .Maps[mapId]
+                    .GetAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (floorMap?.SkillChallenges != null) {
+                    return floorMap.SkillChallenges.Select(sc => sc.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
+                }
+
+                return Array.Empty<string>();
             }
         }
 

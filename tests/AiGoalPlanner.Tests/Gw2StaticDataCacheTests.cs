@@ -79,7 +79,7 @@ namespace jubeater.aigoalplanner.Tests
             string cacheDir = Path.Combine(_tempDir, "cache");
             Directory.CreateDirectory(cacheDir);
 
-            string mapJson = "{\"id\":1205,\"name\":\"Domain of Vabbi\",\"region_id\":10,\"region_name\":\"Crystal Desert\","
+            string mapJson = "{\"version\":2,\"id\":1205,\"name\":\"Domain of Vabbi\",\"region_id\":10,\"region_name\":\"Crystal Desert\","
                            + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"skill_challenges\":[\"sc-1\",\"sc-2\",\"sc-3\"]}";
             File.WriteAllText(Path.Combine(cacheDir, "map_1205.json"), mapJson);
 
@@ -120,9 +120,9 @@ namespace jubeater.aigoalplanner.Tests
             string cacheDir = Path.Combine(_tempDir, "cache");
             Directory.CreateDirectory(cacheDir);
 
-            string map1 = "{\"id\":101,\"name\":\"Map One\",\"region_id\":10,\"region_name\":\"Region A\","
+            string map1 = "{\"version\":2,\"id\":101,\"name\":\"Map One\",\"region_id\":10,\"region_name\":\"Region A\","
                         + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"skill_challenges\":[\"c1\",\"c2\",\"c3\"]}";
-            string map2 = "{\"id\":102,\"name\":\"Map Two\",\"region_id\":10,\"region_name\":\"Region A\","
+            string map2 = "{\"version\":2,\"id\":102,\"name\":\"Map Two\",\"region_id\":10,\"region_name\":\"Region A\","
                         + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"skill_challenges\":[\"c4\",\"c5\"]}";
             File.WriteAllText(Path.Combine(cacheDir, "map_101.json"), map1);
             File.WriteAllText(Path.Combine(cacheDir, "map_102.json"), map2);
@@ -144,9 +144,9 @@ namespace jubeater.aigoalplanner.Tests
             string cacheDir = Path.Combine(_tempDir, "cache");
             Directory.CreateDirectory(cacheDir);
 
-            string map1 = "{\"id\":101,\"name\":\"Map One\",\"region_id\":10,\"region_name\":\"Region A\","
+            string map1 = "{\"version\":2,\"id\":101,\"name\":\"Map One\",\"region_id\":10,\"region_name\":\"Region A\","
                         + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"skill_challenges\":[\"c1\",\"c2\",\"c3\"]}";
-            string map2 = "{\"id\":102,\"name\":\"Map Two\",\"region_id\":10,\"region_name\":\"Region A\","
+            string map2 = "{\"version\":2,\"id\":102,\"name\":\"Map Two\",\"region_id\":10,\"region_name\":\"Region A\","
                         + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"skill_challenges\":[\"c4\",\"c5\"]}";
             File.WriteAllText(Path.Combine(cacheDir, "map_101.json"), map1);
             File.WriteAllText(Path.Combine(cacheDir, "map_102.json"), map2);
@@ -208,14 +208,14 @@ namespace jubeater.aigoalplanner.Tests
             Directory.CreateDirectory(cacheDir);
 
             // Two maps in region 37 on different floors: Map 10 on floor 80 (small floor), Map 11 on floor 1
-            string mapsJson = "[{\"id\":10,\"name\":\"Small Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":80,\"type\":\"Public\"},"
-                            + "{\"id\":11,\"name\":\"Main Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"}]";
+            string mapsJson = "{\"version\":2,\"maps\":[{\"id\":10,\"name\":\"Small Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":80,\"type\":\"Public\"},"
+                            + "{\"id\":11,\"name\":\"Main Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"}]}";
             File.WriteAllText(Path.Combine(cacheDir, "maps.json"), mapsJson);
 
             // Map 10 has 5 skill challenges, Map 11 has 10 skill challenges
-            string map10 = "{\"id\":10,\"name\":\"Small Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\","
+            string map10 = "{\"version\":2,\"id\":10,\"name\":\"Small Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\","
                          + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":80,\"skill_challenges\":[\"sc-1\",\"sc-2\",\"sc-3\",\"sc-4\",\"sc-5\"]}";
-            string map11 = "{\"id\":11,\"name\":\"Main Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\","
+            string map11 = "{\"version\":2,\"id\":11,\"name\":\"Main Floor Map\",\"region_id\":37,\"region_name\":\"Region 37\","
                          + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"skill_challenges\":[\"sc-6\",\"sc-7\",\"sc-8\",\"sc-9\",\"sc-10\",\"sc-11\",\"sc-12\",\"sc-13\",\"sc-14\",\"sc-15\"]}";
             File.WriteAllText(Path.Combine(cacheDir, "map_10.json"), map10);
             File.WriteAllText(Path.Combine(cacheDir, "map_11.json"), map11);
@@ -239,15 +239,15 @@ namespace jubeater.aigoalplanner.Tests
             Directory.CreateDirectory(cacheDir);
 
             // Public map 10 on floor 1, Instance map 1446 on floor -53
-            string mapsJson = "[{\"id\":10,\"name\":\"Public Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"},"
-                            + "{\"id\":1446,\"name\":\"Aetherblade Armada\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":-53,\"type\":\"Instance\"}]";
+            string mapsJson = "{\"version\":2,\"maps\":[{\"id\":10,\"name\":\"Public Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"},"
+                            + "{\"id\":1446,\"name\":\"Aetherblade Armada\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":-53,\"type\":\"Instance\"}]}";
             File.WriteAllText(Path.Combine(cacheDir, "maps.json"), mapsJson);
 
             // Public Map 10 has 5 challenges
-            string map10 = "{\"id\":10,\"name\":\"Public Map\",\"region_id\":37,\"region_name\":\"Region 37\","
+            string map10 = "{\"version\":2,\"id\":10,\"name\":\"Public Map\",\"region_id\":37,\"region_name\":\"Region 37\","
                          + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"challenges_loaded\":true,\"type\":\"Public\",\"skill_challenges\":[\"sc-1\",\"sc-2\",\"sc-3\",\"sc-4\",\"sc-5\"]}";
             // Instance Map 1446 floor returns 404 -> cached as loaded with 0 challenges
-            string map1446 = "{\"id\":1446,\"name\":\"Aetherblade Armada\",\"region_id\":37,\"region_name\":\"Region 37\","
+            string map1446 = "{\"version\":2,\"id\":1446,\"name\":\"Aetherblade Armada\",\"region_id\":37,\"region_name\":\"Region 37\","
                            + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":-53,\"challenges_loaded\":true,\"type\":\"Instance\",\"skill_challenges\":[]}";
             File.WriteAllText(Path.Combine(cacheDir, "map_10.json"), map10);
             File.WriteAllText(Path.Combine(cacheDir, "map_1446.json"), map1446);
@@ -274,7 +274,7 @@ namespace jubeater.aigoalplanner.Tests
             string cacheDir = Path.Combine(_tempDir, "cache");
             Directory.CreateDirectory(cacheDir);
 
-            string mapsJson = "[{\"id\":10,\"name\":\"Public Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"}]";
+            string mapsJson = "{\"version\":2,\"maps\":[{\"id\":10,\"name\":\"Public Map\",\"region_id\":37,\"region_name\":\"Region 37\",\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"}]}";
             File.WriteAllText(Path.Combine(cacheDir, "maps.json"), mapsJson);
 
             // Map 10 floor fetch timed out -> not cached or challenges_loaded is false
@@ -325,6 +325,33 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Empty(masteries);
             Assert.Null(map);
             Assert.Equal(0, missing);
+        }
+    
+        [Fact]
+        public void A_cache_from_the_old_format_is_not_trusted() {
+            string cacheDir = Path.Combine(_tempDir, "cache");
+            Directory.CreateDirectory(cacheDir);
+
+            // Old format map without version (or version 1)
+            string oldMapJson = "{\"id\":1210,\"name\":\"Crystal Oasis\",\"region_id\":12,\"region_name\":\"Crystal Desert\","
+                              + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"challenges_loaded\":true,"
+                              + "\"skill_challenges\":[]}";
+            File.WriteAllText(Path.Combine(cacheDir, "map_1210.json"), oldMapJson);
+
+            // Old format maps.json (raw array)
+            string oldMapsJson = "[{\"id\":1210,\"name\":\"Crystal Oasis\",\"region_id\":12,\"region_name\":\"Crystal Desert\","
+                               + "\"continent_id\":1,\"continent_name\":\"Tyria\",\"default_floor\":1,\"type\":\"Public\"}]";
+            File.WriteAllText(Path.Combine(cacheDir, "maps.json"), oldMapsJson);
+
+            // Old format region
+            string oldRegionJson = "{\"region_id\":12,\"map_ids\":[1210]}";
+            File.WriteAllText(Path.Combine(cacheDir, "region_12.json"), oldRegionJson);
+
+            var cache = new Gw2StaticDataCache(_tempDir);
+
+            Assert.Null(cache.GetMap(1210));
+            Assert.Empty(cache.GetAllMaps());
+            Assert.False(cache.HasRegion(12));
         }
     }
 }

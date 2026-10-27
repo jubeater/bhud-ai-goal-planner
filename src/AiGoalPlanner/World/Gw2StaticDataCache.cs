@@ -32,7 +32,8 @@ namespace jubeater.aigoalplanner.World
     {
         public CachedMapInfo(int id, string name, int regionId, string regionName,
                              int continentId, string continentName, IReadOnlyList<string> skillChallenges,
-                             int defaultFloor = 0, bool challengesLoaded = true, string type = null) {
+                             int defaultFloor = 0, bool challengesLoaded = true, string type = null,
+                             IReadOnlyList<int> floors = null, int? workingFloor = null) {
             Id               = id;
             Name             = name ?? string.Empty;
             RegionId         = regionId;
@@ -43,6 +44,8 @@ namespace jubeater.aigoalplanner.World
             DefaultFloor     = defaultFloor;
             ChallengesLoaded = challengesLoaded;
             Type             = type ?? string.Empty;
+            Floors           = floors != null && floors.Count > 0 ? floors : new[] { defaultFloor };
+            WorkingFloor     = workingFloor;
         }
 
         public int                   Id               { get; }
@@ -55,6 +58,27 @@ namespace jubeater.aigoalplanner.World
         public int                   DefaultFloor     { get; }
         public bool                  ChallengesLoaded { get; }
         public string                Type             { get; }
+        public IReadOnlyList<int>    Floors           { get; }
+        public int?                  WorkingFloor     { get; }
+        public int                   EffectiveFloor   => WorkingFloor ?? DefaultFloor;
+
+        public IReadOnlyList<int> GetCandidateFloors() {
+            var list = new List<int>();
+            if (WorkingFloor.HasValue) {
+                list.Add(WorkingFloor.Value);
+            }
+            if (!list.Contains(DefaultFloor)) {
+                list.Add(DefaultFloor);
+            }
+            if (Floors != null) {
+                foreach (int f in Floors) {
+                    if (!list.Contains(f)) {
+                        list.Add(f);
+                    }
+                }
+            }
+            return list;
+        }
     }
 
     public interface IGw2StaticDataCache
@@ -81,6 +105,8 @@ namespace jubeater.aigoalplanner.World
     /// </summary>
     public sealed class Gw2StaticDataCache : IGw2StaticDataCache
     {
+        public const int CurrentCacheVersion = 2;
+
         private readonly string         _cacheDir;
         private readonly Action<string> _logWarn;
         private readonly object         _lock = new object();
@@ -282,6 +308,9 @@ namespace jubeater.aigoalplanner.World
                     try {
                         string json = System.IO.File.ReadAllText(file);
                         JObject obj = JObject.Parse(json);
+                        int version = obj.Value<int?>("version") ?? 1;
+                        if (version < CurrentCacheVersion) continue;
+
                         int regionId = obj.Value<int>("region_id");
                         JArray mapIdsArray = obj.Value<JArray>("map_ids");
                         if (regionId > 0 && mapIdsArray != null) {
@@ -307,28 +336,47 @@ namespace jubeater.aigoalplanner.World
 
             try {
                 string json = System.IO.File.ReadAllText(filePath);
-                JArray array = JArray.Parse(json);
-                var list = new List<CachedMapInfo>();
-
-                foreach (JObject item in array.OfType<JObject>()) {
-                    int id = item.Value<int>("id");
-                    string name = item.Value<string>("name");
-                    int regionId = item.Value<int>("region_id");
-                    string regionName = item.Value<string>("region_name");
-                    int continentId = item.Value<int>("continent_id");
-                    string continentName = item.Value<string>("continent_name");
-                    int defaultFloor = item.Value<int>("default_floor");
-                    string type = item.Value<string>("type") ?? string.Empty;
-
-                    list.Add(new CachedMapInfo(id, name, regionId, regionName, continentId, continentName,
-                                               Array.Empty<string>(), defaultFloor, challengesLoaded: false, type: type));
+                JToken parsed = JToken.Parse(json);
+                if (parsed is JArray) {
+                    // Old format without version wrapper -> not trusted
+                    return null;
                 }
 
-                lock (_lock) {
-                    _allMaps = list.ToList();
+                if (parsed is JObject obj) {
+                    int version = obj.Value<int?>("version") ?? 1;
+                    if (version < CurrentCacheVersion) return null;
+
+                    JArray array = obj.Value<JArray>("maps");
+                    if (array == null) return null;
+
+                    var list = new List<CachedMapInfo>();
+                    foreach (JObject item in array.OfType<JObject>()) {
+                        int id = item.Value<int>("id");
+                        string name = item.Value<string>("name");
+                        int regionId = item.Value<int>("region_id");
+                        string regionName = item.Value<string>("region_name");
+                        int continentId = item.Value<int>("continent_id");
+                        string continentName = item.Value<string>("continent_name");
+                        int defaultFloor = item.Value<int>("default_floor");
+                        int? workingFloor = item.Value<int?>("working_floor");
+                        string type = item.Value<string>("type") ?? string.Empty;
+
+                        JArray floorsArray = item.Value<JArray>("floors");
+                        List<int> floors = floorsArray != null ? floorsArray.Select(f => (int)f).ToList() : null;
+
+                        list.Add(new CachedMapInfo(id, name, regionId, regionName, continentId, continentName,
+                                                   Array.Empty<string>(), defaultFloor, challengesLoaded: false, type: type,
+                                                   floors: floors, workingFloor: workingFloor));
+                    }
+
+                    lock (_lock) {
+                        _allMaps = list.ToList();
+                    }
+
+                    return list;
                 }
 
-                return list;
+                return null;
             } catch (Exception ex) {
                 _logWarn?.Invoke("Failed to load maps cache: " + ex.GetType().Name);
                 return null;
@@ -342,18 +390,23 @@ namespace jubeater.aigoalplanner.World
                 Directory.CreateDirectory(_cacheDir);
                 string filePath = Path.Combine(_cacheDir, "maps.json");
 
-                var array = new JArray(maps.Select(m => new JObject {
-                    ["id"]             = m.Id,
-                    ["name"]           = m.Name,
-                    ["region_id"]      = m.RegionId,
-                    ["region_name"]    = m.RegionName,
-                    ["continent_id"]   = m.ContinentId,
-                    ["continent_name"] = m.ContinentName,
-                    ["default_floor"]  = m.DefaultFloor,
-                    ["type"]           = m.Type
-                }));
+                var obj = new JObject {
+                    ["version"] = CurrentCacheVersion,
+                    ["maps"] = new JArray(maps.Select(m => new JObject {
+                        ["id"]             = m.Id,
+                        ["name"]           = m.Name,
+                        ["region_id"]      = m.RegionId,
+                        ["region_name"]    = m.RegionName,
+                        ["continent_id"]   = m.ContinentId,
+                        ["continent_name"] = m.ContinentName,
+                        ["default_floor"]  = m.DefaultFloor,
+                        ["working_floor"]  = m.WorkingFloor,
+                        ["type"]           = m.Type,
+                        ["floors"]         = new JArray(m.Floors ?? Array.Empty<int>())
+                    }))
+                };
 
-                System.IO.File.WriteAllText(filePath, array.ToString(Formatting.None));
+                System.IO.File.WriteAllText(filePath, obj.ToString(Formatting.None));
             } catch (Exception ex) {
                 _logWarn?.Invoke("Failed to save maps cache: " + ex.GetType().Name);
             }
@@ -362,6 +415,11 @@ namespace jubeater.aigoalplanner.World
         private static CachedMapInfo ParseMapJson(string json) {
             JObject item = JObject.Parse(json);
 
+            int version = item.Value<int?>("version") ?? 1;
+            if (version < CurrentCacheVersion) {
+                return null;
+            }
+
             int id = item.Value<int>("id");
             string name = item.Value<string>("name");
             int regionId = item.Value<int>("region_id");
@@ -369,15 +427,19 @@ namespace jubeater.aigoalplanner.World
             int continentId = item.Value<int>("continent_id");
             string continentName = item.Value<string>("continent_name");
             int defaultFloor = item.Value<int>("default_floor");
+            int? workingFloor = item.Value<int?>("working_floor");
             bool challengesLoaded = item["challenges_loaded"] != null
                                         ? item.Value<bool>("challenges_loaded")
                                         : true;
             string type = item.Value<string>("type") ?? string.Empty;
 
+            JArray floorsArray = item.Value<JArray>("floors");
+            List<int> floors = floorsArray != null ? floorsArray.Select(f => (int)f).ToList() : null;
+
             JArray challenges = item.Value<JArray>("skill_challenges");
             List<string> scList = challenges != null ? challenges.Select(c => (string)c).ToList() : new List<string>();
 
-            return new CachedMapInfo(id, name, regionId, regionName, continentId, continentName, scList, defaultFloor, challengesLoaded, type);
+            return new CachedMapInfo(id, name, regionId, regionName, continentId, continentName, scList, defaultFloor, challengesLoaded, type, floors, workingFloor);
         }
 
         private IReadOnlyList<CachedMasteryTrack> LoadMasteriesFromDisk() {
@@ -451,6 +513,7 @@ namespace jubeater.aigoalplanner.World
                 string filePath = Path.Combine(_cacheDir, "map_" + map.Id + ".json");
 
                 var obj = new JObject {
+                    ["version"]           = CurrentCacheVersion,
                     ["id"]                = map.Id,
                     ["name"]              = map.Name,
                     ["region_id"]         = map.RegionId,
@@ -458,8 +521,10 @@ namespace jubeater.aigoalplanner.World
                     ["continent_id"]      = map.ContinentId,
                     ["continent_name"]    = map.ContinentName,
                     ["default_floor"]     = map.DefaultFloor,
+                    ["working_floor"]     = map.WorkingFloor,
                     ["challenges_loaded"] = map.ChallengesLoaded,
                     ["type"]              = map.Type,
+                    ["floors"]            = new JArray(map.Floors ?? Array.Empty<int>()),
                     ["skill_challenges"]  = new JArray(map.SkillChallenges)
                 };
 
@@ -477,6 +542,7 @@ namespace jubeater.aigoalplanner.World
                 string filePath = Path.Combine(_cacheDir, "region_" + regionId + ".json");
 
                 var obj = new JObject {
+                    ["version"]   = CurrentCacheVersion,
                     ["region_id"] = regionId,
                     ["map_ids"]   = new JArray(mapIds)
                 };
