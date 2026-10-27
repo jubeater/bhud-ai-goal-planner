@@ -156,6 +156,17 @@ internal static class Program
         public Task<ProgressResult> GetProgressAsync(ProgressKind kind, CancellationToken cancellationToken) {
             return Task.FromResult(new ProgressResult(ProgressStatus.Ok, kind));
         }
+
+        // The check only reads, so a write is never asked for. It answers "not changed" rather than
+        // pretending it did something.
+        public Task<ModuleChange> SetModuleEnabledAsync(string @namespace, bool enabled, CancellationToken cancellationToken) {
+            return Task.FromResult(new ModuleChange(false, false, "This check does not change Modules."));
+        }
+
+        public Task<ModuleSettingChange> SetSettingAsync(string @namespace, string key, string value,
+                                                         CancellationToken cancellationToken) {
+            return Task.FromResult(new ModuleSettingChange(false, null, "This check does not change Settings."));
+        }
     }
 
     private sealed class StubProvider : HttpMessageHandler

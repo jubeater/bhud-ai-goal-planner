@@ -58,6 +58,20 @@ namespace jubeater.aigoalplanner
         private CornerIcon _cornerIcon;
 
         /// <summary>
+        /// The Plan pipeline: validating a proposal, applying the Actions the Player approved, and
+        /// the journal Undo works from. It belongs to the module rather than to a Chat, so Undo
+        /// outlives the conversation the change was proposed in.
+        /// </summary>
+        private Plans _plans;
+
+        /// <summary>
+        /// The Blish HUD host as the Lookups, the Validator, Apply and Undo see it: the decorator
+        /// that hands every read and write to the game thread (ADR-0009). One instance, shared, so a
+        /// write cannot reach Blish HUD by a different road than a read.
+        /// </summary>
+        private IBlishHudWorld _world;
+
+        /// <summary>
         /// Created the first time the Player opens Provider settings, so the module does not pay for
         /// a second window it may never show.
         /// </summary>
@@ -66,6 +80,7 @@ namespace jubeater.aigoalplanner
         private SettingEntry<string> _endpointSetting;
         private SettingEntry<string> _modelSetting;
         private SettingEntry<string> _savedProvidersSetting;
+        private SettingEntry<bool>   _autoApplySetting;
         private SavedProviders       _savedProviders;
         private ProviderKeyStore     _keyStore;
         private ToolCallingCapabilityStore _capabilityStore;
@@ -93,7 +108,15 @@ namespace jubeater.aigoalplanner
             // says what happened, and nothing reaches a Provider. New chat shows the reason again,
             // so it cannot be cleared away.
             try {
-                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug, LogWarn);
+                // The world is built once: reads and writes both go through it, so every one of
+                // them happens on the game thread (ADR-0009).
+                var cache = new Gw2StaticDataCache(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"), LogWarn);
+                var blishWorld = new BlishHudWorld(Gw2ApiManager, cache, LogWarn);
+                _world = new GameThreadWorld(blishWorld, new OverlayGameThread());
+
+                _plans = new Plans(_world, () => _autoApplySetting.Value, LogDebug);
+
+                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug, LogWarn, _plans);
             } catch (Exception exception) {
                 Logger.Error(exception, "AI Goal Planner failed to load its planning core. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
@@ -102,20 +125,22 @@ namespace jubeater.aigoalplanner
         }
 
         /// <summary>
-        /// The Lookups the model may call, against the real Blish HUD host. The world reads live
-        /// state on every Lookup, so a module enabled mid-session is seen from its next Lookup on.
+        /// The tools the model may call, against the real Blish HUD host: this version's Lookups, and
+        /// the one proposal, <c>submit_plan</c>, which the Chat delivers rather than runs (ADR-0003).
         /// </summary>
         /// <remarks>
         /// The Chat thinks on a thread-pool thread, and Blish HUD and the Modules only expect their
-        /// state to be read on the game thread, so every read is handed to Blish HUD's update loop
-        /// first. Reading another module's Settings anywhere else makes that module run its
-        /// compliance code off the game thread, which is what made Event Table log a resolution
-        /// warning during the in-game test of #5.
+        /// state to be read or written on the game thread, so every read and write is handed to
+        /// Blish HUD's update loop first. Reading another module's Settings anywhere else makes that
+        /// module run its compliance code off the game thread, which is what made Event Table log a
+        /// resolution warning during the in-game test of #5.
         /// </remarks>
         private ToolRegistry BuildTools() {
-            var cache = new Gw2StaticDataCache(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"), LogWarn);
-            var blishWorld = new BlishHudWorld(Gw2ApiManager, cache, LogWarn);
-            return Lookups.For(new GameThreadWorld(blishWorld, new OverlayGameThread()), LogDebug);
+            ToolRegistry tools = Lookups.For(_world, LogDebug);
+
+            _plans?.AddTo(tools);
+
+            return tools;
         }
 
         /// <summary>
@@ -153,6 +178,16 @@ namespace jubeater.aigoalplanner
                 () => "Remembers the models configured for each Provider.");
 
             _savedProviders = SavedProviders.FromJson(_savedProvidersSetting.Value);
+
+            // Off by default (ADR-0005): most Players want to see what a Plan would change before it
+            // changes. Turned on, it applies Setting changes the AI proposed and the Player asked
+            // for; installs, Marker Pack downloads and Side Effects still always go through Review.
+            _autoApplySetting = settings.DefineSetting(
+                "plans.autoapply",
+                false,
+                () => "Apply Setting changes without Review",
+                () => "Applies the Setting changes of a plan as soon as the AI proposes them. Changes the Player did not "
+                    + "ask for, and anything that is not a Setting, still wait for Review.");
         }
 
         /// <summary>
@@ -238,6 +273,8 @@ namespace jubeater.aigoalplanner
             }
 
             _chat = null;
+            _plans = null;
+            _world = null;
             _capabilityStore = null;
             _savedProviders  = null;
             _keyStore        = null;

@@ -199,6 +199,10 @@ namespace jubeater.aigoalplanner.Core
             if (setting.Min != null) json["min"] = setting.Min;
             if (setting.Max != null) json["max"] = setting.Max;
 
+            // A value the Setting can only take from a list is no use to the model as a free-form
+            // string: it would have to guess, and the Plan would be rejected for guessing wrong.
+            if (setting.AllowedValues.Count > 0) json["allowed"] = new JArray(setting.AllowedValues);
+
             return json;
         }
 

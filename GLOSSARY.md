@@ -23,6 +23,13 @@ A line the Chat shows instead of an AI reply when there is no usable answer: a r
 off or refused, or a Provider that could not be reached. The AI never sees Notices.
 _Avoid_: Error, warning, system message
 
+**Report**:
+A line the Chat shows in the module's own voice about something the module did or could not do: what
+an Apply changed, what an Undo restored, which Action was not applied and why. The Player is never
+told by the AI what the AI did not do. The AI never sees a Report; what the model is told after an
+Apply is a message of its own.
+_Avoid_: Notice (that is for a Request that had no usable answer), status line, log
+
 **System Prompt**:
 The fixed message the Chat sends ahead of the Player's words on every Request: the Identity message,
 then what the AI may talk about, that it only proposes changes and never makes them, that it

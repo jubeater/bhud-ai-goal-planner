@@ -77,6 +77,26 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_Setting_that_only_takes_certain_values_says_which_ones() {
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.mounts", "Mounts", "1.0.0", "", enabled: true));
+            world.SettingsByNamespace["bh.mounts"] = FakeWorld.Ok(
+                "Mounts",
+                new ModuleSettingInfo("Marker style", "Marker style", "", "MarkerStyle", "Arrow", null, null,
+                                      new[] { "Arrow", "Circle", "Star" }));
+
+            AIFunction tool = GetModuleSettingsTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["namespace"] = "bh.mounts" }));
+
+            JObject style = (JObject)((JArray)result["settings"])[0];
+
+            // A model that has to guess at an enum's name proposes one the Module does not have, and
+            // the Plan is refused for it. The list is what it needs to get it right.
+            Assert.Equal(new[] { "Arrow", "Circle", "Star" }, style["allowed"].Values<string>().ToArray());
+        }
+
+        [Fact]
         public async Task A_disabled_module_is_answered_with_enable_it_first() {
             var world = new FakeWorld();
             world.Modules.Add(new InstalledModuleInfo("bh.tacoo", "TacO", "1.0.0", "", enabled: false));
