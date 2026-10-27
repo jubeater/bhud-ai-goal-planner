@@ -18,6 +18,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 - **Implementing a ticket:** read `docs/agents/implementing.md` before you start.
 - **Reviewing a PR, or checking one in game:** read `docs/agents/reviewing.md` before you start.
+- **Orchestrating other agents through a ticket:** read `docs/agents/orchestrating.md` before you start.
 
 Either way:
 
