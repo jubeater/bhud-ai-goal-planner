@@ -35,6 +35,18 @@ namespace jubeater.aigoalplanner.Core
             return ReadAsync(() => _world.GetModuleSettingsAsync(@namespace, cancellationToken), cancellationToken);
         }
 
+        public Task<PlayerLocationResult> GetLocationAsync(CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.GetLocationAsync(cancellationToken), cancellationToken);
+        }
+
+        public Task<AccountAccessResult> GetAccountAccessAsync(CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.GetAccountAccessAsync(cancellationToken), cancellationToken);
+        }
+
+        public Task<ProgressResult> GetProgressAsync(ProgressKind kind, CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.GetProgressAsync(kind, cancellationToken), cancellationToken);
+        }
+
         /// <summary>
         /// Hands one read to the game thread and carries its answer back. The read itself is the
         /// queued call: a world read answers from live state, so its task is already complete when

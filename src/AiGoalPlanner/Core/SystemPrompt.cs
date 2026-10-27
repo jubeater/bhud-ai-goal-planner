@@ -67,9 +67,13 @@ namespace jubeater.aigoalplanner.Core
         private const string LookupsAndLanguage =
             "Look things up before you answer. Call list_installed_modules to see which modules the "
           + "Player really has, and get_module_settings to read one module's settings; prefer what "
-          + "the tools say over guessing. If a module is disabled, tell the Player to enable it "
-          + "first. Reply in the language of the Player's most recent message, even when earlier "
-          + "messages were in another language.";
+          + "the tools say over guessing. Call get_location to check the Player's current map, region and "
+          + "character. Call get_account_access to check Owned Content: limit suggestions to content the "
+          + "account owns, and state when the best option needs an expansion the Player does not own. Call "
+          + "get_progress to check mastery points and unfinished tracks per region, or missing hero challenges "
+          + "on the current map and region. If a module is disabled, tell the Player to enable it first. "
+          + "Reply in the language of the Player's most recent message, even when earlier messages were in "
+          + "another language.";
 
         /// <summary>
         /// How the model formats replies: plain text so the Chat window stays readable.

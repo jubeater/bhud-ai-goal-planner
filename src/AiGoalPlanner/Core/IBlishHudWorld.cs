@@ -7,9 +7,11 @@ namespace jubeater.aigoalplanner.Core
 {
     /// <summary>
     /// The Blish HUD host as the Lookups see it: what Modules the Player has installed and what a
-    /// Module's Settings are. This is the port. <c>GameThreadWorld</c> is the decorator every
-    /// Lookup goes through, which reads on the game thread (ADR-0009); <c>World.BlishHudWorld</c> is
-    /// the adapter that asks the real Blish HUD, and tests drive the Lookups with an in-memory world.
+    /// Module's Settings are, the Player's location and Owned Content, and their progress in
+    /// Guild Wars 2. This is the port. <c>GameThreadWorld</c> is the decorator every Lookup goes
+    /// through, which reads live Blish HUD state on the game thread (ADR-0009);
+    /// <c>World.BlishHudWorld</c> is the adapter that asks the real Blish HUD, and tests drive the
+    /// Lookups with an in-memory world.
     /// </summary>
     /// <remarks>
     /// A read answers from live state: it takes the state as Blish HUD holds it right now and never
@@ -29,6 +31,25 @@ namespace jubeater.aigoalplanner.Core
         /// enabled; its result says so.
         /// </summary>
         Task<ModuleSettingsResult> GetModuleSettingsAsync(string @namespace, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// The Player's current location from Mumble Link and map data: character name, map ID and name,
+        /// and region ID and name.
+        /// </summary>
+        Task<PlayerLocationResult> GetLocationAsync(CancellationToken cancellationToken);
+
+        /// <summary>
+        /// The expansions and content the Player's Guild Wars 2 account owns. Requires the 'account'
+        /// API permission.
+        /// </summary>
+        Task<AccountAccessResult> GetAccountAccessAsync(CancellationToken cancellationToken);
+
+        /// <summary>
+        /// The Player's progress in Guild Wars 2: mastery points and unfinished tracks per region (requires
+        /// 'progression' permission), or missing hero challenges on the current map and region (requires
+        /// 'characters' permission).
+        /// </summary>
+        Task<ProgressResult> GetProgressAsync(ProgressKind kind, CancellationToken cancellationToken);
     }
 
     /// <summary>
@@ -172,5 +193,162 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>Whether this node is a subcollection that holds other Settings.</summary>
         public bool IsSubcollection { get; }
+    }
+
+    /// <summary>
+    /// The Player's location in Guild Wars 2: the current map and region, and the active character name.
+    /// </summary>
+    public sealed class PlayerLocation
+    {
+        public PlayerLocation(string characterName, int mapId, string mapName, int regionId, string regionName) {
+            CharacterName = characterName ?? string.Empty;
+            MapId         = mapId;
+            MapName       = mapName ?? string.Empty;
+            RegionId      = regionId;
+            RegionName    = regionName ?? string.Empty;
+        }
+
+        public string CharacterName { get; }
+        public int    MapId         { get; }
+        public string MapName       { get; }
+        public int    RegionId      { get; }
+        public string RegionName    { get; }
+    }
+
+    public enum LocationStatus
+    {
+        Ok,
+        Unavailable
+    }
+
+    public sealed class PlayerLocationResult
+    {
+        public PlayerLocationResult(LocationStatus status, PlayerLocation location, string reason = null) {
+            Status   = status;
+            Location = location;
+            Reason   = reason ?? string.Empty;
+        }
+
+        public LocationStatus Status   { get; }
+        public PlayerLocation Location { get; }
+        public string         Reason   { get; }
+    }
+
+    public enum AccountAccessStatus
+    {
+        Ok,
+        MissingPermission,
+        Unavailable
+    }
+
+    /// <summary>
+    /// The expansions and content the Player's account owns.
+    /// </summary>
+    public sealed class AccountAccessResult
+    {
+        public AccountAccessResult(AccountAccessStatus status, IReadOnlyList<string> ownedContent,
+                                   string message = null, string missingPermission = null) {
+            Status            = status;
+            OwnedContent      = ownedContent ?? Array.Empty<string>();
+            Message           = message ?? string.Empty;
+            MissingPermission = missingPermission ?? string.Empty;
+        }
+
+        public AccountAccessStatus    Status            { get; }
+        public IReadOnlyList<string>  OwnedContent      { get; }
+        public string                 Message           { get; }
+        public string                 MissingPermission { get; }
+    }
+
+    public enum ProgressKind
+    {
+        Mastery,
+        HeroPoints
+    }
+
+    public enum ProgressStatus
+    {
+        Ok,
+        MissingPermission,
+        NoCharacterOrMap,
+        Unavailable
+    }
+
+    public sealed class MasteryTrackProgress
+    {
+        public MasteryTrackProgress(int id, string name, string region, int level, int totalLevels) {
+            Id          = id;
+            Name        = name ?? string.Empty;
+            Region      = region ?? string.Empty;
+            Level       = level;
+            TotalLevels = totalLevels;
+        }
+
+        public int    Id          { get; }
+        public string Name        { get; }
+        public string Region      { get; }
+        public int    Level       { get; }
+        public int    TotalLevels { get; }
+    }
+
+    public sealed class MasteryRegionProgress
+    {
+        public MasteryRegionProgress(string region, int spent, int earned, IReadOnlyList<MasteryTrackProgress> unfinishedTracks) {
+            Region           = region ?? string.Empty;
+            Spent            = spent;
+            Earned           = earned;
+            UnfinishedTracks = unfinishedTracks ?? Array.Empty<MasteryTrackProgress>();
+        }
+
+        public string                              Region           { get; }
+        public int                                 Spent            { get; }
+        public int                                 Earned           { get; }
+        public int                                 Unspent          => Math.Max(0, Earned - Spent);
+        public IReadOnlyList<MasteryTrackProgress> UnfinishedTracks { get; }
+    }
+
+    public sealed class HeroChallengeProgress
+    {
+        public HeroChallengeProgress(int mapTotal, int mapCompleted, int regionMissing) {
+            MapTotal      = mapTotal;
+            MapCompleted  = mapCompleted;
+            RegionMissing = regionMissing;
+        }
+
+        public int MapTotal      { get; }
+        public int MapCompleted  { get; }
+        public int MapMissing    => Math.Max(0, MapTotal - MapCompleted);
+        public int RegionMissing { get; }
+    }
+
+    public sealed class ProgressResult
+    {
+        public ProgressResult(ProgressStatus status, ProgressKind kind,
+                              IReadOnlyList<MasteryRegionProgress> masteryRegions = null,
+                              HeroChallengeProgress heroChallenges = null,
+                              string characterName = null, int mapId = 0, string mapName = null, string regionName = null,
+                              string message = null, string missingPermission = null) {
+            Status            = status;
+            Kind              = kind;
+            MasteryRegions    = masteryRegions ?? Array.Empty<MasteryRegionProgress>();
+            HeroChallenges    = heroChallenges;
+            CharacterName     = characterName ?? string.Empty;
+            MapId             = mapId;
+            MapName           = mapName ?? string.Empty;
+            RegionName        = regionName ?? string.Empty;
+            Message           = message ?? string.Empty;
+            MissingPermission = missingPermission ?? string.Empty;
+        }
+
+        public ProgressStatus                       Status            { get; }
+        public ProgressKind                         Kind              { get; }
+        public IReadOnlyList<MasteryRegionProgress> MasteryRegions    { get; }
+        public HeroChallengeProgress                HeroChallenges    { get; }
+        public string                               CharacterName     { get; }
+        public int                                  MapId             { get; }
+        public string                               MapName           { get; }
+        public string                               RegionName        { get; }
+        public string                               Message           { get; }
+        public string                               MissingPermission { get; }
     }
 }

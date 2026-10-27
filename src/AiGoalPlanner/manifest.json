@@ -16,5 +16,19 @@
     }
   ],
   "directories": [ "aigoalplanner" ],
+  "api_permissions": {
+    "account": {
+      "optional": false,
+      "details": "Reads your account's Owned Content so the AI suggests only content you can access."
+    },
+    "progression": {
+      "optional": false,
+      "details": "Reads your mastery points and masteries to plan what you still need."
+    },
+    "characters": {
+      "optional": false,
+      "details": "Reads hero challenge progress for your current character."
+    }
+  },
   "enabled_without_gw2": false
 }

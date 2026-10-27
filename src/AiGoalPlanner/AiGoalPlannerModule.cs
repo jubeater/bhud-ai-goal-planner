@@ -93,7 +93,7 @@ namespace jubeater.aigoalplanner
             // says what happened, and nothing reaches a Provider. New chat shows the reason again,
             // so it cannot be cleared away.
             try {
-                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug);
+                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug, LogWarn);
             } catch (Exception exception) {
                 Logger.Error(exception, "AI Goal Planner failed to load its planning core. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
@@ -113,7 +113,9 @@ namespace jubeater.aigoalplanner
         /// warning during the in-game test of #5.
         /// </remarks>
         private ToolRegistry BuildTools() {
-            return Lookups.For(new GameThreadWorld(new BlishHudWorld(), new OverlayGameThread()), LogDebug);
+            var cache = new Gw2StaticDataCache(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"), LogWarn);
+            var blishWorld = new BlishHudWorld(Gw2ApiManager, cache, LogWarn);
+            return Lookups.For(new GameThreadWorld(blishWorld, new OverlayGameThread()), LogDebug);
         }
 
         /// <summary>
@@ -123,6 +125,10 @@ namespace jubeater.aigoalplanner
         /// </summary>
         private static void LogDebug(string message) {
             Logger.Debug(message);
+        }
+
+        private static void LogWarn(string message) {
+            Logger.Warn(message);
         }
 
         private void DefineProviderSettings() {

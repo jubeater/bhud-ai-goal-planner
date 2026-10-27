@@ -19,6 +19,9 @@ namespace jubeater.aigoalplanner.Core
 
             tools.Register(ToolAccess.ReadOnly, ListInstalledModulesTool.Create(world, logDebug), ListInstalledModulesTool.Progress);
             tools.Register(ToolAccess.ReadOnly, GetModuleSettingsTool.Create(world, logDebug), GetModuleSettingsTool.Progress);
+            tools.Register(ToolAccess.ReadOnly, GetLocationTool.Create(world, logDebug), GetLocationTool.Progress);
+            tools.Register(ToolAccess.ReadOnly, GetAccountAccessTool.Create(world, logDebug), GetAccountAccessTool.Progress);
+            tools.Register(ToolAccess.ReadOnly, GetProgressTool.Create(world, logDebug), GetProgressTool.Progress);
 
             return tools;
         }

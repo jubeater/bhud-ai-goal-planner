@@ -258,6 +258,168 @@ namespace jubeater.aigoalplanner.Tests
             Assert.DoesNotContain("BH.Pathing", line);
         }
 
+        [Fact]
+        public async Task Getting_location_returns_character_map_and_region() {
+            var world = new FakeWorld();
+            world.LocationResult = new PlayerLocationResult(
+                LocationStatus.Ok,
+                new PlayerLocation("Elementalist", 1205, "Domain of Vabbi", 10, "Crystal Desert"));
+
+            AIFunction tool = GetLocationTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("ok", (string)result["status"]);
+            Assert.Equal("Elementalist", (string)result["character"]);
+            Assert.Equal(1205, (int)result["map_id"]);
+            Assert.Equal("Domain of Vabbi", (string)result["map"]);
+            Assert.Equal(10, (int)result["region_id"]);
+            Assert.Equal("Crystal Desert", (string)result["region"]);
+        }
+
+        [Fact]
+        public async Task Getting_location_when_unavailable_returns_reason() {
+            var world = new FakeWorld();
+            world.LocationResult = new PlayerLocationResult(LocationStatus.Unavailable, null, "Mumble Link is not running.");
+
+            AIFunction tool = GetLocationTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("Mumble Link is not running.", (string)result["reason"]);
+        }
+
+        [Fact]
+        public async Task Getting_account_access_returns_owned_content() {
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(
+                AccountAccessStatus.Ok,
+                new[] { "GuildWars2", "HeartOfThorns", "PathOfFire", "EndOfDragons" });
+
+            AIFunction tool = GetAccountAccessTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("ok", (string)result["status"]);
+
+            JArray content = (JArray)result["owned_content"];
+            Assert.Equal(4, content.Count);
+            Assert.Contains("HeartOfThorns", content.Select(c => (string)c));
+            Assert.Contains("EndOfDragons", content.Select(c => (string)c));
+        }
+
+        [Fact]
+        public async Task Getting_account_access_when_permission_missing_returns_missing_permission_notice() {
+            var world = new FakeWorld();
+            world.AccountAccessResult = new AccountAccessResult(
+                AccountAccessStatus.MissingPermission,
+                new string[0],
+                missingPermission: "account");
+
+            AIFunction tool = GetAccountAccessTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync());
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("missing_permission", (string)result["reason"]);
+            Assert.Equal("account", (string)result["permission"]);
+            Assert.Contains("account", (string)result["notice"]);
+        }
+
+        [Fact]
+        public async Task Getting_mastery_progress_returns_regions_points_and_unfinished_tracks() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.Mastery,
+                masteryRegions: new[] {
+                    new MasteryRegionProgress("Central Tyria", 49, 54, new[] {
+                        new MasteryTrackProgress(1, "Pact Commander", "Central Tyria", 4, 5)
+                    }),
+                    new MasteryRegionProgress("Heart of Maguuma", 150, 163, new[] {
+                        new MasteryTrackProgress(2, "Gliding", "Heart of Maguuma", 5, 6),
+                        new MasteryTrackProgress(3, "Itzel Lore", "Heart of Maguuma", 2, 6)
+                    })
+                });
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            Assert.Equal("ok", (string)result["status"]);
+            Assert.Equal("mastery", (string)result["kind"]);
+
+            JArray regions = (JArray)result["regions"];
+            Assert.Equal(2, regions.Count);
+
+            JObject centralTyria = (JObject)regions[0];
+            Assert.Equal("Central Tyria", (string)centralTyria["region"]);
+            Assert.Equal(54, (int)centralTyria["points_earned"]);
+            Assert.Equal(49, (int)centralTyria["points_spent"]);
+            Assert.Equal(5, (int)centralTyria["points_unspent"]);
+
+            JArray unfinished = (JArray)centralTyria["unfinished_tracks"];
+            Assert.Single(unfinished);
+            Assert.Equal("Pact Commander", (string)((JObject)unfinished[0])["name"]);
+            Assert.Equal(4, (int)((JObject)unfinished[0])["level"]);
+            Assert.Equal(5, (int)((JObject)unfinished[0])["total_levels"]);
+        }
+
+        [Fact]
+        public async Task Getting_hero_points_progress_returns_map_and_region_hero_challenges() {
+            var world = new FakeWorld();
+            world.HeroPointsProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.HeroPoints,
+                heroChallenges: new HeroChallengeProgress(mapTotal: 14, mapCompleted: 7, regionMissing: 42),
+                characterName: "Ranger", mapId: 1205, mapName: "Domain of Vabbi", regionName: "Crystal Desert");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "hero_points" }));
+
+            Assert.Equal("ok", (string)result["status"]);
+            Assert.Equal("hero_points", (string)result["kind"]);
+            Assert.Equal("Ranger", (string)result["character"]);
+            Assert.Equal("Domain of Vabbi", (string)result["map"]);
+            Assert.Equal(1205, (int)result["map_id"]);
+            Assert.Equal("Crystal Desert", (string)result["region"]);
+
+            JObject hc = (JObject)result["hero_challenges"];
+            Assert.Equal(14, (int)hc["map_total"]);
+            Assert.Equal(7, (int)hc["map_completed"]);
+            Assert.Equal(7, (int)hc["map_missing"]);
+            Assert.Equal(42, (int)hc["region_missing"]);
+        }
+
+        [Fact]
+        public async Task Getting_progress_when_permission_missing_returns_missing_permission_notice() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(
+                ProgressStatus.MissingPermission, ProgressKind.Mastery,
+                missingPermission: "progression");
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Equal("missing_permission", (string)result["reason"]);
+            Assert.Equal("progression", (string)result["permission"]);
+            Assert.Contains("progression", (string)result["notice"]);
+        }
+
+        [Fact]
+        public async Task Getting_progress_with_invalid_kind_returns_instruction() {
+            var world = new FakeWorld();
+            AIFunction tool = GetProgressTool.Create(world);
+
+            JObject result = Parse(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "unknown" }));
+
+            Assert.Equal("unavailable", (string)result["status"]);
+            Assert.Contains("mastery", (string)result["instruction"]);
+            Assert.Contains("hero_points", (string)result["instruction"]);
+        }
+
         /// <summary>
         /// The tool's JSON. A hand-written Lookup returns its result string as it is, the way the
         /// Chat receives it.
