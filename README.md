@@ -34,6 +34,12 @@ rides along as one inert extra entry rather than failing a build that has nothin
 Building while Blish HUD is running can fail on a locked `.bhm`; send the zip elsewhere instead:
 `dotnet build -p:BlishHUDModuleOutputDir=obj\bhm\`. The folder is created if it does not exist.
 
+To try a worktree in game, `scripts\dev-run.ps1 <worktree>` stops every Blish HUD process (it
+restarts itself when the game closes and keeps the loaded `.bhm` open), builds that worktree's module
+into `obj\bhm\` and launches Blish HUD with `--debug --module` pointing at it. `-Stop` only stops
+Blish HUD, for example before removing a worktree. Blish HUD is looked for in `BLISHHUD_DIR`, then in
+`Desktop\Blish.HUD` under the user profile.
+
 ## Connecting a Provider
 
 The Chat talks to any Provider that speaks the OpenAI-compatible **Chat Completions** API (ADR-0007),
