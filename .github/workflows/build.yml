@@ -31,6 +31,11 @@ jobs:
       - name: Test
         run: dotnet test AiGoalPlanner.sln -c Release --no-build --nologo
 
+      - name: Check against Blish HUD's System.Text.Json 5.0
+        run: |
+          dotnet build tests/AiGoalPlanner.Stj5Check/AiGoalPlanner.Stj5Check.csproj -c Release --nologo
+          tests\AiGoalPlanner.Stj5Check\bin\Release\net48\AiGoalPlanner.Stj5Check.exe
+
       - name: Keep the .bhm
         uses: actions/upload-artifact@v7
         with:

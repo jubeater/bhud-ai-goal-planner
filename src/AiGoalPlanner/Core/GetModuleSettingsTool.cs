@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -26,8 +27,8 @@ namespace jubeater.aigoalplanner.Core
         public const string ThisModuleNamespace = "jubeater.aigoalplanner";
 
         /// <summary>
-        /// The one argument the tool takes. The parameter of <see cref="Create"/> is bound by name,
-        /// and <see cref="Progress"/> reads it back out of a call, so both share the spelling here.
+        /// The one argument the tool takes. The schema offers it under this name, and the function
+        /// reads it back out of the call's arguments, so both share the spelling here.
         /// </summary>
         private const string NamespaceArgument = "namespace";
 
@@ -37,13 +38,20 @@ namespace jubeater.aigoalplanner.Core
           + "module answers that it has to be enabled first; the settings of AI Goal Planner itself "
           + "are never shared.";
 
+        private const string SchemaJson =
+            "{\"type\":\"object\",\"properties\":{\"namespace\":{\"type\":\"string\","
+          + "\"description\":\"The namespace of the Module, from list_installed_modules.\"}},"
+          + "\"required\":[\"namespace\"]}";
+
+        private static readonly JsonDocument Schema = JsonDocument.Parse(SchemaJson);
+
         /// <summary>
-        /// Builds the tool against <paramref name="world"/>, the host that answers the Lookup.
+        /// Builds the tool against <paramref name="world"/>, the host that answers the Lookup. It is
+        /// a hand-written <see cref="AIFunction"/> with a literal schema, per ADR-0008: the
+        /// serializer-driven factory needs a System.Text.Json newer than the one Blish HUD runs.
         /// </summary>
         public static AIFunction Create(IBlishHudWorld world) {
-            return AIFunctionFactory.Create((Func<string, CancellationToken, Task<string>>)(
-                                               (@namespace, cancellationToken) => RunAsync(world, @namespace, cancellationToken)),
-                                           Name, Description);
+            return new Function(world);
         }
 
         /// <summary>
@@ -128,6 +136,23 @@ namespace jubeater.aigoalplanner.Core
             if (setting.Max != null) json["max"] = setting.Max;
 
             return json;
+        }
+
+        private sealed class Function : LookupFunction
+        {
+            private readonly IBlishHudWorld _world;
+
+            public Function(IBlishHudWorld world) : base(GetModuleSettingsTool.Name, GetModuleSettingsTool.Description, Schema) {
+                _world = world;
+            }
+
+            protected override async Task<object> InvokeLookupAsync(AIFunctionArguments arguments, CancellationToken cancellationToken) {
+                string @namespace = arguments != null && arguments.TryGetValue(NamespaceArgument, out object value)
+                                        ? value as string
+                                        : null;
+
+                return await RunAsync(_world, @namespace, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 }

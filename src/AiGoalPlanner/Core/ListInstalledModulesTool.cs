@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -24,13 +25,17 @@ namespace jubeater.aigoalplanner.Core
           + "you propose anything about the Player's setup, and to find the namespace to read a "
           + "module's settings with.";
 
+        private const string SchemaJson = "{\"type\":\"object\",\"properties\":{}}";
+
+        private static readonly JsonDocument Schema = JsonDocument.Parse(SchemaJson);
+
         /// <summary>
-        /// Builds the tool against <paramref name="world"/>, the host that answers the Lookup.
+        /// Builds the tool against <paramref name="world"/>, the host that answers the Lookup. It is
+        /// a hand-written <see cref="AIFunction"/> with a literal schema, per ADR-0008: the
+        /// serializer-driven factory needs a System.Text.Json newer than the one Blish HUD runs.
         /// </summary>
         public static AIFunction Create(IBlishHudWorld world) {
-            return AIFunctionFactory.Create((Func<CancellationToken, Task<string>>)(
-                                               cancellationToken => RunAsync(world, cancellationToken)),
-                                           Name, Description);
+            return new Function(world);
         }
 
         /// <summary>
@@ -60,6 +65,19 @@ namespace jubeater.aigoalplanner.Core
                 ["enabled"]     = module.Enabled,
                 ["description"] = module.Description
             };
+        }
+
+        private sealed class Function : LookupFunction
+        {
+            private readonly IBlishHudWorld _world;
+
+            public Function(IBlishHudWorld world) : base(ListInstalledModulesTool.Name, ListInstalledModulesTool.Description, Schema) {
+                _world = world;
+            }
+
+            protected override async Task<object> InvokeLookupAsync(AIFunctionArguments arguments, CancellationToken cancellationToken) {
+                return await RunAsync(_world, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 }

@@ -185,8 +185,12 @@ namespace jubeater.aigoalplanner.Tests
             Assert.DoesNotContain("show.grid",   resultText);
         }
 
+        /// <summary>
+        /// The tool's JSON. A hand-written Lookup returns its result string as it is, the way the
+        /// Chat receives it.
+        /// </summary>
         private static JObject Parse(object toolResult) {
-            return JObject.Parse(Assert.IsType<JsonElement>(toolResult).GetString());
+            return JObject.Parse(Assert.IsType<string>(toolResult));
         }
     }
 }

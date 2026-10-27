@@ -422,6 +422,23 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_Notice_the_module_shows_itself_is_read_by_the_Player_and_never_by_the_model() {
+            var model = new ScriptedChatClient();
+            model.WillReply("An answer.");
+
+            var chat = NewChat(model);
+
+            chat.ShowNotice("AI Goal Planner failed to load and cannot answer this session.");
+
+            Assert.Equal(ChatMessageAuthor.Notice, Assert.Single(chat.Messages).Author);
+
+            await chat.SendAsync("Hello");
+
+            // The Player reads the Notice, but it is not part of the conversation the model sees.
+            Assert.Equal(new[] { "Hello" }, WithoutTheIdentityMessage(model.Requests[0]));
+        }
+
+        [Fact]
         public async Task A_Lookup_runs_and_its_result_goes_back_to_the_model_before_the_reply() {
             var model = new ScriptedChatClient();
             var world = new FakeWorld();
@@ -449,7 +466,7 @@ namespace jubeater.aigoalplanner.Tests
 
             FunctionResultContent result = Assert.Single(toolAnswer.Contents.OfType<FunctionResultContent>());
 
-            Assert.Contains("bh.pathing", ((JsonElement)result.Result).GetString());
+            Assert.Contains("bh.pathing", (string)result.Result);
         }
 
         [Fact]
@@ -588,7 +605,7 @@ namespace jubeater.aigoalplanner.Tests
             FunctionResultContent result = Assert.Single(
                 model.Requests[1].Single(message => message.Role.Equals(ChatRole.Tool)).Contents.OfType<FunctionResultContent>());
 
-            string answer = ((JsonElement)result.Result).GetString();
+            string answer = (string)result.Result;
 
             Assert.DoesNotContain("sk-live-123", answer);
             Assert.Contains("show.grid", answer);

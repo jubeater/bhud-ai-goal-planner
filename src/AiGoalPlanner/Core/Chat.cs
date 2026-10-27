@@ -146,6 +146,14 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
+        /// Shows a Notice from the module itself, e.g. that it failed to load. The Player reads it
+        /// like any other Notice; the model never sees it.
+        /// </summary>
+        public void ShowNotice(string text) {
+            TryAppendNotice(Volatile.Read(ref _generation), text);
+        }
+
+        /// <summary>
         /// Starts a new Chat: what the Player said before is cleared, and the next Request starts from scratch.
         /// </summary>
         /// <remarks>

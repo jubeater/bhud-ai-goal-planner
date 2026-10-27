@@ -80,7 +80,17 @@ namespace jubeater.aigoalplanner
             _capabilityStore = new ToolCallingCapabilityStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
 
-            _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools());
+            // A dependency that fails to load (ADR-0008: the System.Text.Json Blish HUD runs) must
+            // cost this module its Chat, not Blish HUD its process: the Chat still opens, a Notice
+            // says what happened, and the game keeps running.
+            try {
+                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools());
+            } catch (Exception exception) {
+                Logger.Error(exception, "AI Goal Planner failed to load its planning core. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
+
+                _chat = new Chat(CreateChatClient, BuildSystemPrompt);
+                _chat.ShowNotice("AI Goal Planner failed to load and cannot answer this session. Check the Blish HUD log for the error, then re-enable the module.");
+            }
         }
 
         /// <summary>
@@ -132,18 +142,36 @@ namespace jubeater.aigoalplanner
         }
 
         protected override Task LoadAsync() {
-            Logger.Info("AI Goal Planner is loading.");
+            // Load work lands here; whatever it throws is the module's failure, not Blish HUD's.
+            try {
+                Logger.Info("AI Goal Planner is loading.");
 
-            return Task.CompletedTask;
+                return Task.CompletedTask;
+            } catch (Exception exception) {
+                Logger.Error(exception, "AI Goal Planner failed to load. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
+
+                _chat?.ShowNotice("AI Goal Planner failed to load and cannot answer this session. Check the Blish HUD log for the error, then re-enable the module.");
+
+                return Task.CompletedTask;
+            }
         }
 
+        /// <inheritdoc />
         protected override void OnModuleLoaded(EventArgs e) {
-            _iconTexture = this.ContentsManager.GetTexture("icon.png");
+            // Loading the icon and opening the windows must not take Blish HUD down either: a
+            // failure here leaves the module a Notice instead of a working Chat.
+            try {
+                _iconTexture = this.ContentsManager.GetTexture("icon.png");
 
-            CreateCornerIcon();
-            CreateChatWindow();
+                CreateCornerIcon();
+                CreateChatWindow();
 
-            base.OnModuleLoaded(e);
+                base.OnModuleLoaded(e);
+            } catch (Exception exception) {
+                Logger.Error(exception, "AI Goal Planner failed to finish loading. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
+
+                _chat?.ShowNotice("AI Goal Planner failed to load and cannot answer this session. Check the Blish HUD log for the error, then re-enable the module.");
+            }
         }
 
         /// <inheritdoc />
