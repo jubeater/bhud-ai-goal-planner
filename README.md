@@ -135,6 +135,23 @@ Lookup get_module_settings: 14 ms, module=bh.pathing, status=ok, settings=200 of
 The lines carry timing, finish reasons and counts — what a Lookup read and how big its answer was —
 and never a Setting's value, the Player's words or anything a Provider sent back.
 
+## Known limitations
+
+- **The AI's answers vary.** The same Request can get a different answer, or a different Plan, each
+  time, and the module cannot make a model behave the same way twice. Smaller and local models
+  sometimes skip a Lookup they should have made, or write their own tool-call syntax into the reply
+  instead of calling the tool (`assistant to=get__location…`). The log shows this as a round trip
+  with `finish_reason=stop, tool_calls=0`. Asking again usually works; a model with better tool
+  support makes it rarer.
+- **Hero challenge counts can be unknown.** The Guild Wars 2 API returns no hero-point data for some
+  characters (gw2-api/issues#56). When that happens, the AI says the counts are unknown rather than
+  guessing, and the Player can check the in-game Hero panel. Mastery points and tracks come from other
+  endpoints and are not affected.
+- **API access needs a restart after a build adds API permissions.** On the first load of a build
+  that asks for new Guild Wars 2 API permissions, Blish HUD gives the module no API access for that
+  session, even though the permissions show as granted. The Chat says so; restarting Blish HUD fixes
+  it.
+
 ## CI and releases
 
 `.github/workflows/build.yml` runs on every push and pull request (Windows): it builds the solution,
