@@ -4,9 +4,9 @@ namespace jubeater.aigoalplanner.Core
 {
     /// <summary>
     /// The fixed system prompt the Chat sends ahead of the Player's words: which product the model
-    /// is part of, what it may talk about, that it only proposes changes and never makes them, and
-    /// that it answers from the Player's real setup in the language of the Player's most recent
-    /// message.
+    /// is part of, what it may talk about, that it only proposes changes and never makes them, that
+    /// it answers from the Player's real setup in the language of the Player's most recent message,
+    /// and that it writes in plain text.
     /// </summary>
     /// <remarks>
     /// The prompt is fixed text so the Lookups and the rules stay the same for every Provider and
@@ -24,7 +24,8 @@ namespace jubeater.aigoalplanner.Core
             return Identity(model, endpoint) + "\n\n"
                  + Scope + "\n\n"
                  + AdvisoryOnly + "\n\n"
-                 + LookupsAndLanguage;
+                 + LookupsAndLanguage + "\n\n"
+                 + PlainTextFormat;
         }
 
         /// <summary>
@@ -69,6 +70,13 @@ namespace jubeater.aigoalplanner.Core
           + "the tools say over guessing. If a module is disabled, tell the Player to enable it "
           + "first. Reply in the language of the Player's most recent message, even when earlier "
           + "messages were in another language.";
+
+        /// <summary>
+        /// How the model formats replies: plain text so the Chat window stays readable.
+        /// </summary>
+        private const string PlainTextFormat =
+            "Write in plain text: short paragraphs and simple \"- \" lists. Do not use bold, "
+          + "headings, tables or code fences.";
 
         private static string WhereItRuns(string model, string endpoint) {
             string modelName = (model ?? string.Empty).Trim();
