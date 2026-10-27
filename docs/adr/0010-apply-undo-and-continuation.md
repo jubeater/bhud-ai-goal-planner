@@ -39,10 +39,15 @@ sees after an Apply.
 - **A Continuation never takes a Review away.** When Auto-apply has applied part of a Plan and the
   rest is still waiting for the Player — including a Review where nothing can be applied any more —
   the module does not ask the model again: its next `submit_plan` would replace the Review the Player
-  is looking at. The module reports what it applied and stops. The Continuation comes when the Player
-  Applies or dismisses the rest, and its message carries everything applied in that Request, so the
-  model sees the state it made either way. A dismiss does not spend a turn of its own: the outcome
-  travels in the history and the next Request reads it.
+  is looking at. The module reports what it applied and stops.
+- **What Auto-apply did belongs to the Review it came with.** That outcome is given to the model
+  exactly once, when that Review is resolved, and cleared then. A Review is resolved when the Player
+  applies it — with Actions ticked or with none, since choosing nothing is still a decision — when the
+  Player dismisses it, or when a new Plan replaces it. Resolving it is what starts the Continuation,
+  and the message carries everything applied in that Request, so the model sees the state it made
+  either way. A new Request that leaves the Review open does not resolve it: asking a question is not
+  a decision about the Plan. A dismiss does not spend a turn of its own: the outcome travels in the
+  history and the next Request reads it.
 - **An Action that does not say it is not a Side Effect is one.** `is_side_effect` is required by the
   schema, and only a real `false` — or the text "false" — is read as "the Player asked for this".
   A missing or malformed flag makes the Action a Side Effect: it still shows in the Review, but
@@ -72,7 +77,8 @@ sees after an Apply.
   model would have written arrives with the Player's decision instead of before it.
 - A Plan the Player never decides on still leaves what Auto-apply did in place, and the Chat has no
   Continuation to show for it until the Player applies or dismisses the rest. That is the price of not
-  taking the Review away from them.
+  taking the Review away from them. Asking another question in the meantime keeps the Review, and the
+  outcome that belongs to it, waiting.
 - A rejected Action is shown, not dropped: the Player has to be able to see what the AI wanted and
   why it cannot be done, and the AI is told how many of its Actions were refused.
 - A model that describes changes in plain text instead of calling `submit_plan` costs the Player

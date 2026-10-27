@@ -314,7 +314,10 @@ namespace jubeater.aigoalplanner.Core
 
                 ShowReport(generation, applied.Describe());
 
-                if (applied.Outcomes.Count == 0) return;
+                // Nothing was ticked and nothing was applied before the Review: there is nothing to
+                // tell the model and nothing to carry on from. A Review with an Auto-apply behind it
+                // is resolved all the same, so its outcome is still owed to the model.
+                if (applied.Outcomes.Count == 0 && !HasAppliedBeforeReview) return;
 
                 if (!TryAppendApplyOutcome(generation, applied)) return;
 
@@ -603,10 +606,6 @@ namespace jubeater.aigoalplanner.Core
 
                 _messages.Add(new ChatMessage(ChatMessageAuthor.Player, request));
                 _modelHistory.Add(new AiChatMessage(ChatRole.User, request));
-
-                // A new Request is a new turn of the conversation: what an earlier one left applied
-                // for a Review that is still open does not belong to its Continuation.
-                _appliedBeforeReview = null;
             }
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
@@ -675,6 +674,11 @@ namespace jubeater.aigoalplanner.Core
 
                 return false;
             }
+
+            // This Plan replaces whatever Review is open, so the outcome of an Auto-apply that came
+            // with that Review is resolved here: the model is told what was applied and that the rest
+            // of the old Plan was set aside, and it is not told again later (ADR-0010).
+            if (!TryAppendPlanSetAside(generation)) return false;
 
             PlanReview review;
 
@@ -765,6 +769,40 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
+        /// Settles what Auto-apply applied of a Review that a new Plan is replacing: the model is told
+        /// now, as part of the turn that brings the new Plan, so the outcome is passed on exactly once
+        /// and never turns up in a later Continuation (ADR-0010). Nothing to settle is not an error.
+        /// </summary>
+        private bool TryAppendPlanSetAside(int generation) {
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return false;
+
+                AppliedPlan earlier = _appliedBeforeReview;
+
+                if (earlier == null) return true;
+
+                _appliedBeforeReview = null;
+
+                _modelHistory.Add(new AiChatMessage(ChatRole.User,
+                                                    earlier.Describe()
+                                                  + " The Player's new request set aside the rest of that plan."));
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Whether an Auto-apply outcome is still waiting for the Review it came with to be resolved.
+        /// </summary>
+        private bool HasAppliedBeforeReview {
+            get {
+                lock (_messagesLock) {
+                    return _appliedBeforeReview != null;
+                }
+            }
+        }
+
+        /// <summary>
         /// Remembers what Auto-apply applied of the Plan the Review still holds, so the Continuation
         /// can carry it when the Player has finished with the rest.
         /// </summary>
@@ -842,11 +880,12 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
-        /// Tells the model what the Apply came to, as one message of its own, so its next turn works
-        /// from the state the Apply made. When Auto-apply had already applied part of this Plan while
-        /// the Player decided the rest, that outcome travels with this one, so the Continuation sees
-        /// everything the Request applied. It holds what was applied and what failed and nothing
-        /// else: no undo record, no earlier Chat, and no value the Player did not see in the Review.
+        /// Tells the model what came of the Review the Player has just finished with, as one message
+        /// of its own, so its next turn works from the state the Apply made. When Auto-apply had
+        /// already applied part of this Plan while the Player decided the rest, that outcome travels
+        /// with this one — it is the Review's, and this is where it is resolved. It holds what was
+        /// applied and what failed and nothing else: no undo record, no earlier Chat, and no value
+        /// the Player did not see in the Review.
         /// </summary>
         private bool TryAppendApplyOutcome(int generation, AppliedPlan applied) {
             lock (_messagesLock) {
@@ -860,9 +899,12 @@ namespace jubeater.aigoalplanner.Core
 
                 if (earlier != null) text += earlier.Describe() + " ";
 
+                text += applied.Outcomes.Count == 0
+                            ? "The Player chose none of the other actions. "
+                            : applied.Describe() + " ";
+
                 _modelHistory.Add(new AiChatMessage(ChatRole.User,
-                                                    text + applied.Describe()
-                                                  + " Look up anything you now need to, and tell the Player what you suggest next."));
+                                                    text + "Look up anything you now need to, and tell the Player what you suggest next."));
             }
 
             return true;

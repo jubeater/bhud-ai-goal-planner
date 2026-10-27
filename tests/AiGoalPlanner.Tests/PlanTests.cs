@@ -795,6 +795,115 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task Applying_with_nothing_ticked_still_tells_the_model_what_Auto_apply_did() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool(SubmitPlanTool.Name, "call_1",
+                               Plan("Hiding the markers and shrinking the icons.",
+                                    Action("set_setting", "bh.mounts", key: "Show markers", value: "false", reason: "You asked."),
+                                    Action("set_setting", "bh.mounts", key: "Icon size", value: "1",
+                                           reason: "Smaller icons read better.", sideEffect: true)));
+            model.WillReply("The markers are off; I left the icons as they were.");
+
+            var world = PlayerWorld();
+            var chat  = NewChat(model, world, autoApply: true);
+
+            await chat.SendAsync("hide the mount markers");
+
+            // Auto-apply took one Action and the other waits, so there is no Continuation yet.
+            Assert.Single(model.Requests);
+
+            // The Player unticks the Action that was waiting and applies nothing at all.
+            await chat.ApplyAsync(new int[0]);
+
+            // The Review is resolved, so the outcome of the Auto-apply goes to the model now, with
+            // the Player's empty choice, and the Continuation runs.
+            Assert.Equal(2, model.Requests.Count);
+
+            string history = string.Join(" ", model.Requests.Last().Select(message => message.Text));
+
+            Assert.Contains("Show markers", history);
+            Assert.Contains("chose none of the other actions", history);
+            Assert.Equal("The markers are off; I left the icons as they were.", chat.Messages.Last().Text);
+        }
+
+        [Fact]
+        public async Task Dismissing_a_Review_after_another_question_still_tells_the_model_what_Auto_apply_did() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool(SubmitPlanTool.Name, "call_1",
+                               Plan("Hiding the markers and shrinking the icons.",
+                                    Action("set_setting", "bh.mounts", key: "Show markers", value: "false", reason: "You asked."),
+                                    Action("set_setting", "bh.mounts", key: "Icon size", value: "1",
+                                           reason: "Smaller icons read better.", sideEffect: true)));
+            model.WillReply("I can read any module's settings.");
+            model.WillReply("You are welcome.");
+
+            var world = PlayerWorld();
+            var chat  = NewChat(model, world, autoApply: true);
+
+            await chat.SendAsync("hide the mount markers");
+
+            // The Player asks something else while the Review is still open: it is not resolved, and
+            // what Auto-apply did still belongs to it.
+            await chat.SendAsync("what else can you do?");
+
+            chat.CancelReview();
+
+            await chat.SendAsync("thanks");
+
+            string history = string.Join(" ", model.Requests.Last().Select(message => message.Text));
+
+            Assert.Contains("Show markers", history);
+            Assert.DoesNotContain("Nothing in it was applied", history);
+        }
+
+        [Fact]
+        public async Task A_new_Plan_that_replaces_a_Review_settles_what_Auto_apply_did_exactly_once() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool(SubmitPlanTool.Name, "call_1",
+                               Plan("Hiding the markers and shrinking the icons.",
+                                    Action("set_setting", "bh.mounts", key: "Show markers", value: "false", reason: "You asked."),
+                                    Action("set_setting", "bh.mounts", key: "Icon size", value: "1",
+                                           reason: "Smaller icons read better.", sideEffect: true)));
+
+            // The Player's second question gets a Plan of its own, which replaces the open Review.
+            model.WillCallTool(SubmitPlanTool.Name, "call_2",
+                               Plan("Making the icons smaller as well.",
+                                    Action("set_setting", "bh.mounts", key: "Icon size", value: "2",
+                                           reason: "Smaller icons read better.", sideEffect: true)),
+                               text: "Here is another plan.");
+            model.WillReply("Done.");
+            model.WillReply("Anything else?");
+
+            var world = PlayerWorld();
+            var chat  = NewChat(model, world, autoApply: true);
+
+            await chat.SendAsync("hide the mount markers");
+
+            await chat.SendAsync("make the icons smaller as well");
+
+            // The second Plan replaced the Review the first one left, with its own Action to decide.
+            Assert.Equal("Icon size", Assert.Single(chat.Review.Actions).TargetName);
+
+            // The next time the model is asked is when the Player finishes with that Review. It is
+            // told then: what Auto-apply did for the old Plan, that the rest of it was set aside, and
+            // what the Player has just applied.
+            await chat.ApplyAsync(new[] { 0 });
+
+            string history = string.Join(" ", model.Requests.Last().Select(message => message.Text));
+
+            Assert.Contains("Show markers", history);
+            Assert.Contains("set aside", history);
+            Assert.Contains("Icon size", history);
+
+            // And it is not settled a second time afterwards.
+            await chat.SendAsync("thanks");
+
+            string later = string.Join(" ", model.Requests.Last().Select(message => message.Text));
+
+            Assert.Equal(1, Occurrences(later, "set aside"));
+        }
+
+        [Fact]
         public async Task A_Continuation_never_takes_away_a_Review_the_Player_has_not_decided_on() {
             var model = new ScriptedChatClient();
             model.WillCallTool(SubmitPlanTool.Name, "call_1",
@@ -928,6 +1037,18 @@ namespace jubeater.aigoalplanner.Tests
 
         private static bool Enabled(FakeWorld world, string @namespace) {
             return world.Modules.Single(module => module.Namespace == @namespace).Enabled;
+        }
+
+        /// <summary>How many times <paramref name="needle"/> appears in <paramref name="text"/>.</summary>
+        private static int Occurrences(string text, string needle) {
+            int count = 0;
+
+            for (int at = text.IndexOf(needle, StringComparison.Ordinal); at >= 0;
+                 at = text.IndexOf(needle, at + needle.Length, StringComparison.Ordinal)) {
+                count++;
+            }
+
+            return count;
         }
 
         private static IEnumerable<string> WithoutTheIdentityMessage(IReadOnlyList<AiChatMessage> request) {
