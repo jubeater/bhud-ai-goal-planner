@@ -5,8 +5,8 @@ namespace jubeater.aigoalplanner.Core
     /// <summary>
     /// The fixed system prompt the Chat sends ahead of the Player's words: which product the model
     /// is part of, what it may talk about, that it only proposes changes and never makes them, that
-    /// it answers from the Player's real setup in the Player's language, and that it writes in
-    /// plain text.
+    /// it answers from the Player's real setup in the language of the Player's most recent message,
+    /// and that it writes in plain text.
     /// </summary>
     /// <remarks>
     /// The prompt is fixed text so the Lookups and the rules stay the same for every Provider and
@@ -61,13 +61,15 @@ namespace jubeater.aigoalplanner.Core
           + "below…\" instead.";
 
         /// <summary>
-        /// How the model answers: from the Player's real setup, in the language the Player used.
+        /// How the model answers: from the Player's real setup, in the language of the message the
+        /// Player just sent.
         /// </summary>
         private const string LookupsAndLanguage =
             "Look things up before you answer. Call list_installed_modules to see which modules the "
           + "Player really has, and get_module_settings to read one module's settings; prefer what "
           + "the tools say over guessing. If a module is disabled, tell the Player to enable it "
-          + "first. Reply in the language the Player wrote in.";
+          + "first. Reply in the language of the Player's most recent message, even when earlier "
+          + "messages were in another language.";
 
         /// <summary>
         /// How the model formats replies: plain text so the Chat window stays readable.

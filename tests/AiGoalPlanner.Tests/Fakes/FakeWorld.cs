@@ -51,7 +51,20 @@ namespace jubeater.aigoalplanner.Tests.Fakes
                                               ? found
                                               : NotInstalled(@namespace ?? string.Empty);
 
-            return Task.FromResult(result);
+            return Task.FromResult(WithTheModulesOwnNamespace(result, @namespace));
+        }
+
+        /// <summary>
+        /// Names the Installed Module that matched, the way the real world does, so a test can tell
+        /// that the log never repeats the spelling the model asked with.
+        /// </summary>
+        private ModuleSettingsResult WithTheModulesOwnNamespace(ModuleSettingsResult result, string @namespace) {
+            InstalledModuleInfo matched =
+                Modules.FirstOrDefault(module => string.Equals(module.Namespace, @namespace, StringComparison.OrdinalIgnoreCase));
+
+            return matched == null
+                       ? result
+                       : new ModuleSettingsResult(result.Status, result.ModuleName, result.Settings, matched.Namespace);
         }
 
         public static ModuleSettingsResult NotInstalled(string @namespace) {

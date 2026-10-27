@@ -4,9 +4,10 @@ A [Blish HUD](https://blishhud.com/) module in which an AI sets up and configure
 modules to reach a goal you describe in chat. The design is tracked as GitHub issues on this repo;
 `GLOSSARY.md` and `docs/adr/` explain the terms and the decisions behind it.
 
-**Status:** the Chat talks to a real Provider. A corner icon opens the Chat window, **Provider
-settings** stores the endpoint, the model and (optionally) the API key, and a Send comes back as a
-real AI reply. There are no Lookups or Plans yet, so the AI can only answer in words.
+**Status:** the Chat talks to a real Provider and answers from the Player's real setup: the AI can
+list the installed modules and read one module's settings. A corner icon opens the Chat window,
+**Provider settings** stores the endpoint, the model and (optionally) the API key, and a Send comes
+back as a real AI reply. There are no Plans yet, so the AI can only answer in words.
 
 ## Build
 
@@ -117,6 +118,19 @@ that failure mode is what the packaging above is there to prevent.
   `Blish HUD.exe --debug --module <path to AiGoalPlanner.bhm>`. `--debug` makes Blish HUD rethrow
   module exceptions to the debugger.
 - Logs are written to `Documents\Guild Wars 2\addons\blishhud\logs`.
+
+## Diagnosing a Request
+
+Every Provider round trip and every Lookup leaves one line in the Blish HUD log at debug level, so a
+slow or odd Request can be read back afterwards:
+
+```
+Provider round trip 1: 812 ms, finish_reason=tool_calls, tool_calls=1
+Lookup get_module_settings: 14 ms, module=bh.pathing, status=ok, settings=200 of 431, 18422 chars
+```
+
+The lines carry timing, finish reasons and counts — what a Lookup read and how big its answer was —
+and never a Setting's value, the Player's words or anything a Provider sent back.
 
 ## CI and releases
 
