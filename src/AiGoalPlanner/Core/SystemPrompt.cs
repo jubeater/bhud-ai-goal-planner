@@ -15,7 +15,7 @@ namespace jubeater.aigoalplanner.Core
     /// the next Request on. It is kept out of <see cref="Chat.Messages"/>: the Player reads the
     /// conversation, not the instructions.
     /// </remarks>
-    public static class SystemPrompt
+    public static partial class SystemPrompt
     {
         /// <summary>
         /// The one message the Chat puts first on every Request.
@@ -24,6 +24,7 @@ namespace jubeater.aigoalplanner.Core
             return Identity(model, endpoint) + "\n\n"
                  + Scope + "\n\n"
                  + AdvisoryOnly + "\n\n"
+                 + HowToPropose + "\n\n"
                  + LookupsAndLanguage + "\n\n"
                  + PlainTextFormat;
         }

@@ -35,9 +35,23 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         private const int ToolCallLimit = 15;
 
+        /// <summary>
+        /// How many times one Request may ask the model again after it applied a Plan. A Continuation
+        /// is one more turn of the same Request, and a model that answers every Apply with another
+        /// Plan must not be able to keep the Player waiting for ever.
+        /// </summary>
+        private const int ContinuationLimit = 3;
+
         private readonly Func<IChatClient> _chatClient;
         private readonly Func<string>       _systemPrompt;
         private readonly ToolRegistry       _tools;
+
+        /// <summary>
+        /// The Plan pipeline: what makes a proposal into a Plan, checks it against the Player's real
+        /// setup, applies it and can Undo it. Null in a Chat that was built without one, which can
+        /// then only repeat what the model said about a plan.
+        /// </summary>
+        private readonly Plans _plans;
 
         /// <summary>
         /// Where the diagnostics of a Request go — one line per Provider round trip — or null when
@@ -77,19 +91,26 @@ namespace jubeater.aigoalplanner.Core
         private int _generation;
 
         /// <summary>
+        /// The Plan the Player is being asked to Review, or null when no Review is open. It belongs
+        /// to the Chat the Player is in, so a new Chat takes it away with everything else.
+        /// </summary>
+        private PlanReview _review;
+
+        /// <summary>
         /// A Chat talks to the model <paramref name="chatClient"/> builds and is told what it is by
         /// <paramref name="systemPrompt"/>. Both are asked again for every Request, so a change of
         /// Settings takes effect without losing the conversation. <paramref name="tools"/> holds the
         /// Lookups the model may call; without it the Chat simply has none to offer.
         /// <paramref name="logDebug"/> receives one line per Provider round trip; without it the
-        /// Chat logs nothing.
+        /// Chat logs nothing. <paramref name="plans"/> is what turns a proposal into a Plan the Player
+        /// can Review and Apply; without it the Chat can only repeat what the model said about one.
         /// </summary>
         public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools = null,
-                    Action<string> logDebug = null)
-            : this(chatClient, systemPrompt, tools, logDebug, unavailableReason: null) { }
+                    Action<string> logDebug = null, Plans plans = null)
+            : this(chatClient, systemPrompt, tools, logDebug, plans, unavailableReason: null) { }
 
         private Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools,
-                     Action<string> logDebug, string unavailableReason) {
+                     Action<string> logDebug, Plans plans, string unavailableReason) {
             _unavailableReason = unavailableReason;
 
             if (_unavailableReason == null) {
@@ -102,6 +123,7 @@ namespace jubeater.aigoalplanner.Core
             }
 
             _tools    = tools;
+            _plans    = plans;
             _logDebug = logDebug;
         }
 
@@ -113,7 +135,7 @@ namespace jubeater.aigoalplanner.Core
         /// starting a new Chat shows it again, so it cannot be cleared away.
         /// </summary>
         public static Chat Unavailable(string reason) {
-            return new Chat(null, null, null, null, reason ?? throw new ArgumentNullException(nameof(reason)));
+            return new Chat(null, null, null, null, null, reason ?? throw new ArgumentNullException(nameof(reason)));
         }
 
         /// <summary>
@@ -160,6 +182,32 @@ namespace jubeater.aigoalplanner.Core
                 }
             }
         }
+
+        /// <summary>
+        /// Raised whenever the Review opens or closes, so the Chat window can show the Actions the
+        /// Player may approve. Like <see cref="MessagesChanged"/>, it may be raised on a background
+        /// thread.
+        /// </summary>
+        public event EventHandler<EventArgs> ReviewChanged;
+
+        /// <summary>
+        /// The Plan waiting for the Player's Review, or null when there is none. Its Actions each
+        /// say what would change, from what to what, why, and — when the validator refused one — why
+        /// it cannot be applied.
+        /// </summary>
+        public PlanReview Review {
+            get {
+                lock (_messagesLock) {
+                    return _review;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Whether an Apply is waiting to be undone. Undo is not part of the conversation, so a new
+        /// Chat leaves it in place.
+        /// </summary>
+        public bool CanUndo => _plans != null && _plans.CanUndo;
 
         /// <summary>
         /// Sends a Request in this Chat: the Player's words are added to the Chat and the AI answers.
@@ -226,6 +274,96 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
+        /// Applies the Actions of the open Review that the Player approved, and then lets the AI carry
+        /// on: its next turn works from the state the Apply made, which is the Continuation. The Chat
+        /// reports what was applied and what was not, and one Action that fails does not stop the
+        /// rest.
+        /// </summary>
+        /// <remarks>
+        /// The Review closes before anything is written, so a second click cannot apply the same plan
+        /// twice. A Chat the Player has left mid-Apply does not get the report, but the change itself
+        /// is the Player's configuration and still happened; its Undo record is in the journal either
+        /// way.
+        /// </remarks>
+        public async Task ApplyAsync(IEnumerable<int> actionIndexes, CancellationToken cancellationToken = default) {
+            if (_plans == null) return;
+
+            PlanReview review = Review;
+
+            if (review == null) return;
+
+            int generation = Volatile.Read(ref _generation);
+
+            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            try {
+                if (generation != Volatile.Read(ref _generation)) return;
+
+                SetReview(generation, null);
+
+                AppliedPlan applied = await _plans.ApplyAsync(review, actionIndexes, cancellationToken).ConfigureAwait(false);
+
+                ShowReport(generation, applied.Describe());
+
+                if (applied.Outcomes.Count == 0) return;
+
+                if (!TryAppendApplyOutcome(generation, applied)) return;
+
+                try {
+                    await RunRequest(generation, cancellationToken).ConfigureAwait(false);
+                } finally {
+                    ClearProgress(generation);
+                }
+            } finally {
+                _sendLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// The Player dismissed the open Review: nothing in it is applied. The model is told, so its
+        /// next answer does not assume the changes it proposed are in place.
+        /// </summary>
+        public void CancelReview() {
+            int generation = Volatile.Read(ref _generation);
+
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation) || _review == null) return;
+
+                _review = null;
+
+                _modelHistory.Add(new AiChatMessage(ChatRole.User,
+                                                    "The Player dismissed the plan. Nothing in it was applied."));
+            }
+
+            ReviewChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Puts the most recent Apply back the way it was. Undo is about the Player's configuration,
+        /// not the conversation, so it works whatever the Chat is showing — including after New chat.
+        /// </summary>
+        /// <remarks>
+        /// The model is deliberately not told. What an Undo restores is the Player's own state, which
+        /// the next Lookup reads live; sending undo records to a Provider would hand it a history of
+        /// the Player's configuration it has no use for.
+        /// </remarks>
+        public async Task UndoAsync(CancellationToken cancellationToken = default) {
+            if (_plans == null) return;
+
+            int generation = Volatile.Read(ref _generation);
+
+            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            try {
+                UndoResult result = await _plans.UndoAsync(cancellationToken).ConfigureAwait(false);
+
+                ShowReport(generation, result.Describe());
+            } finally {
+                _sendLock.Release();
+            }
+        }
+
+        /// <summary>
         /// Starts a new Chat: what the Player said before is cleared, and the next Request starts from scratch.
         /// </summary>
         /// <remarks>
@@ -240,11 +378,13 @@ namespace jubeater.aigoalplanner.Core
                 _messages.Clear();
                 _modelHistory.Clear();
                 _progressLines.Clear();
+                _review = null;
                 Interlocked.Increment(ref _generation);
             }
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
             ProgressChanged?.Invoke(this, EventArgs.Empty);
+            ReviewChanged?.Invoke(this, EventArgs.Empty);
 
             // Starting over is not a way to clear the failure away: an unavailable Chat shows its
             // reason again in the fresh Chat.
@@ -255,11 +395,14 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>
         /// One Request, from the model's first answer to the Chat's last word: tool rounds as long as
-        /// the model calls read-only tools, then the reply. Everything it shows or tells the model is
-        /// gated on <paramref name="generation"/>, so nothing lands in a Chat the Player has left.
+        /// the model calls read-only tools, then the reply — or a Plan, which ends the Request with
+        /// the Review open, unless Auto-apply already carried some of it out and the model is asked
+        /// to carry on from there. Everything it shows or tells the model is gated on
+        /// <paramref name="generation"/>, so nothing lands in a Chat the Player has left.
         /// </summary>
         private async Task RunRequest(int generation, CancellationToken cancellationToken) {
             int executedToolCalls = 0;
+            int continuations     = 0;
             int round             = 0;
 
             while (true) {
@@ -325,12 +468,19 @@ namespace jubeater.aigoalplanner.Core
 
                 if (_tools != null && calls.Any(call => _tools.IsProposal(call.Name))) {
                     // A proposal is delivered to the Player, not run: per ADR-0003 nothing changes
-                    // until the Player applies it. The Review flow that takes a proposal from here
-                    // arrives with its own ticket; until then the Chat can only repeat what the
-                    // model said about it.
-                    ShowUndeliverableProposal(generation, response);
+                    // until the Player applies it.
+                    if (_plans == null) {
+                        ShowUndeliverableProposal(generation, response);
 
-                    return;
+                        return;
+                    }
+
+                    bool continuation = await DeliverPlanAsync(generation, response, calls, cancellationToken)
+                                            .ConfigureAwait(false);
+
+                    if (!continuation || ++continuations > ContinuationLimit) return;
+
+                    continue;
                 }
 
                 if (executedToolCalls + calls.Count > ToolCallLimit) {
@@ -457,9 +607,9 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
-        /// The model called a proposal tool. Until the Review flow can take a proposal, all the Chat
-        /// can do is repeat what the model said about it, so the Player is never left with the
-        /// impression that something has been done — it has not.
+        /// The model called a proposal tool and this Chat has no Plan pipeline to give it to. That is
+        /// a wiring mistake rather than something a Player can reach, but the Player is still not
+        /// left believing something happened: nothing has.
         /// </summary>
         private void ShowUndeliverableProposal(int generation, ChatResponse response) {
             string text = response.Text;
@@ -470,6 +620,127 @@ namespace jubeater.aigoalplanner.Core
             }
 
             TryAppendNotice(generation, "The model proposed changes but did not say which. This version of AI Goal Planner cannot show proposals yet.");
+        }
+
+        /// <summary>
+        /// Takes the Plan the model proposed and puts it in front of the Player: its reply as the AI's
+        /// answer, and its Actions as a Review. Answers whether the model should be asked again — it
+        /// should when Auto-apply already carried part of the Plan out, so the model can carry on
+        /// from the state it made.
+        /// </summary>
+        private async Task<bool> DeliverPlanAsync(int generation, ChatResponse response, List<FunctionCallContent> calls,
+                                                  CancellationToken cancellationToken) {
+            FunctionCallContent call = calls.First(candidate => _tools.IsProposal(candidate.Name));
+            Plan                plan = SubmitPlanTool.ReadPlan(call.Arguments);
+
+            bool hasReply = !string.IsNullOrWhiteSpace(plan.Reply);
+
+            // A call with neither words nor Actions is nothing the Player can be shown or asked to
+            // approve; the Chat says so rather than opening an empty Review.
+            if (plan.Actions.Count == 0 && !hasReply) {
+                TryAppendNotice(generation, "The AI proposed changes but did not say which.");
+
+                return false;
+            }
+
+            if (hasReply && !TryAppendAiReply(generation, plan.Reply)) return false;
+
+            if (plan.Actions.Count == 0) {
+                TryAppendPlanExchange(generation, response, calls, call.CallId, PlanResult(0, 0, 0));
+
+                return false;
+            }
+
+            PlanReview review;
+
+            try {
+                review = await _plans.ReviewAsync(plan, cancellationToken).ConfigureAwait(false);
+            } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                throw;
+            } catch (Exception exception) {
+                // The Player's installation could not be read — a Module that fails while its
+                // Settings are read is the usual cause. Nothing is proposed against state that
+                // could not be checked.
+                if (_logDebug != null) _logDebug("Plan could not be checked: " + exception.GetType().Name);
+
+                TryAppendNotice(generation, "The plan could not be checked against your installation. Try again.");
+
+                return false;
+            }
+
+            IReadOnlyList<int> autoApplied = _plans.AutoApplies ? AutoApplyable(review) : new int[0];
+
+            AppliedPlan applied = autoApplied.Count == 0
+                                      ? null
+                                      : await _plans.ApplyAsync(review, autoApplied, cancellationToken).ConfigureAwait(false);
+
+            if (!TryAppendPlanExchange(generation, response, calls, call.CallId,
+                                       PlanResult(review.Actions.Count,
+                                                  review.Actions.Count(action => !action.IsAccepted),
+                                                  autoApplied.Count))) {
+                return false;
+            }
+
+            PlanReview remaining = applied == null ? review : review.Without(autoApplied);
+
+            SetReview(generation, remaining.IsEmpty ? null : remaining);
+
+            if (applied == null) return false;
+
+            ShowReport(generation, applied.Describe());
+
+            return TryAppendApplyOutcome(generation, applied);
+        }
+
+        /// <summary>
+        /// Which Actions Auto-apply may take without the Player: Setting changes the validator
+        /// accepted and that are not Side Effects. Enabling and disabling Modules, Side Effects and
+        /// rejected Actions always wait for Review (ADR-0005).
+        /// </summary>
+        private static IReadOnlyList<int> AutoApplyable(PlanReview review) {
+            var indexes = new List<int>();
+
+            for (int index = 0; index < review.Actions.Count; index++) {
+                ReviewedAction action = review.Actions[index];
+
+                if (action.CanApply && action.Action.Kind == PlanActionKind.SetSetting && !action.Action.IsSideEffect) {
+                    indexes.Add(index);
+                }
+            }
+
+            return indexes;
+        }
+
+        /// <summary>
+        /// What the model is told its <c>submit_plan</c> call came to: how many Actions the Player was
+        /// shown, how many the validator refused, and how many Auto-apply took. Nothing about values
+        /// or undo records: the model reads the state it needs with a Lookup.
+        /// </summary>
+        private static string PlanResult(int actions, int rejected, int autoApplied) {
+            return "{\"status\":\"delivered\",\"actions\":" + actions
+                 + ",\"cannot_be_applied\":" + rejected
+                 + ",\"auto_applied\":" + autoApplied + "}";
+        }
+
+        /// <summary>
+        /// Shows the Player what an Apply or an Undo did, in the module's own voice: the AI did not do
+        /// it, so it is not the AI that says it was done.
+        /// </summary>
+        private void ShowReport(int generation, string text) {
+            TryAppend(generation, new ChatMessage(ChatMessageAuthor.Report, text));
+        }
+
+        /// <summary>
+        /// Opens or closes the Review, only while <paramref name="generation"/> is still current.
+        /// </summary>
+        private void SetReview(int generation, PlanReview review) {
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return;
+
+                _review = review;
+            }
+
+            ReviewChanged?.Invoke(this, EventArgs.Empty);
         }
 
         /// <summary>
@@ -499,6 +770,43 @@ namespace jubeater.aigoalplanner.Core
 
                 _modelHistory.Add(AssistantMessageOf(response));
                 _modelHistory.Add(new AiChatMessage(ChatRole.Tool, results.Cast<AIContent>().ToList()));
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Adds a proposal round to what the model will be told: its own calls, and a result for every
+        /// one of them. The proposal's call gets <paramref name="result"/>; a Lookup asked for in the
+        /// same turn was not run and its result says so, because a tool call without an answer is a
+        /// hole the next Request could not explain.
+        /// </summary>
+        private bool TryAppendPlanExchange(int generation, ChatResponse response, List<FunctionCallContent> calls,
+                                           string planCallId, string result) {
+            var results = new List<FunctionResultContent>(calls.Count);
+
+            foreach (FunctionCallContent call in calls) {
+                results.Add(string.Equals(call.CallId, planCallId, StringComparison.Ordinal)
+                                ? new FunctionResultContent(call.CallId, result)
+                                : new FunctionResultContent(call.CallId,
+                                      "{\"status\":\"not run\",\"reason\":\"The plan was delivered in this turn, so this call was not run.\"}"));
+            }
+
+            return TryAppendToolExchange(generation, response, results);
+        }
+
+        /// <summary>
+        /// Tells the model what the Apply came to, as one message of its own, so its next turn works
+        /// from the state the Apply made. It holds what was applied and what failed and nothing else:
+        /// no undo record, no earlier Chat, and no value the Player did not see in the Review.
+        /// </summary>
+        private bool TryAppendApplyOutcome(int generation, AppliedPlan applied) {
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return false;
+
+                _modelHistory.Add(new AiChatMessage(ChatRole.User,
+                                                    "The Player applied the plan you proposed. " + applied.Describe()
+                                                  + " Look up anything you now need to, and tell the Player what you suggest next."));
             }
 
             return true;

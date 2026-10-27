@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Blish_HUD;
 using Blish_HUD.Content;
 using Blish_HUD.Controls;
@@ -25,12 +27,32 @@ namespace jubeater.aigoalplanner.UI
         private const string WindowId = "jubeater.aigoalplanner.chat";
 
         private const int WindowWidth       = 560;
-        private const int WindowHeight      = 680;
-        private const int MessageListHeight = 470;
+        private const int WindowHeight      = 780;
+
+        /// <summary>
+        /// What is left of the window inside its frame: 690 px of the 780, as the frame takes 50 above
+        /// the content and 40 below it.
+        /// </summary>
+        private const int ContentHeight     = WindowHeight - 90;
+
+        private const int MessageListHeight = 360;
         private const int MessageSpacing    = 6;
-        private const int InputRowTop       = 480;
-        private const int ProviderRowTop    = 514;
+
+        /// <summary>
+        /// Where the Review sits, between the conversation and the input row. The window grew for it:
+        /// a Review needs a row per Action with what it would change, why, and what cannot be done.
+        /// </summary>
+        private const int ReviewTitleTop    = 368;
+        private const int ReviewPanelTop    = 390;
+        private const int ReviewPanelHeight = 140;
+        private const int ReviewButtonsTop  = 536;
+        private const int ReviewIndent      = 16;
+        private const int SideEffectWidth   = 84;
+
+        private const int InputRowTop       = 574;
+        private const int ProviderRowTop    = 608;
         private const int RequestBoxWidth   = 300;
+        private const int UndoButtonWidth   = 90;
 
         /// <summary>
         /// Blish HUD's <see cref="Scrollbar"/> is 12 px wide. The message list is worked out from the
@@ -60,6 +82,15 @@ namespace jubeater.aigoalplanner.UI
         private static readonly Color NoticeColor = new Color(240, 165, 150);
         private static readonly Color HintColor   = new Color(170, 170, 170);
 
+        /// <summary>
+        /// What the module says itself about what it did: an Apply, an Undo. It is not the AI talking,
+        /// so it does not look like an AI reply.
+        /// </summary>
+        private static readonly Color ModuleColor = new Color(175, 215, 175);
+
+        /// <summary>A Side Effect is a change the Player did not ask for, and it says so in red.</summary>
+        private static readonly Color SideEffectColor = new Color(230, 150, 120);
+
         private readonly Chat         _chat;
         private readonly Action       _openProviderSettings;
         private readonly Func<string> _describeProvider;
@@ -74,7 +105,31 @@ namespace jubeater.aigoalplanner.UI
         private readonly StandardButton _cancelButton;
         private readonly StandardButton _newChatButton;
         private readonly StandardButton _providerButton;
+        private readonly StandardButton _undoButton;
         private readonly List<Control>  _messageControls = new List<Control>();
+
+        private readonly Label          _reviewTitle;
+        private readonly Panel          _reviewPanel;
+        private readonly Scrollbar      _reviewScrollbar;
+        private readonly StandardButton _applyButton;
+        private readonly StandardButton _cancelReviewButton;
+        private readonly List<Control>  _reviewControls = new List<Control>();
+
+        /// <summary>
+        /// Which Action each checkbox in the Review stands for, so Apply sends the ones the Player
+        /// left checked — and in the order the Plan has them.
+        /// </summary>
+        private readonly List<KeyValuePair<Checkbox, int>> _reviewRows = new List<KeyValuePair<Checkbox, int>>();
+
+        /// <summary>
+        /// The Actions of the Review on screen that the Player has unticked. The panel is rebuilt
+        /// whenever the Chat changes, so what the Player decided has to outlive the controls that
+        /// showed it — otherwise a repaint would tick everything again.
+        /// </summary>
+        private readonly HashSet<int> _reviewUnchosen = new HashSet<int>();
+
+        /// <summary>The Review those ticks belong to, so a different Plan starts with everything ticked.</summary>
+        private PlanReview _shownReview;
 
         /// <summary>
         /// The Request that is on its way right now, so Cancel can stop it. Null when the Player has
@@ -104,7 +159,9 @@ namespace jubeater.aigoalplanner.UI
             _window = new StandardWindow(
                 windowBackground,
                 new Rectangle(25, 26, WindowWidth, WindowHeight),
-                new Rectangle(40, 50, 540, 590)) {
+                // The content region is the part inside the frame: the conversation, the Review, the
+                // input row and the Provider row all have to fit in it, so it grows with the window.
+                new Rectangle(40, 50, 540, ContentHeight)) {
                 Parent        = GameService.Graphics.SpriteScreen,
                 Title         = "AI Goal Planner",
                 Subtitle      = "Describe a goal",
@@ -198,24 +255,83 @@ namespace jubeater.aigoalplanner.UI
             };
             _providerButton.Click += OnProviderButtonClicked;
 
+            // Undo is about the Player's configuration, not the conversation, so it sits beside the
+            // settings rather than in the part of the window that a New chat empties. It is only
+            // clickable while an Apply waiting to be undone exists.
+            _undoButton = new StandardButton {
+                Parent   = content,
+                Location = new Point(156, ProviderRowTop),
+                Size     = new Point(UndoButtonWidth, StandardButton.STANDARD_CONTROL_HEIGHT),
+                Text     = "Undo"
+            };
+            _undoButton.Click += OnUndoClicked;
+
             // A reminder of which Provider the Chat will talk to, so a wrong endpoint or model name
             // is visible before the Player gets an error back.
             _providerLabel = new Label {
                 Parent    = content,
-                Location  = new Point(156, ProviderRowTop + 6),
-                Size      = new Point(384, 20),
+                Location  = new Point(156 + UndoButtonWidth + 6, ProviderRowTop + 6),
+                Size      = new Point(540 - (156 + UndoButtonWidth + 6), 20),
                 Font      = GameService.Content.DefaultFont14,
                 TextColor = HintColor,
                 Text      = string.Empty
             };
 
+            // The Review: what the AI proposed, one row per Action, and the two buttons that decide
+            // what happens to it. It is its own area so a long Plan cannot push the conversation out
+            // of the window.
+            _reviewTitle = new Label {
+                Parent    = content,
+                Location  = new Point(0, ReviewTitleTop),
+                Size      = new Point(messageListWidth, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
+                Text      = string.Empty,
+                Visible   = false
+            };
+
+            _reviewPanel = new Panel {
+                Parent          = content,
+                Location        = new Point(0, ReviewPanelTop),
+                Size            = new Point(messageListWidth, ReviewPanelHeight),
+                BackgroundColor = Color.Transparent,
+                Visible         = false
+            };
+
+            _reviewScrollbar = new Scrollbar(_reviewPanel) {
+                Parent   = content,
+                Location = new Point(messageListWidth + ScrollbarGap, ReviewPanelTop),
+                Height   = ReviewPanelHeight,
+                Visible  = false
+            };
+
+            _applyButton = new StandardButton {
+                Parent   = content,
+                Location = new Point(messageListWidth - 90, ReviewButtonsTop),
+                Size     = new Point(90, StandardButton.STANDARD_CONTROL_HEIGHT),
+                Text     = "Apply",
+                Visible  = false
+            };
+            _applyButton.Click += OnApplyClicked;
+
+            _cancelReviewButton = new StandardButton {
+                Parent   = content,
+                Location = new Point(messageListWidth - 90 - 6 - 100, ReviewButtonsTop),
+                Size     = new Point(100, StandardButton.STANDARD_CONTROL_HEIGHT),
+                Text     = "Cancel",
+                Visible  = false
+            };
+            _cancelReviewButton.Click += OnCancelReviewClicked;
+
             _chat.MessagesChanged += OnMessagesChanged;
             _chat.ProgressChanged += OnProgressChanged;
+            _chat.ReviewChanged   += OnReviewChanged;
 
             // The Player opens the Chat from the corner icon, so it starts out hidden.
             _window.Visible = false;
             RefreshProvider();
             RenderMessages();
+            RenderReview();
         }
 
         /// <summary>
@@ -231,6 +347,7 @@ namespace jubeater.aigoalplanner.UI
             RefreshProvider();
             _window.Show();
             _requestBox.Focused = true;
+            RenderReview();
         }
 
         /// <summary>
@@ -249,12 +366,16 @@ namespace jubeater.aigoalplanner.UI
 
             _chat.MessagesChanged -= OnMessagesChanged;
             _chat.ProgressChanged -= OnProgressChanged;
+            _chat.ReviewChanged   -= OnReviewChanged;
 
             _requestBox.EnterPressed -= OnRequestBoxEnterPressed;
             _sendButton.Click        -= OnSendClicked;
             _cancelButton.Click      -= OnCancelClicked;
             _newChatButton.Click     -= OnNewChatClicked;
             _providerButton.Click    -= OnProviderButtonClicked;
+            _applyButton.Click       -= OnApplyClicked;
+            _cancelReviewButton.Click -= OnCancelReviewClicked;
+            _undoButton.Click        -= OnUndoClicked;
 
             _window.Dispose();
         }
@@ -309,25 +430,59 @@ namespace jubeater.aigoalplanner.UI
             // instead of waiting for the Provider to answer.
             _requestBox.Text = string.Empty;
 
+            RunWhileInFlight("Sending the Request to the Provider failed.",
+                             cancellationToken => _chat.SendAsync(request, cancellationToken));
+        }
+
+        /// <summary>
+        /// Applies the Actions the Player left checked. The Chat closes the Review, changes what it
+        /// can, says what it did in the conversation and lets the AI carry on from there.
+        /// </summary>
+        private void OnApplyClicked(object sender, MouseEventArgs e) {
+            IReadOnlyList<int> chosen = _reviewRows.Where(row => row.Key.Checked).Select(row => row.Value).ToList();
+
+            RunWhileInFlight("Applying the plan failed.", cancellationToken => _chat.ApplyAsync(chosen, cancellationToken));
+        }
+
+        /// <summary>
+        /// Throws the Review away without changing anything. The AI is told, so its next answer does
+        /// not assume the changes it proposed are in place.
+        /// </summary>
+        private void OnCancelReviewClicked(object sender, MouseEventArgs e) {
+            _chat.CancelReview();
+        }
+
+        /// <summary>
+        /// Puts the last Apply back the way it was. Undo changes the Player's configuration, which is
+        /// why it is offered outside the Review and outlives a New chat.
+        /// </summary>
+        private void OnUndoClicked(object sender, MouseEventArgs e) {
+            RunWhileInFlight("Undoing the last change failed.", cancellationToken => _chat.UndoAsync(cancellationToken));
+        }
+
+        /// <summary>
+        /// Runs one piece of Chat work with Cancel available and the buttons handed back whichever way
+        /// it ends. What the Chat itself says about the outcome is already in the conversation, so the
+        /// only thing left here is to keep the game from crashing on an unexpected error.
+        /// </summary>
+        private async void RunWhileInFlight(string failureMessage, Func<CancellationToken, Task> work) {
+            // One piece of work at a time: the buttons that start one are disabled while one runs,
+            // and this is what makes sure a click that arrives anyway cannot replace the cancellation
+            // source of the work already running.
+            if (_requestInFlight) return;
+
             _requestCancellation = new CancellationTokenSource();
             _requestInFlight     = true;
             QueueRender();
 
-            SendRequestAsync(request, _requestCancellation.Token);
-        }
+            CancellationToken cancellationToken = _requestCancellation.Token;
 
-        /// <summary>
-        /// Asks the Chat for a reply. Failures end up in the Chat as a Notice, so the only thing
-        /// left to do here is to keep the game from crashing on an unexpected error, and to hand
-        /// the buttons back when the Request is over, cancelled or not.
-        /// </summary>
-        private async void SendRequestAsync(string request, CancellationToken cancellationToken) {
             try {
-                await _chat.SendAsync(request, cancellationToken);
+                await work(cancellationToken);
             } catch (OperationCanceledException) {
                 // The Player cancelled this Request; the Chat has nothing more to add to it.
             } catch (Exception exception) {
-                Logger.Warn(exception, "Sending the Request to the Provider failed.");
+                Logger.Warn(exception, failureMessage);
             } finally {
                 // Taken out of the field here, so a Cancel click can never reach this source again.
                 CancellationTokenSource finished = Interlocked.Exchange(ref _requestCancellation, null);
@@ -354,6 +509,14 @@ namespace jubeater.aigoalplanner.UI
             QueueRender();
         }
 
+        /// <summary>
+        /// The Chat opens or closes a Review on whatever thread the model or the Player reached it
+        /// from, so the panel that shows it is painted on the game thread like everything else.
+        /// </summary>
+        private void OnReviewChanged(object sender, EventArgs e) {
+            QueueRender();
+        }
+
         private void QueueRender() {
             if (_disposed || _renderQueued) return;
 
@@ -368,6 +531,7 @@ namespace jubeater.aigoalplanner.UI
             if (_disposed) return;
 
             RenderMessages();
+            RenderReview();
         }
 
         /// <summary>
@@ -449,9 +613,157 @@ namespace jubeater.aigoalplanner.UI
                     return PlayerColor;
                 case ChatMessageAuthor.Ai:
                     return AiColor;
+                case ChatMessageAuthor.Report:
+                    return ModuleColor;
                 default:
                     return NoticeColor;
             }
+        }
+
+        /// <summary>
+        /// Rebuilds the Review from the Chat: one row per Action, with what it would change, why, and
+        /// what cannot be done — a checkbox for each Action that can be applied, and nothing to tick
+        /// on the ones that cannot.
+        /// </summary>
+        private void RenderReview() {
+            foreach (Control reviewControl in _reviewControls) {
+                reviewControl.Dispose();
+            }
+
+            _reviewControls.Clear();
+            _reviewRows.Clear();
+
+            PlanReview review = _chat.Review;
+            bool       open   = review != null;
+
+            // A different Plan starts with everything ticked; the same Plan keeps what the Player
+            // already decided, however often the Chat repaints.
+            if (!ReferenceEquals(review, _shownReview)) {
+                _reviewUnchosen.Clear();
+                _shownReview = review;
+            }
+
+            _reviewTitle.Visible     = open;
+            _reviewPanel.Visible     = open;
+            _reviewScrollbar.Visible = open;
+            _cancelReviewButton.Visible   = open;
+            _applyButton.Visible     = open && review.HasSomethingToApply;
+            _applyButton.Enabled     = !_requestInFlight;
+            _cancelReviewButton.Enabled   = !_requestInFlight;
+
+            // Undo is offered for as long as there is an Apply to put back, whatever the Chat shows.
+            _undoButton.Enabled = _chat.CanUndo && !_requestInFlight;
+
+            if (!open) return;
+
+            _reviewTitle.Text = "Review: " + Describe(review);
+
+            int top = 0;
+
+            for (int index = 0; index < review.Actions.Count; index++) {
+                top = AddReviewRow(review.Actions[index], index, top);
+            }
+
+            _reviewScrollbar.RecalculateLayout();
+            _reviewScrollbar.ScrollDistance = 0f;
+        }
+
+        private static string Describe(PlanReview review) {
+            int applyable = review.Actions.Count(action => action.CanApply);
+
+            if (applyable == 0) return "nothing here can be applied";
+
+            return applyable == 1 ? "1 change to apply" : applyable + " changes to apply";
+        }
+
+        /// <summary>
+        /// Adds one Action to the Review and says where the next one goes: a checkbox the Player can
+        /// tick, what the Action would change, and why the AI proposes it. An Action that cannot be
+        /// applied keeps its row and its box, greyed out, with the reason the validator gave — a Plan
+        /// the AI proposes is what the Player reviews, including the parts that will not work.
+        /// </summary>
+        private int AddReviewRow(ReviewedAction action, int index, int top) {
+            var box = new Checkbox {
+                Parent           = _reviewPanel,
+                Location         = new Point(0, top),
+                Width            = _reviewPanel.Width - SideEffectWidth,
+                Text             = action.Summary,
+                Enabled          = action.CanApply,
+                Checked          = action.CanApply && !_reviewUnchosen.Contains(index),
+                BasicTooltipText = action.Action.Reason
+            };
+
+            box.CheckedChanged += (sender, e) => Remember(index, e.Checked);
+
+            _reviewControls.Add(box);
+            _reviewRows.Add(new KeyValuePair<Checkbox, int>(box, index));
+
+            if (action.Action.IsSideEffect) {
+                AddReviewLabel("Side effect", SideEffectColor, top, _reviewPanel.Width - SideEffectWidth);
+            }
+
+            int detail = top + box.Height + 2;
+
+            if (!action.IsAccepted) {
+                return AddReviewLabel(ProblemOf(action), NoticeColor, detail, ReviewIndent) + MessageSpacing;
+            }
+
+            // Advice's Summary is the reason itself, so there is nothing to add under it.
+            if (action.Action.Kind == PlanActionKind.Advice) return detail + MessageSpacing;
+
+            return AddReviewLabel(DetailOf(action), HintColor, detail, ReviewIndent) + MessageSpacing;
+        }
+
+        /// <summary>
+        /// What the Player would get: the value now, the value the Action would give it, and why the
+        /// AI proposes it.
+        /// </summary>
+        private static string DetailOf(ReviewedAction action) {
+            return "Now " + action.CurrentValue + " → " + action.ProposedValue + ". " + action.Action.Reason;
+        }
+
+        private static string ProblemOf(ReviewedAction action) {
+            return "Cannot be applied: " + action.Problem;
+        }
+
+        /// <summary>
+        /// Remembers what the Player did with one checkbox, so the next repaint of the Review shows
+        /// the same choice instead of ticking everything again.
+        /// </summary>
+        private void Remember(int index, bool chosen) {
+            if (chosen) {
+                _reviewUnchosen.Remove(index);
+                return;
+            }
+
+            _reviewUnchosen.Add(index);
+        }
+
+        /// <summary>
+        /// Adds one line to the Review and says where the next one goes. It starts at
+        /// <paramref name="left"/> and wraps inside what is left of the panel, so a long reason cannot
+        /// run out of it.
+        /// </summary>
+        private int AddReviewLabel(string text, Color color, int top, int left) {
+            BitmapFont font = GameService.Content.DefaultFont14;
+
+            int width = _reviewPanel.Width - left - TextRightMargin;
+
+            var label = new Label {
+                Parent         = _reviewPanel,
+                Text           = TextWrap.Wrap(text, s => font.MeasureString(s).Width, width),
+                Font           = font,
+                TextColor      = color,
+                Width          = width,
+                AutoSizeHeight = true
+            };
+
+            label.RecalculateLayout();
+            label.Location = new Point(left, top);
+
+            _reviewControls.Add(label);
+
+            return label.Bottom;
         }
     }
 }

@@ -9,10 +9,10 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 {
     /// <summary>
     /// An in-memory world for tests: the Player's modules and their settings are whatever the test
-    /// puts in. A test can also take over answering a Lookup itself, to hold it open or to make it
-    /// fail, and can count the Lookups it was asked.
+    /// puts in, and a change made through it really changes them. A test can also take over
+    /// answering a Lookup or a write itself, to hold it open, fail it or count it.
     /// </summary>
-    internal sealed class FakeWorld : IBlishHudWorld
+    internal sealed partial class FakeWorld : IBlishHudWorld
     {
         public List<InstalledModuleInfo> Modules { get; } = new List<InstalledModuleInfo>();
 
@@ -29,8 +29,25 @@ namespace jubeater.aigoalplanner.Tests.Fakes
         /// </summary>
         public Func<string, CancellationToken, Task<ModuleSettingsResult>> AnswerGetModuleSettings;
 
+        /// <summary>
+        /// When set, answers every module state change instead of changing one, so a test can make
+        /// a write fail without breaking anything else.
+        /// </summary>
+        public Func<string, bool, ModuleChange> AnswerSetModuleEnabled;
+
+        /// <summary>When set, answers every Setting change instead of making it.</summary>
+        public Func<string, string, string, ModuleSettingChange> AnswerSetSetting;
+
+        /// <summary>
+        /// Every change that was made through this world, in order, as "enable ns", "disable ns" or
+        /// "set ns/key=value": what the Player's configuration would show afterwards.
+        /// </summary>
+        public List<string> Writes { get; } = new List<string>();
+
         public int ListCalls      { get; private set; }
         public int SettingsCalls  { get; private set; }
+        public int ModuleWrites   { get; private set; }
+        public int SettingWrites  { get; private set; }
 
         public Task<IReadOnlyList<InstalledModuleInfo>> ListInstalledModulesAsync(CancellationToken cancellationToken) {
             ListCalls++;

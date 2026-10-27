@@ -43,7 +43,8 @@ namespace jubeater.aigoalplanner.Core
                 if (SecretFilter.LooksLikeSecret(setting.Key, setting.DisplayName)) continue;
 
                 into.Add(new ModuleSettingInfo(Qualify(prefix, setting.Key), setting.DisplayName, setting.Description,
-                                               setting.TypeName, setting.Value, setting.Min, setting.Max));
+                                               setting.TypeName, setting.Value, setting.Min, setting.Max,
+                                               setting.AllowedValues));
             }
         }
 

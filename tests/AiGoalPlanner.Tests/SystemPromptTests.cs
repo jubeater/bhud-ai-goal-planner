@@ -59,6 +59,19 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void It_names_the_kinds_of_Action_a_plan_can_have() {
+            string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
+
+            // A model that is not told which kinds exist invents one, and the Review has to refuse
+            // it; a model that is told the fields of each kind does not add a stray key or value.
+            Assert.Contains("enable_module", prompt);
+            Assert.Contains("disable_module", prompt);
+            Assert.Contains("set_setting", prompt);
+            Assert.Contains("advice", prompt);
+            Assert.Contains("is_side_effect", prompt);
+        }
+
+        [Fact]
         public void It_names_every_Lookup_the_model_can_call() {
             var registry = Lookups.For(new FakeWorld());
 
