@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using Blish_HUD;
 using Blish_HUD.Content;
@@ -46,7 +45,8 @@ namespace jubeater.aigoalplanner.UI
         /// Room left between the end of a wrapped line and the edge of the message list. Blish HUD's
         /// own wrapping measures a line word by word, which comes out a few pixels short of the line
         /// that is then drawn, so a line wrapped right up to the edge loses its last characters under
-        /// the clip. Messages are wrapped in <see cref="WrapText"/> instead, stopping short of the edge.
+        /// the clip. Messages are wrapped by <see cref="TextWrap.Wrap"/> instead, stopping short of
+        /// the edge.
         /// </summary>
         private const int TextRightMargin = 4;
 
@@ -141,14 +141,16 @@ namespace jubeater.aigoalplanner.UI
                 Height   = MessageListHeight
             };
 
+            BitmapFont font = GameService.Content.DefaultFont16;
+
             _emptyHint = new Label {
                 Parent         = _messageList,
                 Location       = new Point(0, 0),
                 Width          = messageListWidth,
-                Text           = WrapText("Nothing here yet. Ask for what you want to do in Guild Wars 2, then press Send.",
-                                          GameService.Content.DefaultFont16,
-                                          messageListWidth - TextRightMargin),
-                Font           = GameService.Content.DefaultFont16,
+                Text           = TextWrap.Wrap("Nothing here yet. Ask for what you want to do in Guild Wars 2, then press Send.",
+                                               s => font.MeasureString(s).Width,
+                                               messageListWidth - TextRightMargin),
+                Font           = font,
                 TextColor      = HintColor,
                 AutoSizeHeight = true
             };
@@ -414,8 +416,8 @@ namespace jubeater.aigoalplanner.UI
 
             var label = new Label {
                 Parent         = _messageList,
-                // Lines are wrapped here, not by the Label: see TextRightMargin.
-                Text           = WrapText(text, font, _messageList.Width - TextRightMargin),
+                // Lines are wrapped by TextWrap, not by the Label: see TextRightMargin.
+                Text           = TextWrap.Wrap(text, s => font.MeasureString(s).Width, _messageList.Width - TextRightMargin),
                 Font           = font,
                 TextColor      = color,
                 Width          = _messageList.Width,
@@ -428,53 +430,6 @@ namespace jubeater.aigoalplanner.UI
             _messageControls.Add(label);
 
             return label.Bottom + MessageSpacing;
-        }
-
-        /// <summary>
-        /// Breaks <paramref name="text"/> into lines no wider than <paramref name="width"/>, so a
-        /// message can be drawn entire inside the message list.
-        /// </summary>
-        /// <remarks>
-        /// Blish HUD's own wrapping - what <see cref="Label.WrapText"/> uses - measures every word on
-        /// its own, and every one of those measurements comes out a little short (a glyph starts left
-        /// of its own origin). A line packed against the width is then drawn wider than the label it
-        /// sits in, and its last characters are clipped at the edge. Measuring the whole candidate
-        /// line keeps the line inside the width it is drawn in.
-        /// A single word wider than a whole line has nothing to break at, so it is left as it is.
-        /// </remarks>
-        private static string WrapText(string text, BitmapFont font, int width) {
-            var wrapped = new StringBuilder();
-            var line    = new StringBuilder();
-
-            bool firstParagraph = true;
-
-            foreach (string paragraph in text.Split('\n')) {
-                if (!firstParagraph) wrapped.Append('\n');
-
-                firstParagraph = false;
-
-                foreach (string word in paragraph.Split(' ')) {
-                    string candidate = line.Length == 0 ? word : line + " " + word;
-
-                    if (line.Length > 0 && font.MeasureString(candidate).Width > width) {
-                        wrapped.Append(line).Append('\n');
-
-                        line.Clear().Append(word);
-
-                        continue;
-                    }
-
-                    if (line.Length > 0) line.Append(' ');
-
-                    line.Append(word);
-                }
-
-                wrapped.Append(line);
-
-                line.Clear();
-            }
-
-            return wrapped.ToString();
         }
 
         private static string Format(ChatMessage message) {
