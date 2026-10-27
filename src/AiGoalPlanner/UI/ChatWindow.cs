@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using Blish_HUD;
 using Blish_HUD.Content;
@@ -8,6 +9,7 @@ using Blish_HUD.Input;
 using jubeater.aigoalplanner.Core;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using MonoGame.Extended.BitmapFonts;
 
 namespace jubeater.aigoalplanner.UI
 {
@@ -25,12 +27,28 @@ namespace jubeater.aigoalplanner.UI
 
         private const int WindowWidth       = 560;
         private const int WindowHeight      = 680;
-        private const int MessageListWidth  = 500;
         private const int MessageListHeight = 470;
         private const int MessageSpacing    = 6;
         private const int InputRowTop       = 480;
         private const int ProviderRowTop    = 514;
         private const int RequestBoxWidth   = 300;
+
+        /// <summary>
+        /// Blish HUD's <see cref="Scrollbar"/> is 12 px wide. The message list is worked out from the
+        /// window's content region, so it has to set that much room aside, plus the gap that keeps the
+        /// scrollbar off the list and off the window's right edge.
+        /// </summary>
+        private const int ScrollbarWidth         = 12;
+        private const int ScrollbarGap           = 4;
+        private const int MessageListRightMargin = 8;
+
+        /// <summary>
+        /// Room left between the end of a wrapped line and the edge of the message list. Blish HUD's
+        /// own wrapping measures a line word by word, which comes out a few pixels short of the line
+        /// that is then drawn, so a line wrapped right up to the edge loses its last characters under
+        /// the clip. Messages are wrapped in <see cref="WrapText"/> instead, stopping short of the edge.
+        /// </summary>
+        private const int TextRightMargin = 4;
 
         private static readonly Color PlayerColor = new Color(235, 200, 130);
         private static readonly Color AiColor     = Color.White;
@@ -105,27 +123,33 @@ namespace jubeater.aigoalplanner.UI
                 BackgroundColor = Color.Transparent
             };
 
+            // The content region is what the Player can actually see, so the message list takes what
+            // is left of it once the scrollbar and the space around it are set aside: text that goes
+            // past that is text nobody reads.
+            int messageListWidth = _window.ContentRegion.Width - ScrollbarWidth - ScrollbarGap - MessageListRightMargin;
+
             _messageList = new Panel {
                 Parent          = content,
                 Location        = new Point(0, 0),
-                Size            = new Point(MessageListWidth, MessageListHeight),
+                Size            = new Point(messageListWidth, MessageListHeight),
                 BackgroundColor = Color.Transparent
             };
 
             _scrollbar = new Scrollbar(_messageList) {
                 Parent   = content,
-                Location = new Point(MessageListWidth + 4, 0),
+                Location = new Point(messageListWidth + ScrollbarGap, 0),
                 Height   = MessageListHeight
             };
 
             _emptyHint = new Label {
                 Parent         = _messageList,
                 Location       = new Point(0, 0),
-                Width          = MessageListWidth,
-                Text           = "Nothing here yet. Ask for what you want to do in Guild Wars 2, then press Send.",
+                Width          = messageListWidth,
+                Text           = WrapText("Nothing here yet. Ask for what you want to do in Guild Wars 2, then press Send.",
+                                          GameService.Content.DefaultFont16,
+                                          messageListWidth - TextRightMargin),
                 Font           = GameService.Content.DefaultFont16,
                 TextColor      = HintColor,
-                WrapText       = true,
                 AutoSizeHeight = true
             };
 
@@ -386,13 +410,15 @@ namespace jubeater.aigoalplanner.UI
         /// Adds one line to the message list and says where the next one goes.
         /// </summary>
         private int AddLabel(string text, Color color, int top) {
+            BitmapFont font = GameService.Content.DefaultFont16;
+
             var label = new Label {
                 Parent         = _messageList,
-                Text           = text,
-                Font           = GameService.Content.DefaultFont16,
+                // Lines are wrapped here, not by the Label: see TextRightMargin.
+                Text           = WrapText(text, font, _messageList.Width - TextRightMargin),
+                Font           = font,
                 TextColor      = color,
-                WrapText       = true,
-                Width          = MessageListWidth,
+                Width          = _messageList.Width,
                 AutoSizeHeight = true
             };
 
@@ -402,6 +428,53 @@ namespace jubeater.aigoalplanner.UI
             _messageControls.Add(label);
 
             return label.Bottom + MessageSpacing;
+        }
+
+        /// <summary>
+        /// Breaks <paramref name="text"/> into lines no wider than <paramref name="width"/>, so a
+        /// message can be drawn entire inside the message list.
+        /// </summary>
+        /// <remarks>
+        /// Blish HUD's own wrapping - what <see cref="Label.WrapText"/> uses - measures every word on
+        /// its own, and every one of those measurements comes out a little short (a glyph starts left
+        /// of its own origin). A line packed against the width is then drawn wider than the label it
+        /// sits in, and its last characters are clipped at the edge. Measuring the whole candidate
+        /// line keeps the line inside the width it is drawn in.
+        /// A single word wider than a whole line has nothing to break at, so it is left as it is.
+        /// </remarks>
+        private static string WrapText(string text, BitmapFont font, int width) {
+            var wrapped = new StringBuilder();
+            var line    = new StringBuilder();
+
+            bool firstParagraph = true;
+
+            foreach (string paragraph in text.Split('\n')) {
+                if (!firstParagraph) wrapped.Append('\n');
+
+                firstParagraph = false;
+
+                foreach (string word in paragraph.Split(' ')) {
+                    string candidate = line.Length == 0 ? word : line + " " + word;
+
+                    if (line.Length > 0 && font.MeasureString(candidate).Width > width) {
+                        wrapped.Append(line).Append('\n');
+
+                        line.Clear().Append(word);
+
+                        continue;
+                    }
+
+                    if (line.Length > 0) line.Append(' ');
+
+                    line.Append(word);
+                }
+
+                wrapped.Append(line);
+
+                line.Clear();
+            }
+
+            return wrapped.ToString();
         }
 
         private static string Format(ChatMessage message) {
