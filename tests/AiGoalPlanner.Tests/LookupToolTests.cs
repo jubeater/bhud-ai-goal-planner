@@ -205,12 +205,15 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal(54, (int)tyria["points_earned"]);
             Assert.Equal(5, (int)tyria["points_unspent"]);
 
-            JArray tracks = (JArray)result["tracks"];
+            JArray tracks = (JArray)result["track_regions"];
             JObject tyriaTracks = (JObject)tracks[0];
             Assert.Equal("Tyria", (string)tyriaTracks["region"]);
-            Assert.NotEqual(JTokenType.Array, tyriaTracks["unfinished_tracks"]?.Type);
+            Assert.Null(tyriaTracks["unfinished_tracks"]);
+            Assert.Null(tyriaTracks["tracks"]);
             Assert.Equal("unavailable", (string)tyriaTracks["tracks_status"]);
             Assert.Equal("unavailable", (string)result["tracks_status"]);
+            Assert.Null(result["tracks"]);
+            Assert.Null(result["point_totals"]);
         }
 
         /// <summary>
@@ -448,7 +451,7 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal(1, (int)points[0]["points_spent"]);
             Assert.Equal(2, (int)points[0]["points_unspent"]);
 
-            JArray tracks = (JArray)result["tracks"];
+            JArray tracks = (JArray)result["track_regions"];
             Assert.Equal(2, tracks.Count);
 
             JObject desert = (JObject)tracks[0];
@@ -456,7 +459,8 @@ namespace jubeater.aigoalplanner.Tests
             JArray desertTracks = (JArray)desert["unfinished_tracks"];
             Assert.Equal(6, desertTracks.Count);
             Assert.Equal("Raptor Mount", (string)desertTracks[0]["name"]);
-            Assert.Equal(1, (int)desertTracks[0]["level"]);
+            Assert.Equal(1, (int)desertTracks[0]["unlocked"]);
+            Assert.Null(desertTracks[0]["level"]);
             Assert.Equal(4, (int)desertTracks[0]["total_levels"]);
 
             JObject magic = (JObject)tracks[1];
@@ -464,6 +468,47 @@ namespace jubeater.aigoalplanner.Tests
             JArray magicTracks = (JArray)magic["unfinished_tracks"];
             Assert.Single(magicTracks);
             Assert.Equal("Castoran Survivalist", (string)magicTracks[0]["name"]);
+            Assert.Equal(1, (int)magicTracks[0]["unlocked"]);
+            Assert.Null(magicTracks[0]["level"]);
+        }
+
+        [Fact]
+        public async Task Each_track_name_appears_exactly_once_in_the_answer() {
+            var world = new FakeWorld();
+            world.MasteryProgressResult = new ProgressResult(
+                ProgressStatus.Ok, ProgressKind.Mastery,
+                masteryPoints: new[] {
+                    new MasteryPointRegion("Path of Fire", spent: 1, earned: 3)
+                },
+                masteryTracks: new[] {
+                    new MasteryTrackRegion("Desert", new[] {
+                        new MasteryTrackProgress(14, "Raptor Mount", "Desert", 1, 4),
+                        new MasteryTrackProgress(17, "Springer Mount", "Desert", 0, 4)
+                    })
+                });
+
+            AIFunction tool = GetProgressTool.Create(world);
+
+            string json = Assert.IsType<string>(await tool.InvokeAsync(new AIFunctionArguments { ["kind"] = "mastery" }));
+
+            // Each track name must appear exactly once in the serialized JSON
+            Assert.Single(System.Text.RegularExpressions.Regex.Matches(json, "Raptor Mount"));
+            Assert.Single(System.Text.RegularExpressions.Regex.Matches(json, "Springer Mount"));
+
+            // Redundant arrays and fields must be removed
+            JObject parsed = JObject.Parse(json);
+            Assert.Null(parsed["point_totals"]);
+            Assert.Null(parsed["tracks"]);
+            Assert.NotNull(parsed["points"]);
+            Assert.NotNull(parsed["track_regions"]);
+
+            JObject desert = (JObject)((JArray)parsed["track_regions"])[0];
+            Assert.NotNull(desert["unfinished_tracks"]);
+            Assert.Null(desert["tracks"]);
+
+            JObject raptor = (JObject)((JArray)desert["unfinished_tracks"])[0];
+            Assert.NotNull(raptor["unlocked"]);
+            Assert.Null(raptor["level"]);
         }
 
         [Fact]

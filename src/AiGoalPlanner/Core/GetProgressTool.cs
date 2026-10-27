@@ -137,18 +137,14 @@ namespace jubeater.aigoalplanner.Core
                     };
 
                     if (!tr.TracksAvailable) {
-                        trObj["tracks_status"]     = "unavailable";
-                        trObj["unfinished_tracks"] = null;
-                        trObj["tracks"]            = null;
+                        trObj["tracks_status"] = "unavailable";
                     } else {
                         var trackItems = new JArray(tr.UnfinishedTracks.Select(t => new JObject {
                             ["name"]         = t.Name,
-                            ["level"]        = t.Level,
-                            ["total_levels"] = t.TotalLevels,
-                            ["unlocked"]     = t.Level
+                            ["unlocked"]     = t.Level,
+                            ["total_levels"] = t.TotalLevels
                         }));
                         trObj["unfinished_tracks"] = trackItems;
-                        trObj["tracks"]            = trackItems;
                     }
 
                     tracksArray.Add(trObj);
@@ -158,8 +154,6 @@ namespace jubeater.aigoalplanner.Core
                     ["status"]        = "ok",
                     ["kind"]          = "mastery",
                     ["points"]        = pointsArray,
-                    ["point_totals"]  = pointsArray,
-                    ["tracks"]        = tracksArray,
                     ["track_regions"] = tracksArray
                 };
 
@@ -168,7 +162,7 @@ namespace jubeater.aigoalplanner.Core
                 }
 
                 return new LookupAnswer(json.ToString(Formatting.None),
-                                        "points=" + result.MasteryPoints.Count + ", tracks=" + result.MasteryTracks.Count);
+                                        "points=" + result.MasteryPoints.Count + ", track_regions=" + result.MasteryTracks.Count);
             }
 
             // Hero points
