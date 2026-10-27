@@ -409,7 +409,7 @@ namespace jubeater.aigoalplanner.UI
                 case ChatMessageAuthor.Player:
                     return "Player: " + message.Text;
                 case ChatMessageAuthor.Ai:
-                    return "AI: " + message.Text;
+                    return "AI: " + PlainText.Strip(message.Text);
                 default:
                     return message.Text;
             }

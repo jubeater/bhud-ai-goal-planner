@@ -23,7 +23,8 @@ namespace jubeater.aigoalplanner.Core
             return Identity(model, endpoint) + "\n\n"
                  + Scope + "\n\n"
                  + AdvisoryOnly + "\n\n"
-                 + LookupsAndLanguage;
+                 + LookupsAndLanguage + "\n\n"
+                 + PlainTextFormat;
         }
 
         /// <summary>
@@ -66,6 +67,13 @@ namespace jubeater.aigoalplanner.Core
           + "Player really has, and get_module_settings to read one module's settings; prefer what "
           + "the tools say over guessing. If a module is disabled, tell the Player to enable it "
           + "first. Reply in the language the Player wrote in.";
+
+        /// <summary>
+        /// How the model formats replies: plain text so the Chat window stays readable.
+        /// </summary>
+        private const string PlainTextFormat =
+            "Write in plain text: short paragraphs and simple \"- \" lists. Do not use bold, "
+          + "headings, tables or code fences.";
 
         private static string WhereItRuns(string model, string endpoint) {
             string modelName = (model ?? string.Empty).Trim();

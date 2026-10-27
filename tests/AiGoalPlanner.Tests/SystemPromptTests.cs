@@ -89,5 +89,14 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("You are running via ollama.com.", prompt);
             Assert.DoesNotContain("model .", prompt);
         }
+
+        [Fact]
+        public void It_asks_for_plain_text_replies() {
+            string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
+
+            Assert.Contains("plain text", prompt);
+            Assert.Contains("bold", prompt);
+            Assert.Contains("headings", prompt);
+        }
     }
 }
