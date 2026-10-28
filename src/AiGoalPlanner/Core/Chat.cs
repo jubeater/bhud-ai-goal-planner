@@ -257,6 +257,17 @@ namespace jubeater.aigoalplanner.Core
 
 #if DEBUG
         /// <summary>
+        /// Whether the Chat is working on something right now — a Request still running, or an Apply
+        /// or Undo still going — whoever started it. The developer channel waits on this before it
+        /// dispatches, so a request that arrives while the Player is busy waits its turn instead of
+        /// cutting in. Best-effort across threads: work starting between the check and the dispatch
+        /// still serializes on the Chat's own locks.
+        /// </summary>
+        public bool IsBusy => _sendLock.CurrentCount == 0;
+#endif
+
+#if DEBUG
+        /// <summary>
         /// The Provider round trips of the Request that is on its way or ran last, oldest first, each
         /// with how long it took and how it finished — the same what the debug log keeps, in the shape
         /// the developer channel reports. Empty when no Request has run through this Chat yet.

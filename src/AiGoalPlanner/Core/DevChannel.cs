@@ -76,7 +76,11 @@ namespace jubeater.aigoalplanner.Core
                 response = DevResponse.Failed(DevErrors.ChannelOff);
             } else if (await _gate.WaitAsync(_busyTimeout, cancellationToken).ConfigureAwait(false)) {
                 try {
-                    response = await ExecuteWithTimeoutAsync(request, cancellationToken).ConfigureAwait(false);
+                    if (await WaitForChatAsync(_busyTimeout, cancellationToken).ConfigureAwait(false)) {
+                        response = await ExecuteWithTimeoutAsync(request, cancellationToken).ConfigureAwait(false);
+                    } else {
+                        response = DevResponse.Failed(DevErrors.Busy);
+                    }
                 } catch (Exception exception) {
                     // The type, not the message: a message can carry a Setting's value back out.
                     response = DevResponse.Failed("failed: " + exception.GetType().Name);
@@ -91,6 +95,23 @@ namespace jubeater.aigoalplanner.Core
                             + (response.Ok ? "ok" : response.Error) + ", " + watch.ElapsedMilliseconds + " ms");
 
             return response;
+        }
+
+        /// <summary>
+        /// Waits until the Chat is free — no Request, Apply or Undo still running, whoever started
+        /// it — up to <paramref name="budget"/>, so a request that arrives while the Player is busy
+        /// waits its turn. Answers false when the budget runs out first.
+        /// </summary>
+        private async Task<bool> WaitForChatAsync(TimeSpan budget, CancellationToken cancellationToken) {
+            Stopwatch watch = Stopwatch.StartNew();
+
+            while (_chat.IsBusy) {
+                if (watch.Elapsed >= budget) return false;
+
+                await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+            }
+
+            return true;
         }
 
         /// <summary>

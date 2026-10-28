@@ -379,6 +379,34 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_Player_started_Request_counts_for_busy() {
+            var model = new ScriptedChatClient();
+            model.WillHold();
+            model.WillReply("An answer.");
+
+            var chat = NewChannelChat(model, PlayerWorld());
+
+            Task player = chat.SendAsync("A Player request");
+
+            await WaitUntil(() => model.Requests.Count == 1);
+
+            var channel = new DevChannel(chat, isOpen: () => true, logDebug: null, inbox: new FakeDevInbox(),
+                                         busyTimeout: TimeSpan.FromMilliseconds(30));
+
+            DevResponse response = await channel.HandleAsync(new DevRequest("b1", DevRequestOp.NewChat));
+
+            Assert.False(response.Ok);
+            Assert.Equal(DevErrors.Busy, response.Error);
+
+            model.Release();
+            await player;
+
+            // The new_chat never ran: the Player's Request and its answer are still the Chat.
+            Assert.Equal(2, chat.Messages.Count);
+            Assert.Equal("A Player request", chat.Messages[0].Text);
+        }
+
+        [Fact]
         public async Task A_request_that_outlasts_its_budget_times_out() {
             var model = new ScriptedChatClient();
             model.WillCallTool("get_module_settings", "call_1",
