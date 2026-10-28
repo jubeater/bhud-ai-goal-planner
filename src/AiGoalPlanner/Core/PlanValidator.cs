@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using jubeater.aigoalplanner.World;
 
 namespace jubeater.aigoalplanner.Core
 {
@@ -275,6 +276,10 @@ namespace jubeater.aigoalplanner.Core
 
                 if (pack == null) {
                     return Reject(action, null, "\"" + wanted + "\" is not on Pathing's official marker pack list.");
+                }
+
+                if (!MarkerPackService.IsValidFileName(pack.FileName)) {
+                    return Reject(action, null, "\"" + pack.FileName + "\" is not a valid marker pack file.");
                 }
 
                 if (!_downloadPacks.Add(pack.FileName)) {

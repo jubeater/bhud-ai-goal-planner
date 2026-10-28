@@ -10,11 +10,11 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     public sealed class ApplyOutcome
     {
-        public ApplyOutcome(ReviewedAction action, bool succeeded, string problem = null, bool changed = true) {
+        public ApplyOutcome(ReviewedAction action, bool succeeded, string problem = null, bool? changed = null) {
             Action    = action ?? throw new ArgumentNullException(nameof(action));
             Succeeded = succeeded;
             Problem   = problem ?? string.Empty;
-            Changed   = changed && succeeded;
+            Changed   = changed ?? succeeded;
         }
 
         public ReviewedAction Action { get; }

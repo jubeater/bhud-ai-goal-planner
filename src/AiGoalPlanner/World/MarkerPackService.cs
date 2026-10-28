@@ -164,11 +164,20 @@ namespace jubeater.aigoalplanner.World
                 return new MarkerPackChange(false, false, wanted, null, 0, "\"" + wanted + "\" is not on Pathing's official marker pack list.");
             }
 
+            if (!IsValidFileName(targetPack.FileName)) {
+                return new MarkerPackChange(false, false, targetPack.Name, targetPack.FileName, targetPack.SizeMb,
+                    "The marker pack file name \"" + targetPack.FileName + "\" is not valid.");
+            }
+
             if (string.IsNullOrWhiteSpace(_markersDirectory)) {
                 return new MarkerPackChange(false, false, targetPack.Name, targetPack.FileName, targetPack.SizeMb, "Markers directory is not configured.");
             }
 
             string destFile = Path.Combine(_markersDirectory, targetPack.FileName);
+            if (!IsInsideMarkersDirectory(destFile, _markersDirectory)) {
+                return new MarkerPackChange(false, false, targetPack.Name, targetPack.FileName, targetPack.SizeMb,
+                    "The marker pack destination path is outside the markers directory.");
+            }
             if (File.Exists(destFile)) {
                 return new MarkerPackChange(applied: true, changed: false, targetPack.Name, targetPack.FileName, targetPack.SizeMb);
             }
@@ -221,6 +230,12 @@ namespace jubeater.aigoalplanner.World
                 }
 
                 try {
+                    if (!IsValidFileName(targetPack.FileName) || !IsInsideMarkersDirectory(destFile, _markersDirectory)) {
+                        TryDeleteFile(tempFile);
+                        return new MarkerPackChange(false, false, targetPack.Name, targetPack.FileName, targetPack.SizeMb,
+                            "The marker pack destination path is outside the markers directory.");
+                    }
+
                     File.Move(tempFile, destFile);
                 } catch (IOException) when (File.Exists(destFile)) {
                     TryDeleteFile(tempFile);
@@ -244,11 +259,20 @@ namespace jubeater.aigoalplanner.World
                 return Task.FromResult(new MarkerPackChange(false, false, null, null, 0, "No file specified to delete."));
             }
 
+            if (!IsValidFileName(file)) {
+                return Task.FromResult(new MarkerPackChange(false, false, file, file, 0,
+                    "The marker pack file name \"" + file + "\" is not valid."));
+            }
+
             if (string.IsNullOrWhiteSpace(_markersDirectory) || !Directory.Exists(_markersDirectory)) {
                 return Task.FromResult(new MarkerPackChange(true, false, file, file, 0));
             }
 
             string fullPath = Path.Combine(_markersDirectory, file);
+            if (!IsInsideMarkersDirectory(fullPath, _markersDirectory)) {
+                return Task.FromResult(new MarkerPackChange(false, false, file, file, 0,
+                    "The target path is outside the markers directory."));
+            }
             if (!File.Exists(fullPath)) {
                 return Task.FromResult(new MarkerPackChange(true, false, file, file, 0));
             }
@@ -380,6 +404,42 @@ namespace jubeater.aigoalplanner.World
                         await contentStream.CopyToAsync(fileStream, 8192, cancellationToken).ConfigureAwait(false);
                     }
                 }
+            }
+        }
+
+        public static bool IsValidFileName(string name) {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            if (name == "." || name == "..") return false;
+            if (name.IndexOf('/') >= 0 || name.IndexOf('\\') >= 0) return false;
+            if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;
+            if (!string.Equals(Path.GetFileName(name), name, StringComparison.Ordinal)) return false;
+
+            string ext = Path.GetExtension(name);
+            if (!string.Equals(ext, ".taco", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(ext, ".zip", StringComparison.OrdinalIgnoreCase)) {
+                return false;
+            }
+
+            string stem = Path.GetFileNameWithoutExtension(name);
+            if (string.IsNullOrWhiteSpace(stem) || stem == "." || stem == "..") return false;
+
+            return true;
+        }
+
+        public static bool IsInsideMarkersDirectory(string path, string markersDirectory) {
+            if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(markersDirectory)) return false;
+
+            try {
+                string fullDir = Path.GetFullPath(markersDirectory);
+                if (!fullDir.EndsWith(Path.DirectorySeparatorChar.ToString()) &&
+                    !fullDir.EndsWith(Path.AltDirectorySeparatorChar.ToString())) {
+                    fullDir += Path.DirectorySeparatorChar;
+                }
+
+                string fullPath = Path.GetFullPath(path);
+                return fullPath.StartsWith(fullDir, StringComparison.OrdinalIgnoreCase);
+            } catch {
+                return false;
             }
         }
 

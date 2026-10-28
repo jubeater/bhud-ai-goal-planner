@@ -174,7 +174,7 @@ namespace jubeater.aigoalplanner.Core
             undo.Add(new UndoStep(PlanActionKind.DownloadPack, null, null, null, change.PackName, change.FileName));
 
             if (!string.IsNullOrEmpty(change.Problem)) {
-                return new ApplyOutcome(action, false, change.Problem);
+                return new ApplyOutcome(action, false, change.Problem, changed: true);
             }
 
             return new ApplyOutcome(action, true);
