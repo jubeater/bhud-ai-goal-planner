@@ -75,7 +75,7 @@ namespace jubeater.aigoalplanner.Core
           + "on the current map and region. Call list_marker_packs to see available and installed marker packs. Call find_marker_categories to find Pathing marker categories "
           + "for a goal (such as hero points or routes). Name the category's display path to turn on and say "
           + "whether it is on or off; never claim to have turned anything on. If a downloaded pack appears in skipped_packs, tell the Player plainly that the pack's category list couldn't be read, and that the Player can find it in Pathing's menu under the pack's name; do not suggest waiting for indexing or restarting Pathing. If Pathing or marker packs are "
-          + "missing, suggest installing them. If a module is disabled, tell the Player to enable it first. "
+          + "missing, suggest installing them. Call search_catalog to search the official module catalog when no installed module covers the Player's goal. If a module is disabled, tell the Player to enable it first. "
           + "Reply in the language of the Player's most recent message, even when earlier messages were in "
           + "another language.";
 

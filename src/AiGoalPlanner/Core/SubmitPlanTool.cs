@@ -38,9 +38,9 @@ namespace jubeater.aigoalplanner.Core
           + "\"reply\":{\"type\":\"string\",\"description\":\"What you say to the Player about this plan.\"},"
           + "\"actions\":{\"type\":\"array\",\"description\":\"The changes, in the order they should be applied.\","
           + "\"items\":{\"type\":\"object\",\"properties\":{"
-          + "\"kind\":{\"type\":\"string\",\"enum\":[\"enable_module\",\"disable_module\",\"set_setting\",\"download_pack\",\"advice\"],"
+          + "\"kind\":{\"type\":\"string\",\"enum\":[\"install\",\"enable_module\",\"disable_module\",\"set_setting\",\"download_pack\",\"advice\"],"
           + "\"description\":\"What this action does.\"},"
-          + "\"module\":{\"type\":\"string\",\"description\":\"The module's namespace, for the module and setting kinds.\"},"
+          + "\"module\":{\"type\":\"string\",\"description\":\"The module's namespace, for the module, install and setting kinds.\"},\"gap\":{\"type\":\"string\",\"description\":\"The missing ability that justifies an install action.\"},"
           + "\"key\":{\"type\":\"string\",\"description\":\"The setting key, for set_setting.\"},"
           + "\"value\":{\"type\":\"string\",\"description\":\"The setting's new value as text, for set_setting.\"},\"pack\":{\"type\":\"string\",\"description\":\"The marker pack name or file name, for download_pack.\"},"
           + "\"reason\":{\"type\":\"string\",\"description\":\"Why you propose this, for the Player to read.\"},"
@@ -93,10 +93,13 @@ namespace jubeater.aigoalplanner.Core
 
             PlanActionKind kind = KindOf(kindText);
 
+            string gap          = TextOf(Value(action, "gap")).Trim();
             string reason       = TextOf(Value(action, "reason")).Trim();
             bool   isSideEffect = SideEffectOf(Value(action, "is_side_effect"));
 
             switch (kind) {
+                case PlanActionKind.Install:
+                    return new PlanAction(kind, kindText, TextOf(Value(action, "module")).Trim(), null, null, reason, isSideEffect, gap: gap);
                 case PlanActionKind.EnableModule:
                 case PlanActionKind.DisableModule:
                     // Only the Module is read: a stray key or value must never be applied as a
@@ -128,6 +131,7 @@ namespace jubeater.aigoalplanner.Core
 
         private static PlanActionKind KindOf(string kindText) {
             switch ((kindText ?? string.Empty).Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_')) {
+                case "install":        return PlanActionKind.Install;
                 case "enable_module":  return PlanActionKind.EnableModule;
                 case "disable_module": return PlanActionKind.DisableModule;
                 case "set_setting":    return PlanActionKind.SetSetting;
