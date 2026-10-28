@@ -280,7 +280,7 @@ namespace jubeater.aigoalplanner
         /// </summary>
         private static IReadOnlyList<Preset> LoadPresets() {
             try {
-                IReadOnlyList<Preset> presets = PresetLibrary.Load();
+                IReadOnlyList<Preset> presets = PresetLibrary.Load(LogDebug);
 
                 LogDebug("Loaded " + presets.Count + " presets.");
 

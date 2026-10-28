@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using jubeater.aigoalplanner.Core;
@@ -28,6 +29,23 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void One_unreadable_preset_file_is_skipped_while_the_others_still_load() {
+            var log = new List<string>();
+
+            IReadOnlyList<Preset> presets = PresetLibrary.LoadFrom(
+                new[] { "a.json", "b.json", "c.json" },
+                name => name == "b.json"
+                            ? throw new InvalidCastException("bad field")
+                            : "{\"name\":\"" + name + "\",\"request\":\"Help me.\",\"hints\":\"Check progress.\"}",
+                log.Add);
+
+            Assert.Equal(new[] { "a.json", "c.json" },
+                         presets.Select(preset => preset.Name).ToArray());
+            Assert.Single(log);
+            Assert.Contains("InvalidCastException", log[0]);
+        }
+
+        [Fact]
         public void A_valid_preset_file_parses() {
             Preset preset = Preset.Parse("{\"name\":\"Hero points\",\"request\":\"Help me.\",\"hints\":\"Check progress.\"}");
 
@@ -48,6 +66,16 @@ namespace jubeater.aigoalplanner.Tests
         [InlineData("{\"name\":\"Hero points\",\"request\":\"Help me.\"}")]
         [InlineData("[\"Hero points\"]")]
         public void A_preset_file_with_missing_or_blank_fields_is_skipped(string json) {
+            Assert.Null(Preset.Parse(json));
+        }
+
+        [Theory]
+        [InlineData("{\"name\":{},\"request\":\"Help me.\",\"hints\":\"Check progress.\"}")]
+        [InlineData("{\"name\":[\"Hero points\"],\"request\":\"Help me.\",\"hints\":\"Check progress.\"}")]
+        [InlineData("{\"name\":\"Hero points\",\"request\":[\"Help me.\"],\"hints\":\"Check progress.\"}")]
+        [InlineData("{\"name\":\"Hero points\",\"request\":\"Help me.\",\"hints\":{\"text\":\"Check progress.\"}}")]
+        [InlineData("{\"name\":42,\"request\":\"Help me.\",\"hints\":\"Check progress.\"}")]
+        public void A_preset_file_with_wrongly_typed_fields_is_skipped(string json) {
             Assert.Null(Preset.Parse(json));
         }
 

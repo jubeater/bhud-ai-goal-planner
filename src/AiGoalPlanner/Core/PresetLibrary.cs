@@ -17,29 +17,56 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>
         /// Every bundled preset, oldest file name first, with the bad files left out.
+        /// <paramref name="logDebug"/> hears about each skipped file by name and failure type, so
+        /// a broken data file is visible in the log without ever logging file content.
         /// </summary>
-        public static IReadOnlyList<Preset> Load() {
-            return LoadFrom(typeof(PresetLibrary).Assembly, ResourcePrefix);
-        }
-
-        internal static IReadOnlyList<Preset> LoadFrom(Assembly assembly, string prefix) {
-            var presets = new List<Preset>();
+        public static IReadOnlyList<Preset> Load(Action<string> logDebug = null) {
+            Assembly assembly = typeof(PresetLibrary).Assembly;
 
             IEnumerable<string> resources = assembly.GetManifestResourceNames()
-                                                    .Where(name => name.StartsWith(prefix, StringComparison.Ordinal)
+                                                    .Where(name => name.StartsWith(ResourcePrefix, StringComparison.Ordinal)
                                                                 && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                                                     .OrderBy(name => name);
 
-            foreach (string resource in resources) {
-                using (Stream stream = assembly.GetManifestResourceStream(resource))
-                using (var reader = new StreamReader(stream)) {
-                    Preset preset = Preset.Parse(reader.ReadToEnd());
+            return LoadFrom(resources, resource => ReadResource(assembly, resource), logDebug);
+        }
 
-                    if (preset != null) presets.Add(preset);
+        /// <summary>
+        /// The presets in <paramref name="resources"/>, read through <paramref name="read"/>, so a
+        /// test can hold a broken file without shipping one. A file that cannot be read or parsed
+        /// is skipped with a <paramref name="logDebug"/> line naming the file and the failure type,
+        /// and the rest still load.
+        /// </summary>
+        public static IReadOnlyList<Preset> LoadFrom(IEnumerable<string> resources, Func<string, string> read,
+                                                     Action<string> logDebug) {
+            var presets = new List<Preset>();
+
+            foreach (string resource in resources ?? Enumerable.Empty<string>()) {
+                Preset preset = null;
+
+                try {
+                    preset = Preset.Parse(read(resource));
+                } catch (Exception exception) {
+                    logDebug?.Invoke("Skipped preset " + resource + " (" + exception.GetType().Name + ").");
+                    continue;
                 }
+
+                if (preset == null) {
+                    logDebug?.Invoke("Skipped preset " + resource + " (missing field).");
+                    continue;
+                }
+
+                presets.Add(preset);
             }
 
             return presets;
+        }
+
+        private static string ReadResource(Assembly assembly, string resource) {
+            using (Stream stream = assembly.GetManifestResourceStream(resource))
+            using (var reader = new StreamReader(stream)) {
+                return reader.ReadToEnd();
+            }
         }
 
         /// <summary>
