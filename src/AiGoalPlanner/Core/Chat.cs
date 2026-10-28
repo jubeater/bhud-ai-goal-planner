@@ -1226,8 +1226,8 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         private static string GetContinuationInstruction(AppliedPlan earlier, AppliedPlan applied) {
             string instruction = "Look up anything you now need to, and tell the Player what you suggest next.";
-            bool hadDownload = (earlier != null && earlier.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.DownloadPack))
-                            || (applied != null && applied.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.DownloadPack));
+            bool hadDownload = (earlier != null && earlier.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.DownloadPack && o.Changed))
+                            || (applied != null && applied.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.DownloadPack && o.Changed));
             if (hadDownload) {
                 instruction += " Use find_marker_categories to look up marker categories for the downloaded pack. If the pack appears in skipped_packs, tell the Player plainly that the pack's category list couldn't be read, and that the Player can find it in Pathing's menu under the pack's name; do not suggest waiting for indexing or restarting Pathing.";
             }
