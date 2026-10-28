@@ -59,6 +59,12 @@ namespace jubeater.aigoalplanner.UI
         private const int PresetRowTop      = 672;
         private const int PresetButtonGap   = 6;
         private const int PresetButtonPad   = 24;
+
+        /// <summary>
+        /// A button narrower than this stops being a button, so a preset that cannot even have
+        /// this much room is left out rather than drawn as a sliver.
+        /// </summary>
+        private const int MinPresetButtonWidth = 60;
         private const int RequestBoxWidth   = 300;
         private const int UndoButtonWidth   = 90;
 
@@ -382,16 +388,23 @@ namespace jubeater.aigoalplanner.UI
             int left  = 70;
             int right = _window.ContentRegion.Width - TextRightMargin;
 
+            var naturalWidths = new List<int>(presets.Count);
+
             foreach (Preset preset in presets) {
                 float textWidth = GameService.Content.DefaultFont16.MeasureString(preset.Name).Width;
-                int   width     = Math.Min((int)Math.Ceiling(textWidth) + PresetButtonPad, right - left);
+                naturalWidths.Add((int)Math.Ceiling(textWidth) + PresetButtonPad);
+            }
 
-                if (width < 60) break;
+            IReadOnlyList<int> widths = PresetLayout.FitWidths(naturalWidths, right - left,
+                                                              PresetButtonGap, MinPresetButtonWidth);
+
+            for (int index = 0; index < widths.Count; index++) {
+                Preset preset = presets[index];
 
                 var button = new StandardButton {
                     Parent           = content,
                     Location         = new Point(left, PresetRowTop),
-                    Size             = new Point(width, StandardButton.STANDARD_CONTROL_HEIGHT),
+                    Size             = new Point(widths[index], StandardButton.STANDARD_CONTROL_HEIGHT),
                     Text             = preset.Name,
                     BasicTooltipText = preset.Request
                 };
@@ -399,7 +412,7 @@ namespace jubeater.aigoalplanner.UI
                 button.Click += OnPresetClicked;
                 _presetRequests[button] = preset.Request;
 
-                left += width + PresetButtonGap;
+                left += widths[index] + PresetButtonGap;
             }
         }
 

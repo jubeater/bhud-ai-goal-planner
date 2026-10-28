@@ -134,6 +134,34 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("enable test.xphelper", world.Writes);
         }
 
+        [Fact]
+        public async Task The_hero_points_preset_without_Pathing_advises_a_hand_install() {
+            Preset preset = PresetLibrary.Load().Single(candidate => candidate.Name == "Hero points");
+
+            var model = new ScriptedChatClient();
+            model.WillCallTool(ListInstalledModulesTool.Name, "call_modules", new Dictionary<string, object>());
+            model.WillCallTool(ListMarkerPacksTool.Name, "call_packs", new Dictionary<string, object>());
+            model.WillCallTool(SubmitPlanTool.Name, "call_plan",
+                               Plan("Pathing is not installed, so there are no trails to show yet.",
+                                    AdviceAction("Install Pathing from the Blish HUD module manager, then ask again.")));
+
+            // A fresh profile: only this module, no Pathing, no Marker Packs.
+            var world = new FakeWorld {
+                LocationResult = new PlayerLocationResult(
+                    LocationStatus.Ok,
+                    new PlayerLocation("Test Character", 999, "Test Map", 99, "Test Region"))
+            };
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync(preset.Request);
+
+            ReviewedAction advice = Assert.Single(chat.Review.Actions);
+
+            Assert.True(advice.IsAccepted);
+            Assert.False(advice.CanApply);
+            Assert.Empty(world.Writes);
+        }
+
         private static FakeWorld HeroPointWorld() {
             var world = new FakeWorld {
                 LocationResult = new PlayerLocationResult(
@@ -169,7 +197,7 @@ namespace jubeater.aigoalplanner.Tests
             plans.AddTo(tools);
 
             return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1")
-                                                + "\n\n" + PresetLibrary.SectionFor(PresetLibrary.Load()),
+                                                + "\n\n" + PresetLibrary.SystemPromptSectionFor(PresetLibrary.Load()),
                             tools, null, plans);
         }
 

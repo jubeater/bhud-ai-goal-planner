@@ -563,7 +563,7 @@ namespace jubeater.aigoalplanner
         /// </summary>
         private string BuildSystemPrompt() {
             string prompt = SystemPrompt.For(_modelSetting.Value, _endpointSetting.Value);
-            string presets = PresetLibrary.SectionFor(_presets);
+            string presets = PresetLibrary.SystemPromptSectionFor(_presets);
 
             return presets.Length == 0 ? prompt : prompt + "\n\n" + presets;
         }

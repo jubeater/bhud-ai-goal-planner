@@ -47,7 +47,7 @@ namespace jubeater.aigoalplanner.Core
         /// hints the AI follows when the Chat is about that goal. Empty when there are no
         /// presets, so the prompt reads as if they were never there.
         /// </summary>
-        public static string SectionFor(IReadOnlyList<Preset> presets) {
+        public static string SystemPromptSectionFor(IReadOnlyList<Preset> presets) {
             if (presets == null || presets.Count == 0) return string.Empty;
 
             var lines = new List<string> {

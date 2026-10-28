@@ -53,7 +53,7 @@ namespace jubeater.aigoalplanner.Tests
 
         [Fact]
         public void Extra_fields_in_a_preset_file_are_ignored() {
-            Preset preset = Preset.Parse("{\"name\":\"XP\",\"request\":\"Help me.\",\"hints\":\"Check XP.\",\"season\":\"Janthir\"}");
+            Preset preset = Preset.Parse("{\"name\":\"XP\",\"request\":\"Help me.\",\"hints\":\"Check XP.\",\"notes\":\"For the author.\"}");
 
             Assert.NotNull(preset);
             Assert.Equal("XP", preset.Name);
@@ -61,7 +61,7 @@ namespace jubeater.aigoalplanner.Tests
 
         [Fact]
         public void The_prompt_section_names_each_preset_and_carries_its_hints() {
-            string section = PresetLibrary.SectionFor(PresetLibrary.Load());
+            string section = PresetLibrary.SystemPromptSectionFor(PresetLibrary.Load());
 
             foreach (Preset preset in PresetLibrary.Load()) {
                 Assert.Contains(preset.Name, section);
@@ -71,7 +71,7 @@ namespace jubeater.aigoalplanner.Tests
 
         [Fact]
         public void The_prompt_section_is_plain_text() {
-            string section = PresetLibrary.SectionFor(PresetLibrary.Load());
+            string section = PresetLibrary.SystemPromptSectionFor(PresetLibrary.Load());
 
             Assert.DoesNotContain("**", section);
             Assert.DoesNotContain("```", section);
@@ -79,8 +79,8 @@ namespace jubeater.aigoalplanner.Tests
 
         [Fact]
         public void No_presets_means_no_prompt_section() {
-            Assert.Equal(string.Empty, PresetLibrary.SectionFor(new Preset[0]));
-            Assert.Equal(string.Empty, PresetLibrary.SectionFor(null));
+            Assert.Equal(string.Empty, PresetLibrary.SystemPromptSectionFor(new Preset[0]));
+            Assert.Equal(string.Empty, PresetLibrary.SystemPromptSectionFor(null));
         }
     }
 }
