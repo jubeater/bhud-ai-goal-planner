@@ -137,6 +137,63 @@ namespace jubeater.aigoalplanner.Core
         private AppliedPlan _appliedBeforeReview;
 
         /// <summary>
+        /// The Token Budget one Chat may use before the Chat asks the Player whether to go on, or
+        /// null when nobody set one: the budget then stays at its default. It is asked again for
+        /// every Request, so a change of Settings takes effect in the Chat that is already open.
+        /// </summary>
+        private readonly Func<long> _tokenBudget;
+
+        /// <summary>
+        /// The prices per million tokens for the Provider in use, or null when nobody set them:
+        /// with no prices the Chat shows tokens but no cost. Asked again for every round trip, so
+        /// what the Chat records is what the prices were when the tokens were spent.
+        /// </summary>
+        private readonly Func<TokenPrice> _tokenPrices;
+
+        /// <summary>
+        /// Everything this Chat has used so far, across all its Requests: input, cached input and
+        /// output, from the Providers' usage data.
+        /// </summary>
+        private TokenUsage _totalUsage = TokenUsage.Empty;
+
+        /// <summary>
+        /// What <see cref="_totalUsage"/> cost at the prices in force when it was spent, meaningful
+        /// only together with <see cref="_hasTotalCost"/>.
+        /// </summary>
+        private decimal? _totalEstimatedCostUsd;
+
+        /// <summary>
+        /// Whether any round trip of this Chat had prices to cost it at: with none the Chat shows
+        /// no cost rather than a zero that was never estimated.
+        /// </summary>
+        private bool _hasTotalCost;
+
+        /// <summary>
+        /// What the Request that is running has used since the last AI reply: every round trip adds
+        /// its usage, and the reply the Request ends with carries the whole round. A reply that
+        /// lands in a Chat the Player has left takes nothing with it.
+        /// </summary>
+        private TokenUsage _requestUsage = TokenUsage.Empty;
+
+        /// <summary>
+        /// What <see cref="_requestUsage"/> cost, meaningful only together with
+        /// <see cref="_requestHasCost"/>.
+        /// </summary>
+        private decimal? _requestCost;
+
+        /// <summary>
+        /// Whether any round trip since the last AI reply had prices to cost it at.
+        /// </summary>
+        private bool _requestHasCost;
+
+        /// <summary>
+        /// Whether this Chat has already asked about its Token Budget: it asks once per Chat, and
+        /// whatever the Player sends next is the answer — another message to keep going, or a New
+        /// chat to start over.
+        /// </summary>
+        private bool _budgetPromptShown;
+
+        /// <summary>
         /// A Chat talks to the model <paramref name="chatClient"/> builds and is told what it is by
         /// <paramref name="systemPrompt"/>. Both are asked again for every Request, so a change of
         /// Settings takes effect without losing the conversation. <paramref name="tools"/> holds the
@@ -147,15 +204,18 @@ namespace jubeater.aigoalplanner.Core
         /// Apply; without it the Chat can only repeat what the model said about one.
         /// </summary>
         public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools = null,
-                    Action<string> logDebug = null, Action<string> logWarn = null, Plans plans = null)
-            : this(chatClient, systemPrompt, tools, logDebug, logWarn, plans, unavailableReason: null) { }
+                    Action<string> logDebug = null, Action<string> logWarn = null, Plans plans = null,
+                    Func<long> tokenBudget = null, Func<TokenPrice> tokenPrices = null)
+            : this(chatClient, systemPrompt, tools, logDebug, logWarn, plans, unavailableReason: null,
+                   tokenBudget: tokenBudget, tokenPrices: tokenPrices) { }
 
         public Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools,
                     Action<string> logDebug, Plans plans)
             : this(chatClient, systemPrompt, tools, logDebug, logWarn: null, plans, unavailableReason: null) { }
 
         private Chat(Func<IChatClient> chatClient, Func<string> systemPrompt, ToolRegistry tools,
-                     Action<string> logDebug, Action<string> logWarn, Plans plans, string unavailableReason) {
+                     Action<string> logDebug, Action<string> logWarn, Plans plans, string unavailableReason,
+                     Func<long> tokenBudget = null, Func<TokenPrice> tokenPrices = null) {
             _unavailableReason = unavailableReason;
 
             if (_unavailableReason == null) {
@@ -171,6 +231,9 @@ namespace jubeater.aigoalplanner.Core
             _plans    = plans;
             _logDebug = logDebug;
             _logWarn  = logWarn;
+
+            _tokenBudget = tokenBudget;
+            _tokenPrices = tokenPrices;
         }
 
         /// <summary>
@@ -254,6 +317,32 @@ namespace jubeater.aigoalplanner.Core
         /// Chat leaves it in place.
         /// </summary>
         public bool CanUndo => _plans != null && _plans.CanUndo;
+
+        /// <summary>
+        /// Everything this Chat has used so far, across all its Requests: input, cached input and
+        /// output, from the Providers' usage data. Empty when no round trip reported any. The
+        /// Chat window reads it for the per-Chat display; the model is never told it.
+        /// </summary>
+        public TokenUsage TotalUsage {
+            get {
+                lock (_messagesLock) {
+                    return _totalUsage;
+                }
+            }
+        }
+
+        /// <summary>
+        /// What <see cref="TotalUsage"/> cost at the prices the Player entered, or null when no
+        /// round trip of this Chat had prices to cost it at: with nothing to estimate from the
+        /// Chat shows tokens but no cost.
+        /// </summary>
+        public decimal? TotalEstimatedCostUsd {
+            get {
+                lock (_messagesLock) {
+                    return _hasTotalCost ? _totalEstimatedCostUsd : (decimal?)null;
+                }
+            }
+        }
 
 #if DEBUG
         /// <summary>
@@ -352,6 +441,8 @@ namespace jubeater.aigoalplanner.Core
                 } finally {
                     ClearProgress(currentGeneration);
                 }
+
+                MaybePromptForBudget(currentGeneration);
             } finally {
                 _sendLock.Release();
             }
@@ -450,6 +541,8 @@ namespace jubeater.aigoalplanner.Core
                 } finally {
                     ClearProgress(generation);
                 }
+
+                MaybePromptForBudget(generation);
             } finally {
                 _sendLock.Release();
             }
@@ -523,6 +616,13 @@ namespace jubeater.aigoalplanner.Core
                 _progressLines.Clear();
                 _review              = null;
                 _appliedBeforeReview = null;
+                _totalUsage              = TokenUsage.Empty;
+                _totalEstimatedCostUsd   = null;
+                _hasTotalCost            = false;
+                _requestUsage            = TokenUsage.Empty;
+                _requestCost             = null;
+                _requestHasCost          = false;
+                _budgetPromptShown       = false;
 #if DEBUG
                 _roundTrips.Clear();
                 _lookups.Clear();
@@ -557,11 +657,22 @@ namespace jubeater.aigoalplanner.Core
             while (true) {
                 round++;
 
+                // The budget is checked before every Provider call, not just after the Request:
+                // past it the loop ends here, with the tool results already in the history, and
+                // the Player's next message continues from them.
+                if (StopAtBudget(generation)) return;
+
                 ChatResponse response;
+                TokenPrice   roundPrices = null;
                 Stopwatch    clock = Stopwatch.StartNew();
 
                 try {
                     IChatClient chatClient = _chatClient();
+
+                    // The prices are captured with the client, before its response is awaited: a
+                    // round trip is costed at the Provider that served it, not at whatever the
+                    // Player switched to while it was answering.
+                    roundPrices = _tokenPrices?.Invoke();
 
                     response = await chatClient
                                       .GetResponseAsync(BuildHistory(), BuildOptions(), cancellationToken)
@@ -594,6 +705,7 @@ namespace jubeater.aigoalplanner.Core
                                                                    .ToList();
 
                 LogRound(round, clock, response, calls.Count);
+                RecordUsage(generation, response, roundPrices);
 
                 if (calls.Count == 0) {
                     ShowResponse(generation, response);
@@ -781,6 +893,14 @@ namespace jubeater.aigoalplanner.Core
 
                 _messages.Add(new ChatMessage(ChatMessageAuthor.Player, request));
                 _modelHistory.Add(new AiChatMessage(ChatRole.User, request));
+
+                // A new Request starts its own per-reply accounting: whatever an earlier Request
+                // spent without leaving a reply behind stays in the Chat's totals, not in the
+                // next reply. A Continuation after an Apply is the same Request, so only a new
+                // Request resets.
+                _requestUsage   = TokenUsage.Empty;
+                _requestCost    = null;
+                _requestHasCost = false;
             }
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
@@ -1010,13 +1130,22 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>
         /// Adds the model's reply to the Chat and to what the model will be told, only while
-        /// <paramref name="generation"/> is still current, as one step.
+        /// <paramref name="generation"/> is still current, as one step. The reply carries what the
+        /// Request behind it used, across its tool rounds — the model is told the words, never the
+        /// counts.
         /// </summary>
         private bool TryAppendAiReply(int generation, string text) {
             lock (_messagesLock) {
                 if (generation != Volatile.Read(ref _generation)) return false;
 
-                _messages.Add(new ChatMessage(ChatMessageAuthor.Ai, text));
+                TokenUsage replyUsage = _requestUsage.IsEmpty ? null : _requestUsage;
+                decimal?   replyCost  = _requestHasCost ? _requestCost : (decimal?)null;
+
+                _requestUsage   = TokenUsage.Empty;
+                _requestCost    = null;
+                _requestHasCost = false;
+
+                _messages.Add(new ChatMessage(ChatMessageAuthor.Ai, text, replyUsage, replyCost));
                 _modelHistory.Add(new AiChatMessage(ChatRole.Assistant, text));
             }
 
@@ -1264,6 +1393,69 @@ namespace jubeater.aigoalplanner.Core
             // The reason is whatever text the endpoint sent, so it is not repeated here either: the
             // log says "other", and the Player gets words of this module's own.
             return "The model stopped before finishing. Try again.";
+        }
+
+        /// <summary>
+        /// Adds one round trip's usage to the Chat's total and to the Request that is running, with
+        /// what it cost at the prices captured with the client before its response was awaited. A
+        /// round trip whose Provider reported no usage adds nothing. A reply that lands in a Chat
+        /// the Player has left counts for neither that Chat nor its totals.
+        /// </summary>
+        private void RecordUsage(int generation, ChatResponse response, TokenPrice roundPrices) {
+            TokenUsage usage = TokenUsage.FromResponse(response?.Usage);
+
+            if (usage == null) return;
+
+            decimal? cost = usage.EstimateCost(roundPrices);
+
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return;
+
+                _totalUsage   = _totalUsage.Add(usage);
+                _requestUsage = _requestUsage.Add(usage);
+
+                if (cost.HasValue) {
+                    _requestCost           = (_requestCost ?? 0) + cost.Value;
+                    _requestHasCost        = true;
+                    _totalEstimatedCostUsd = (_totalEstimatedCostUsd ?? 0) + cost.Value;
+                    _hasTotalCost          = true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Asks the Player whether to go on, once per Chat, when its tokens have reached its Token
+        /// Budget. The rule lives in <see cref="StopAtBudget"/>; this is its end-of-Request call,
+        /// for the Request that crossed the budget on its last round and makes no further calls.
+        /// </summary>
+        private void MaybePromptForBudget(int generation) {
+            StopAtBudget(generation);
+        }
+
+        /// <summary>
+        /// Whether this Request ends before its next Provider call: the Chat's tokens have reached
+        /// its Token Budget and the Player has not been asked yet. The question is a Notice in the
+        /// Chat, asked once per Chat — the model is not asked to ask it, which would spend the
+        /// Player's tokens past the budget to talk about the budget. A Request the Player has left
+        /// ends silently instead. When the Player has been asked, a further message is the answer
+        /// and the Request goes on.
+        /// </summary>
+        private bool StopAtBudget(int generation) {
+            long budget = _tokenBudget?.Invoke() ?? TokenBudget.Default;
+
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return true;
+                if (_budgetPromptShown) return false;
+                if (!TokenBudget.IsReached(_totalUsage.Total, budget)) return false;
+
+                _budgetPromptShown = true;
+
+                _messages.Add(new ChatMessage(ChatMessageAuthor.Notice, TokenBudget.PromptFor(_totalUsage.Total, budget)));
+            }
+
+            MessagesChanged?.Invoke(this, EventArgs.Empty);
+
+            return true;
         }
     }
 }

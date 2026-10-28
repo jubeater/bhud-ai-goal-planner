@@ -30,16 +30,30 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     public sealed class ChatMessage
     {
-        public ChatMessage(ChatMessageAuthor author, string text)
+        public ChatMessage(ChatMessageAuthor author, string text, TokenUsage usage = null, decimal? estimatedCostUsd = null)
         {
             if (text == null) throw new ArgumentNullException(nameof(text));
 
-            Author = author;
-            Text   = text;
+            Author            = author;
+            Text              = text;
+            Usage             = usage;
+            EstimatedCostUsd  = estimatedCostUsd;
         }
 
         public ChatMessageAuthor Author { get; }
 
         public string Text { get; }
+
+        /// <summary>
+        /// The tokens the reply behind this message used — the whole Request's, across its tool
+        /// rounds — or null when the Provider reported no usage. Only AI replies carry one.
+        /// </summary>
+        public TokenUsage Usage { get; }
+
+        /// <summary>
+        /// What <see cref="Usage"/> cost at the prices the Player entered, or null when no prices
+        /// were entered for it.
+        /// </summary>
+        public decimal? EstimatedCostUsd { get; }
     }
 }
