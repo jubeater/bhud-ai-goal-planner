@@ -284,8 +284,8 @@ namespace jubeater.aigoalplanner
             // quick and must not touch the disk, while watching starts a task that lives until Unload.
             if (_chat != null && _devChannelSetting != null) {
                 _devChannelHost = new DevChannelHost();
-                _devChannelHost.Start(_chat, () => _devChannelSetting.Value, LogDebug,
-                                      DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
+                _devChannelHost.Start(_chat, () => _devChannelSetting.Value, ReadBlishDebugFlag, LogDebug,
+                                      new DevInbox(DirectoriesManager.GetFullDirectoryPath("aigoalplanner")));
             }
 #endif
         }

@@ -13,24 +13,26 @@ namespace jubeater.aigoalplanner
     /// IO never blocks it — and calls the same Chat methods the window's buttons call, which hand
     /// every Blish HUD read and write to the game thread themselves (ADR-0009).
     /// </summary>
-    internal sealed class DevChannelHost
+    public sealed class DevChannelHost
     {
         private readonly object _door = new object();
         private CancellationTokenSource _watching;
         private bool _stopped = true;
 
         /// <summary>
-        /// Starts watching <c>dev\</c> under <paramref name="rootDir"/> against
-        /// <paramref name="chat"/>. <paramref name="settingOn"/> is the module setting; the channel
-        /// reads nothing while it is off.
+        /// Starts watching <paramref name="inbox"/> against <paramref name="chat"/>.
+        /// <paramref name="settingOn"/> is the module setting and <paramref name="blishDebug"/>
+        /// whether Blish HUD was started with <c>--debug</c>; while either is missing nothing is
+        /// read.
         /// </summary>
-        public void Start(Chat chat, Func<bool> settingOn, Action<string> logDebug, string rootDir) {
+        public void Start(Chat chat, Func<bool> settingOn, Func<bool> blishDebug, Action<string> logDebug,
+                          IDevInbox inbox) {
             Stop();
 
             lock (_door) {
                 _stopped = false;
 
-                var channel = new DevChannel(chat, () => !_stopped && settingOn(), logDebug, new DevInbox(rootDir));
+                var channel = new DevChannel(chat, () => !_stopped && settingOn() && blishDebug(), logDebug, inbox);
 
                 CancellationTokenSource watching = new CancellationTokenSource();
 
