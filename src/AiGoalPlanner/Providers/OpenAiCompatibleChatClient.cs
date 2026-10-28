@@ -182,13 +182,28 @@ namespace jubeater.aigoalplanner.Providers
 
             if (usage != null) {
                 response.Usage = new AiUsageDetails {
-                    InputTokenCount  = usage["prompt_tokens"]?.Value<long?>(),
-                    OutputTokenCount = usage["completion_tokens"]?.Value<long?>(),
-                    TotalTokenCount  = usage["total_tokens"]?.Value<long?>()
+                    InputTokenCount       = usage["prompt_tokens"]?.Value<long?>(),
+                    OutputTokenCount      = usage["completion_tokens"]?.Value<long?>(),
+                    TotalTokenCount       = usage["total_tokens"]?.Value<long?>(),
+                    CachedInputTokenCount = ReadCachedInputTokens(usage)
                 };
             }
 
             return response;
+        }
+
+        /// <summary>
+        /// The cached input tokens in a usage block, however the Provider spells them: OpenAI nests
+        /// them as <c>prompt_tokens_details.cached_tokens</c>, DeepSeek also reports them flat as
+        /// <c>prompt_cache_hit_tokens</c> (the same number twice), and a Provider that reports no
+        /// caching leaves neither.
+        /// </summary>
+        private static long? ReadCachedInputTokens(JToken usage) {
+            long? cached = usage["prompt_tokens_details"]?["cached_tokens"]?.Value<long?>();
+
+            if (cached.HasValue) return cached;
+
+            return usage["prompt_cache_hit_tokens"]?.Value<long?>();
         }
 
         /// <summary>
