@@ -162,6 +162,53 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Empty(world.Writes);
         }
 
+        [Fact]
+        public async Task The_hero_points_preset_enables_an_installed_but_disabled_Pathing_and_continues() {
+            Preset preset = PresetLibrary.Load().Single(candidate => candidate.Name == "Hero points");
+
+            var model = new ScriptedChatClient();
+            model.WillCallTool(ListInstalledModulesTool.Name, "call_modules", new Dictionary<string, object>());
+            model.WillCallTool(SubmitPlanTool.Name, "call_plan",
+                               Plan("Pathing is installed but disabled. I suggest enabling it.",
+                                    EnableAction("test.pathing")));
+
+            var world = DisabledPathingWorld();
+            var chat  = NewChat(model, world);
+
+            await chat.SendAsync(preset.Request);
+
+            ReviewedAction enable = Assert.Single(chat.Review.Actions);
+
+            Assert.True(enable.IsAccepted);
+            Assert.True(enable.CanApply);
+            Assert.Equal("disabled", enable.CurrentValue);
+            Assert.Equal("enabled", enable.ProposedValue);
+
+            model.WillCallTool(GetModuleSettingsTool.Name, "call_settings",
+                               new Dictionary<string, object> { ["namespace"] = "test.pathing" });
+            model.WillReply("Pathing is enabled now. Here is how it is set up.");
+
+            await chat.ApplyAsync(new[] { 0 });
+
+            Assert.True(world.Modules.Single(module => module.Namespace == "test.pathing").Enabled);
+            Assert.True(world.SettingsCalls >= 1);
+            Assert.Equal("Pathing is enabled now. Here is how it is set up.",
+                         chat.Messages.Last(message => message.Author == ChatMessageAuthor.Ai).Text);
+        }
+
+        private static FakeWorld DisabledPathingWorld() {
+            var world = new FakeWorld {
+                LocationResult = new PlayerLocationResult(
+                    LocationStatus.Ok,
+                    new PlayerLocation("Test Character", 999, "Test Map", 99, "Test Region"))
+            };
+
+            world.Modules.Add(new InstalledModuleInfo("test.pathing", "Pathing", "1.0.0", "Markers and trails.", enabled: false));
+            world.SettingsByNamespace["test.pathing"] = FakeWorld.Disabled("Pathing");
+
+            return world;
+        }
+
         private static FakeWorld HeroPointWorld() {
             var world = new FakeWorld {
                 LocationResult = new PlayerLocationResult(

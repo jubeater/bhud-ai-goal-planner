@@ -52,6 +52,22 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void The_hero_hints_enable_an_installed_Pathing_and_keep_a_hand_install_as_fallback() {
+            Preset hero = PresetLibrary.Load().Single(candidate => candidate.Name == "Hero points");
+
+            Assert.Contains("enable_module", hero.Hints);
+            Assert.Contains("Catalog", hero.Hints);
+            Assert.DoesNotContain("enable it by hand", hero.Hints);
+        }
+
+        [Fact]
+        public void Every_preset_relying_on_a_module_states_the_same_install_rule() {
+            foreach (Preset preset in PresetLibrary.Load()) {
+                Assert.Contains("enable_module", preset.Hints);
+                Assert.Contains("Catalog", preset.Hints);
+            }
+        }
+        [Fact]
         public void Extra_fields_in_a_preset_file_are_ignored() {
             Preset preset = Preset.Parse("{\"name\":\"XP\",\"request\":\"Help me.\",\"hints\":\"Check XP.\",\"notes\":\"For the author.\"}");
 
