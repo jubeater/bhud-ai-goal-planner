@@ -85,7 +85,7 @@ namespace jubeater.aigoalplanner.Core
         public string DescribeWithCost(decimal? costUsd) {
             string text = Describe();
 
-            if (costUsd.HasValue && text.Length > 0) text += " · ≈" + DescribeCost(costUsd.Value);
+            if (costUsd.HasValue && text.Length > 0) text += " · ~" + DescribeCost(costUsd.Value);
 
             return text;
         }

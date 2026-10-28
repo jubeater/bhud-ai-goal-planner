@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.ComponentModel.Composition;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -82,11 +83,14 @@ namespace jubeater.aigoalplanner
         private SettingEntry<string> _modelSetting;
         private SettingEntry<string> _savedProvidersSetting;
         private SettingEntry<bool>   _autoApplySetting;
+        private SettingEntry<int>    _tokenBudgetSetting;
+        private SettingEntry<string> _tokenPricesSetting;
 #if DEBUG
         private SettingEntry<bool> _devChannelSetting;
         private DevChannelHost     _devChannelHost;
 #endif
         private SavedProviders       _savedProviders;
+        private TokenPrices          _tokenPrices;
         private ProviderKeyStore     _keyStore;
         private ToolCallingCapabilityStore _capabilityStore;
         private HttpClient           _httpClient;
@@ -127,7 +131,9 @@ namespace jubeater.aigoalplanner
 
                 _plans = new Plans(_world, () => _autoApplySetting.Value, LogDebug);
 
-                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug, LogWarn, _plans);
+                _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug, LogWarn, _plans,
+                    () => _tokenBudgetSetting.Value,
+                    () => _tokenPrices.GetPrice(_endpointSetting.Value));
             } catch (Exception exception) {
                 Logger.Error(exception, "AI Goal Planner failed to load its planning core. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
@@ -199,6 +205,23 @@ namespace jubeater.aigoalplanner
                 () => "Apply Setting changes without Review",
                 () => "Applies the Setting changes of a plan as soon as the AI proposes them. Changes the Player did not "
                     + "ask for, and anything that is not a Setting, still wait for Review.");
+
+            // About 300k tokens per Chat (ADR-0002 counts in tokens, not money). 0 means no limit:
+            // the Chat never asks. It is a Blish HUD setting too, so it can be changed without
+            // opening Provider settings.
+            _tokenBudgetSetting = settings.DefineSetting(
+                "tokens.budget",
+                (int)TokenBudget.Default,
+                () => "Token Budget",
+                () => "How many tokens one Chat may use before it asks whether to go on. 0 means no limit.");
+
+            _tokenPricesSetting = settings.DefineSetting(
+                "tokens.prices",
+                string.Empty,
+                () => "Token prices",
+                () => "Remembers the prices per million tokens for each Provider, for the cost estimate.");
+
+            _tokenPrices = TokenPrices.FromJson(_tokenPricesSetting.Value);
         }
 
 #if DEBUG
@@ -336,6 +359,7 @@ namespace jubeater.aigoalplanner
             _capabilityStore = null;
             _savedProviders  = null;
             _keyStore        = null;
+            _tokenPrices     = null;
 
             if (_httpClient != null) {
                 _httpClient.Dispose();
@@ -382,7 +406,11 @@ namespace jubeater.aigoalplanner
                     NotifyProviderChanged,
                     endpoint => _savedProviders.GetModel(endpoint),
                     () => _savedProviders.Endpoints,
-                    RemoveSavedProvider);
+                    RemoveSavedProvider,
+                    () => _tokenBudgetSetting.Value.ToString(CultureInfo.InvariantCulture),
+                    endpoint => FormatPrice(_tokenPrices.GetPrice(endpoint)?.InputPerMillion),
+                    endpoint => FormatPrice(_tokenPrices.GetPrice(endpoint)?.OutputPerMillion),
+                    SaveTokenSettings);
             }
 
             _providerWindow.Show();
@@ -417,6 +445,66 @@ namespace jubeater.aigoalplanner
         }
 
         /// <summary>
+        /// Keeps the Token Budget and the prices per million tokens the Player entered: the budget
+        /// as a Setting, the prices under the endpoint the window shows. Empty price fields forget
+        /// the endpoint's prices. Anything the Player could get wrong is reported as an
+        /// <see cref="ArgumentException"/> the window shows, so a half-typed endpoint or a mistyped
+        /// number never reaches the Settings.
+        /// </summary>
+        private void SaveTokenSettings(string endpoint, string budgetText, string inputPriceText, string outputPriceText) {
+            // Refuses prices for an endpoint that is not a URL, the way a key is refused: a
+            // half-typed endpoint must not leave prices behind that nothing will ever read again.
+            ProviderSettings.ParseEndpoint(endpoint);
+
+            if (!TryParseBudget(budgetText, out int budget)) {
+                throw new ArgumentException("Token Budget must be a whole number of tokens, or 0 for no limit.");
+            }
+
+            if (!TryParsePrice(inputPriceText, out decimal? inputPrice) || !TryParsePrice(outputPriceText, out decimal? outputPrice)) {
+                throw new ArgumentException("Prices must be numbers 0 or more, or left empty.");
+            }
+
+            _tokenBudgetSetting.Value = budget;
+
+            _tokenPrices.SetPrice(endpoint, new TokenPrice(inputPrice, outputPrice));
+            _tokenPricesSetting.Value = _tokenPrices.ToJson();
+        }
+
+        private static bool TryParseBudget(string text, out int budget) {
+            string trimmed = (text ?? string.Empty).Trim();
+
+            return (int.TryParse(trimmed, NumberStyles.Integer | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out budget)
+                 || int.TryParse(trimmed, NumberStyles.Integer | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out budget))
+                 && budget >= 0;
+        }
+
+        private static bool TryParsePrice(string text, out decimal? price) {
+            string trimmed = (text ?? string.Empty).Trim();
+
+            if (trimmed.Length == 0) {
+                price = null;
+
+                return true;
+            }
+
+            if ((decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.CurrentCulture, out decimal parsed)
+              || decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.InvariantCulture, out parsed))
+              && parsed >= 0) {
+                price = parsed;
+
+                return true;
+            }
+
+            price = null;
+
+            return false;
+        }
+
+        private static string FormatPrice(decimal? price) {
+            return price?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+
+        /// <summary>
         /// The one line the settings view may show about the key: whether one is saved and its last
         /// four characters, never the key itself.
         /// </summary>
@@ -426,6 +514,7 @@ namespace jubeater.aigoalplanner
 
         private void NotifyProviderChanged() {
             _chatWindow?.RefreshProvider();
+            _chatWindow?.RefreshTokens();
         }
 
         private string DescribeProvider() {
@@ -444,8 +533,8 @@ namespace jubeater.aigoalplanner
         }
 
         /// <summary>
-        /// Removes a saved custom Provider: deletes its stored key, forgets its saved model,
-        /// drops its capability records, and if it was the one currently in use, clears the
+        /// Removes a saved custom Provider: deletes its stored key, forgets its saved model and
+        /// prices, drops its capability records, and if it was the one currently in use, clears the
         /// endpoint and model Settings so the Chat shows "Connect a Provider first".
         /// </summary>
         public void RemoveSavedProvider(string endpoint) {
@@ -458,6 +547,11 @@ namespace jubeater.aigoalplanner
             _savedProviders?.Remove(endpoint);
             if (_savedProvidersSetting != null && _savedProviders != null) {
                 _savedProvidersSetting.Value = _savedProviders.ToJson();
+            }
+
+            _tokenPrices?.Remove(endpoint);
+            if (_tokenPricesSetting != null && _tokenPrices != null) {
+                _tokenPricesSetting.Value = _tokenPrices.ToJson();
             }
 
             _capabilityStore?.Clear(endpoint);

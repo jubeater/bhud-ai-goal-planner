@@ -359,6 +359,17 @@ namespace jubeater.aigoalplanner.UI
             _providerLabel.Text = _describeProvider();
         }
 
+        /// <summary>
+        /// Rewrites the subtitle with the Chat's token totals, for a settings change that brought
+        /// no new message to render: prices changed, so the per-Chat cost reads differently now.
+        /// What a new message uses is rewritten in the render pass instead.
+        /// </summary>
+        public void RefreshTokens() {
+            if (_disposed) return;
+
+            _window.Subtitle = TokenSubtitle();
+        }
+
         public void Dispose() {
             _disposed = true;
 
@@ -558,8 +569,16 @@ namespace jubeater.aigoalplanner.UI
 
             int top = 0;
 
+            // The per-Chat token display lives in the subtitle, where the carried-over hint said
+            // there is room for it; what one reply used sits under that reply instead.
+            _window.Subtitle = TokenSubtitle();
+
             foreach (ChatMessage message in messages) {
                 top = AddLabel(Format(message), ColorFor(message.Author), top);
+
+                if (message.Author == ChatMessageAuthor.Ai && message.Usage != null && !message.Usage.IsEmpty) {
+                    top = AddLabel("    " + message.Usage.DescribeWithCost(message.EstimatedCostUsd), HintColor, top);
+                }
             }
 
             foreach (string line in _chat.ProgressLines) {
@@ -594,6 +613,18 @@ namespace jubeater.aigoalplanner.UI
             _messageControls.Add(label);
 
             return label.Bottom + MessageSpacing;
+        }
+
+        /// <summary>
+        /// The subtitle with the per-Chat token display: the tokens this Chat has used, with the
+        /// estimated cost when the Player entered prices. An empty Chat keeps its plain subtitle.
+        /// </summary>
+        private string TokenSubtitle() {
+            TokenUsage total = _chat.TotalUsage;
+
+            if (total.IsEmpty) return "Describe a goal";
+
+            return "Describe a goal · " + total.DescribeWithCost(_chat.TotalEstimatedCostUsd);
         }
 
         private static string Format(ChatMessage message) {

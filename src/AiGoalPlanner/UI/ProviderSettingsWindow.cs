@@ -31,10 +31,10 @@ namespace jubeater.aigoalplanner.UI
         /// button sits 16 px in from the right edge.
         /// </summary>
         private const int WindowWidth  = 560;
-        private const int WindowHeight = 400;
+        private const int WindowHeight = 510;
 
         private const int ContentWidth  = 540;
-        private const int ContentHeight = 320;
+        private const int ContentHeight = 430;
 
         private static readonly Color HintColor  = new Color(170, 170, 170);
         private static readonly Color ErrorColor = new Color(240, 165, 150);
@@ -49,6 +49,10 @@ namespace jubeater.aigoalplanner.UI
         private readonly Func<string, string>      _getSavedModel;
         private readonly Func<IEnumerable<string>> _getSavedEndpoints;
         private readonly Action<string>            _removeProvider;
+        private readonly Func<string>              _readTokenBudget;
+        private readonly Func<string, string>      _readInputPrice;
+        private readonly Func<string, string>      _readOutputPrice;
+        private readonly Action<string, string, string, string> _saveTokens;
 
         private readonly Dictionary<string, string> _customEndpointsByLabel =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -58,6 +62,9 @@ namespace jubeater.aigoalplanner.UI
         private readonly StandardButton _removeButton;
         private readonly TextBox        _endpointBox;
         private readonly TextBox        _modelBox;
+        private readonly TextBox        _budgetBox;
+        private readonly TextBox        _inputPriceBox;
+        private readonly TextBox        _outputPriceBox;
         private readonly Label          _keyStatusLabel;
         private readonly StandardButton _pasteKeyButton;
         private readonly StandardButton _clearKeyButton;
@@ -77,7 +84,11 @@ namespace jubeater.aigoalplanner.UI
                                       Action                    providerChanged,
                                       Func<string, string>      getSavedModel     = null,
                                       Func<IEnumerable<string>> getSavedEndpoints = null,
-                                      Action<string>            removeProvider    = null) {
+                                      Action<string>            removeProvider    = null,
+                                      Func<string>              readTokenBudget   = null,
+                                      Func<string, string>      readInputPrice    = null,
+                                      Func<string, string>      readOutputPrice   = null,
+                                      Action<string, string, string, string> saveTokens = null) {
             _readEndpoint      = readEndpoint      ?? throw new ArgumentNullException(nameof(readEndpoint));
             _readModel         = readModel         ?? throw new ArgumentNullException(nameof(readModel));
             _describeKey       = describeKey       ?? throw new ArgumentNullException(nameof(describeKey));
@@ -87,6 +98,10 @@ namespace jubeater.aigoalplanner.UI
             _getSavedModel     = getSavedModel;
             _getSavedEndpoints = getSavedEndpoints;
             _removeProvider    = removeProvider;
+            _readTokenBudget   = readTokenBudget;
+            _readInputPrice    = readInputPrice;
+            _readOutputPrice   = readOutputPrice;
+            _saveTokens        = saveTokens;
 
             _window = new StandardWindow(
                 windowBackground,
@@ -216,11 +231,53 @@ namespace jubeater.aigoalplanner.UI
             };
             _saveButton.Click += OnSaveClicked;
 
+            new Label {
+                Parent    = content,
+                Location  = new Point(0, 263),
+                Size      = new Point(ContentWidth, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
+                Text      = "Token Budget (tokens per Chat, 0 = no limit)"
+            };
+
+            // A number the Player types: Blish HUD draws the setting's own box elsewhere too, and
+            // this one keeps the budget next to the Provider it applies to.
+            _budgetBox = new TextBox {
+                Parent          = content,
+                Location        = new Point(0, 285),
+                Size            = new Point(200, 27),
+                PlaceholderText = "e.g. 300000"
+            };
+
+            new Label {
+                Parent    = content,
+                Location  = new Point(0, 320),
+                Size      = new Point(ContentWidth, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
+                Text      = "Prices in $ per million tokens (optional, for this Provider)"
+            };
+
+            // Empty fields mean no estimate: nothing is shown until both prices are entered.
+            _inputPriceBox = new TextBox {
+                Parent          = content,
+                Location        = new Point(0, 342),
+                Size            = new Point(265, 27),
+                PlaceholderText = "Input $/M, e.g. 3"
+            };
+
+            _outputPriceBox = new TextBox {
+                Parent          = content,
+                Location        = new Point(275, 342),
+                Size            = new Point(265, 27),
+                PlaceholderText = "Output $/M, e.g. 15"
+            };
+
             // The status gets its own row, the full width and a wrap: the longest message is two
             // lines, and a status that is cut off says nothing.
             _statusLabel = new Label {
                 Parent         = content,
-                Location       = new Point(0, 263),
+                Location       = new Point(0, 377),
                 Width          = ContentWidth,
                 Font           = GameService.Content.DefaultFont14,
                 TextColor      = HintColor,
@@ -249,6 +306,10 @@ namespace jubeater.aigoalplanner.UI
                 _endpointBox.Text = endpoint;
                 _modelBox.Text    = model;
                 _statusLabel.Text = string.Empty;
+
+                _budgetBox.Text     = _readTokenBudget?.Invoke() ?? string.Empty;
+                _inputPriceBox.Text  = _readInputPrice?.Invoke(endpoint) ?? string.Empty;
+                _outputPriceBox.Text = _readOutputPrice?.Invoke(endpoint) ?? string.Empty;
 
                 RefreshKeyStatus(endpoint);
                 UpdateRemoveButtonState();
@@ -351,6 +412,9 @@ namespace jubeater.aigoalplanner.UI
                 string savedModel = _getSavedModel?.Invoke(endpoint);
                 _modelBox.Text = savedModel ?? string.Empty;
 
+                _inputPriceBox.Text  = _readInputPrice?.Invoke(endpoint) ?? string.Empty;
+                _outputPriceBox.Text = _readOutputPrice?.Invoke(endpoint) ?? string.Empty;
+
                 RefreshKeyStatus(endpoint);
                 UpdateRemoveButtonState();
             } finally {
@@ -373,6 +437,12 @@ namespace jubeater.aigoalplanner.UI
                     if (!string.IsNullOrWhiteSpace(savedModel)) {
                         _modelBox.Text = savedModel;
                     }
+                }
+
+                if (string.IsNullOrWhiteSpace(_inputPriceBox.Text) && string.IsNullOrWhiteSpace(_outputPriceBox.Text)
+                 && !string.IsNullOrWhiteSpace(endpoint)) {
+                    _inputPriceBox.Text  = _readInputPrice?.Invoke(endpoint) ?? string.Empty;
+                    _outputPriceBox.Text = _readOutputPrice?.Invoke(endpoint) ?? string.Empty;
                 }
 
                 RefreshKeyStatus(endpoint);
@@ -408,6 +478,8 @@ namespace jubeater.aigoalplanner.UI
                 _providerDropdown.SelectedItem = "Custom";
                 _endpointBox.Text              = string.Empty;
                 _modelBox.Text                 = string.Empty;
+                _inputPriceBox.Text            = string.Empty;
+                _outputPriceBox.Text           = string.Empty;
                 RefreshKeyStatus(string.Empty);
                 UpdateRemoveButtonState();
                 ShowStatus(string.Empty, HintColor);
@@ -420,6 +492,22 @@ namespace jubeater.aigoalplanner.UI
 
         private void OnSaveClicked(object sender, MouseEventArgs e) {
             string endpoint = ReadEndpoint();
+
+            // The token settings are validated first, so a mistyped budget or price stops the save
+            // with an error instead of keeping half of what the Player typed.
+            try {
+                _saveTokens?.Invoke(endpoint, _budgetBox.Text, _inputPriceBox.Text, _outputPriceBox.Text);
+            } catch (ArgumentException exception) {
+                ShowStatus(exception.Message, ErrorColor);
+                return;
+            } catch (ProviderException exception) {
+                ShowStatus(DescribeProblem(exception.Failure), ErrorColor);
+                return;
+            } catch (Exception exception) {
+                Logger.Warn(exception, "Saving the token settings failed.");
+                ShowStatus("The token settings could not be saved.", ErrorColor);
+                return;
+            }
 
             try {
                 _save(endpoint, _modelBox.Text);

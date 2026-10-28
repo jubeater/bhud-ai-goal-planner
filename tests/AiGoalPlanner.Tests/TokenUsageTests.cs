@@ -103,7 +103,7 @@ namespace jubeater.aigoalplanner.Tests
 
         [Fact]
         public void Usage_with_a_cost_describes_both() {
-            Assert.Equal("1,200 in · 900 cached · 80 out · ≈$0.0048",
+            Assert.Equal("1,200 in · 900 cached · 80 out · ~$0.0048",
                          new TokenUsage(1200, 900, 80).DescribeWithCost(0.0048m));
         }
 
