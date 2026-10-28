@@ -90,6 +90,30 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         private readonly List<string> _progressLines = new List<string>();
 
+#if DEBUG
+        /// <summary>
+        /// The Provider round trips so far in this Chat, oldest first, each with how long it took
+        /// and how it finished. The developer channel reads back only what each operation added;
+        /// no other caller reads these.
+        /// </summary>
+        private readonly List<DevRoundTrip> _roundTrips = new List<DevRoundTrip>();
+
+        /// <summary>
+        /// The Lookups run so far in this Chat, oldest first, each with its name, how long it took
+        /// and what it read. The developer channel reads back only what each operation added; no
+        /// other caller reads these.
+        /// </summary>
+        private readonly List<DevLookup> _lookups = new List<DevLookup>();
+
+        /// <summary>
+        /// The Apply that ran last, and what it did — including what Auto-apply took on its own
+        /// (ADR-0005 allows only Setting changes without Side Effects to be auto-applied). The
+        /// developer channel reads it to answer an Apply with what the Apply did; the Player gets the
+        /// same report as a message the Chat holds.
+        /// </summary>
+        private AppliedPlan _lastApply;
+#endif
+
         /// <summary>
         /// Which Chat this is, so work started in one Chat can tell that the Player has moved on. It
         /// moves on under <c>_messagesLock</c>, together with emptying the Chat, which is what makes
@@ -231,6 +255,52 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         public bool CanUndo => _plans != null && _plans.CanUndo;
 
+#if DEBUG
+        /// <summary>
+        /// Whether the Chat is working on something right now — a Request still running, or an Apply
+        /// or Undo still going — whoever started it. The developer channel waits on this before it
+        /// dispatches, so a request that arrives while the Player is busy waits its turn instead of
+        /// cutting in. Best-effort across threads: work starting between the check and the dispatch
+        /// still serializes on the Chat's own locks.
+        /// </summary>
+        public bool IsBusy => _sendLock.CurrentCount == 0;
+#endif
+
+#if DEBUG
+        /// <summary>
+        /// The Provider round trips so far in this Chat, oldest first, each with how long it took
+        /// and how it finished — the same what the debug log keeps, in the shape the developer
+        /// channel reports. Empty when no Request has run through this Chat yet.
+        /// </summary>
+        public IReadOnlyList<DevRoundTrip> RoundTrips {
+            get {
+                lock (_messagesLock) {
+                    return _roundTrips.ToArray();
+                }
+            }
+        }
+
+        /// <summary>
+        /// The Lookups run so far in this Chat, oldest first, each with its name, how long it took
+        /// and what it read — the same what the debug log keeps, in the shape the developer channel
+        /// reports. Empty when no Request has run through this Chat yet.
+        /// </summary>
+        public IReadOnlyList<DevLookup> Lookups {
+            get {
+                lock (_messagesLock) {
+                    return _lookups.ToArray();
+                }
+            }
+        }
+
+        /// <summary>
+        /// The Apply that ran last, and what it did, or null when nothing has been applied in this
+        /// Chat yet. The developer channel reads it to answer an Apply with what the Apply did; the
+        /// Player gets the same report as a message the Chat holds.
+        /// </summary>
+        public AppliedPlan LastApply => _lastApply;
+#endif
+
         /// <summary>
         /// Sends a Request in this Chat: the Player's words are added to the Chat and the AI answers.
         /// An empty Request (a Send with nothing typed) is ignored.
@@ -326,6 +396,10 @@ namespace jubeater.aigoalplanner.Core
 
                 AppliedPlan applied = await _plans.ApplyAsync(review, actionIndexes, cancellationToken).ConfigureAwait(false);
 
+#if DEBUG
+                _lastApply = applied;
+#endif
+
                 ShowReport(generation, applied.Describe());
 
                 // Nothing was ticked and nothing was applied before the Review: there is nothing to
@@ -417,6 +491,11 @@ namespace jubeater.aigoalplanner.Core
                 _progressLines.Clear();
                 _review              = null;
                 _appliedBeforeReview = null;
+#if DEBUG
+                _roundTrips.Clear();
+                _lookups.Clear();
+                _lastApply = null;
+#endif
                 Interlocked.Increment(ref _generation);
             }
 
@@ -562,16 +641,30 @@ namespace jubeater.aigoalplanner.Core
                 AddProgress(generation, tool.ProgressText(call.Arguments));
 
                 try {
-                    object result = await tool.Function
-                                              .InvokeAsync(new AIFunctionArguments(call.Arguments), cancellationToken)
-                                              .ConfigureAwait(false);
+#if DEBUG
+                    LookupFunction lookup = tool.Function as LookupFunction;
 
-                    if (result is string jsonString && TryExtractNotice(jsonString, out string notice)) {
-                        TryAppendNotice(generation, notice);
-                        _logWarn?.Invoke("Lookup " + call.Name + ": " + notice);
+                    if (lookup != null) {
+                        lookup.Completed += OnLookupCompleted;
                     }
 
-                    results.Add(new FunctionResultContent(call.CallId, result));
+                    try {
+#endif
+                        object result = await tool.Function
+                                                  .InvokeAsync(new AIFunctionArguments(call.Arguments), cancellationToken)
+                                                  .ConfigureAwait(false);
+
+                        if (result is string jsonString && TryExtractNotice(jsonString, out string notice)) {
+                            TryAppendNotice(generation, notice);
+                            _logWarn?.Invoke("Lookup " + call.Name + ": " + notice);
+                        }
+
+                        results.Add(new FunctionResultContent(call.CallId, result));
+#if DEBUG
+                    } finally {
+                        if (lookup != null) lookup.Completed -= OnLookupCompleted;
+                    }
+#endif
                 } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
                     throw;
                 } catch (Exception exception) {
@@ -584,6 +677,19 @@ namespace jubeater.aigoalplanner.Core
 
             return results;
         }
+
+#if DEBUG
+        /// <summary>
+        /// One Lookup of the Request that is running just finished, however it ended: with what it
+        /// read, or with why it did not. The Chat collects what the developer channel reports about
+        /// the Request, and nothing else.
+        /// </summary>
+        private void OnLookupCompleted(object sender, LookupOutcome outcome) {
+            lock (_messagesLock) {
+                _lookups.Add(new DevLookup(outcome.Name, outcome.DurationMs, outcome.Detail, outcome.Chars));
+            }
+        }
+#endif
 
         private static bool TryExtractNotice(string json, out string notice) {
             notice = null;
@@ -741,6 +847,10 @@ namespace jubeater.aigoalplanner.Core
             AppliedPlan applied = autoApplied.Count == 0
                                       ? null
                                       : await _plans.ApplyAsync(review, autoApplied, cancellationToken).ConfigureAwait(false);
+
+#if DEBUG
+            if (applied != null) _lastApply = applied;
+#endif
 
             if (!TryAppendPlanExchange(generation, response, calls, call.CallId,
                                        PlanResult(review.Actions.Count,
@@ -975,9 +1085,18 @@ namespace jubeater.aigoalplanner.Core
         /// Player's key was used to buy, and the log is not the place for it.
         /// </summary>
         private void LogRound(int round, Stopwatch clock, ChatResponse response, int toolCalls) {
+            // One sample for both outputs: the response and the log line report the same time.
+            long elapsedMs = clock.ElapsedMilliseconds;
+
+#if DEBUG
+            lock (_messagesLock) {
+                _roundTrips.Add(new DevRoundTrip(elapsedMs, FinishReasonText(response.FinishReason), toolCalls));
+            }
+#endif
+
             if (_logDebug == null) return;
 
-            _logDebug("Provider round trip " + round + ": " + clock.ElapsedMilliseconds + " ms, finish_reason="
+            _logDebug("Provider round trip " + round + ": " + elapsedMs + " ms, finish_reason="
                     + FinishReasonText(response.FinishReason) + ", tool_calls=" + toolCalls);
         }
 
@@ -1009,9 +1128,18 @@ namespace jubeater.aigoalplanner.Core
         /// echo the request, and with it the key.
         /// </summary>
         private void LogRoundFailed(int round, Stopwatch clock, string failure) {
+            // One sample for both outputs, like a round trip that came back.
+            long elapsedMs = clock.ElapsedMilliseconds;
+
+#if DEBUG
+            lock (_messagesLock) {
+                _roundTrips.Add(new DevRoundTrip(elapsedMs, failure, 0));
+            }
+#endif
+
             if (_logDebug == null) return;
 
-            _logDebug("Provider round trip " + round + " failed after " + clock.ElapsedMilliseconds + " ms: " + failure);
+            _logDebug("Provider round trip " + round + " failed after " + elapsedMs + " ms: " + failure);
         }
 
         private static string Describe(ProviderFailure failure) {

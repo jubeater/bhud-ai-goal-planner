@@ -7,6 +7,31 @@ using Microsoft.Extensions.AI;
 
 namespace jubeater.aigoalplanner.Core
 {
+#if DEBUG
+    /// <summary>
+    /// What one Lookup did: its name, how long it took, what it read and how big its answer was, as
+    /// the debug log keeps it. The Chat collects them, so the developer channel can report what a
+    /// Request did without parsing the log.
+    /// </summary>
+    public sealed class LookupOutcome
+    {
+        public LookupOutcome(string name, long durationMs, string detail, int chars) {
+            Name      = name;
+            DurationMs = durationMs;
+            Detail    = detail;
+            Chars     = chars;
+        }
+
+        public string Name { get; }
+
+        public long DurationMs { get; }
+
+        public string Detail { get; }
+
+        public int Chars { get; }
+    }
+#endif
+
     /// <summary>
     /// One Lookup as the model sees it: a hand-written <see cref="AIFunction"/> with a literal JSON
     /// schema, per ADR-0008. Blish HUD embeds System.Text.Json 5.0 and loads it before any module,
@@ -28,6 +53,14 @@ namespace jubeater.aigoalplanner.Core
         private readonly string         _description;
         private readonly JsonDocument   _schema;
         private readonly Action<string> _logDebug;
+
+        /// <summary>
+        /// Raised when one Lookup ran, so the Chat can collect what it did — for the developer channel,
+        /// which reports it. Without subscribers the Lookup logs and answers exactly as before.
+        /// </summary>
+#if DEBUG
+        public event EventHandler<LookupOutcome> Completed;
+#endif
 
         /// <summary>
         /// Builds the function. <paramref name="schema"/> is the tool's JSON schema as text; the
@@ -65,16 +98,37 @@ namespace jubeater.aigoalplanner.Core
             try {
                 LookupAnswer answer = await InvokeLookupAsync(arguments, cancellationToken).ConfigureAwait(false);
 
-                Log(clock, DescribeForLog(answer));
+                string what = string.IsNullOrEmpty(answer.LogDetail) ? "ok" : answer.LogDetail;
+
+                // One sample for both outputs: the response and the log line report the same time.
+                long elapsedMs = clock.ElapsedMilliseconds;
+
+#if DEBUG
+                Completed?.Invoke(this, new LookupOutcome(_name, elapsedMs, what, answer.Text.Length));
+#endif
+
+                Log(elapsedMs, DescribeForLog(answer));
 
                 return answer.Text;
             } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
-                Log(clock, "cancelled");
+                long elapsedMs = clock.ElapsedMilliseconds;
+
+                Log(elapsedMs, "cancelled");
+
+#if DEBUG
+                Completed?.Invoke(this, new LookupOutcome(_name, elapsedMs, "cancelled", 0));
+#endif
 
                 throw;
             } catch (Exception exception) {
                 // The type, not the message: a message can carry a Setting's value back out.
-                Log(clock, "failed: " + exception.GetType().Name);
+                long elapsedMs = clock.ElapsedMilliseconds;
+
+                Log(elapsedMs, "failed: " + exception.GetType().Name);
+
+#if DEBUG
+                Completed?.Invoke(this, new LookupOutcome(_name, elapsedMs, "failed: " + exception.GetType().Name, 0));
+#endif
 
                 throw;
             }
@@ -91,10 +145,10 @@ namespace jubeater.aigoalplanner.Core
             return what + ", " + answer.Text.Length + " chars";
         }
 
-        private void Log(Stopwatch clock, string what) {
+        private void Log(long elapsedMs, string what) {
             if (_logDebug == null) return;
 
-            _logDebug("Lookup " + _name + ": " + clock.ElapsedMilliseconds + " ms, " + what);
+            _logDebug("Lookup " + _name + ": " + elapsedMs + " ms, " + what);
         }
     }
 }

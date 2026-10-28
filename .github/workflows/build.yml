@@ -36,6 +36,16 @@ jobs:
           dotnet build tests/AiGoalPlanner.Stj5Check/AiGoalPlanner.Stj5Check.csproj -c Release --nologo
           tests\AiGoalPlanner.Stj5Check\bin\Release\net48\AiGoalPlanner.Stj5Check.exe
 
+      - name: Release build holds no developer channel
+        shell: pwsh
+        run: |
+          $asm = [System.Reflection.Assembly]::LoadFrom((Join-Path $PWD 'src/AiGoalPlanner/bin/Release/net48/AiGoalPlanner.dll'))
+          try { $types = $asm.GetTypes() }
+          catch [System.Reflection.ReflectionTypeLoadException] { $types = $_.Exception.Types | Where-Object { $_ -ne $null } }
+          $leaked = @($types | Where-Object { $_.FullName -match 'Dev(Channel|Request|Response|Inbox|Gate|Lookup|RoundTrip)|LookupOutcome' } | ForEach-Object { $_.FullName })
+          if ($leaked.Count -gt 0) { Write-Error "Release DLL contains developer channel types: $($leaked -join ', ')"; exit 1 }
+          Write-Output 'Release DLL holds no developer channel.'
+
       - name: Keep the .bhm
         uses: actions/upload-artifact@v7
         with:
