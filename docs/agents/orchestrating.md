@@ -34,7 +34,7 @@ Stop delegating and ask the maintainer when:
 
 - a finding is P1, or you'd accept a finding the ticket doesn't cover (a scope change)
 - the ticket, an ADR and the code disagree, or a decision isn't written down anywhere
-- a PR reaches its 4th review round
+- a PR reaches its 4th review round. Ask too whether its later rounds are scoped (docs/agents/reviewing.md, "Scoped review"); a scoped request says so and links the findings it checks.
 - an agent is stuck on an approval or permission prompt, or asks for something outside its manual
 - the in-game check needs a comparison with an in-game panel (Hero, Mastery) or a particular map
 - it's time to merge
@@ -44,5 +44,5 @@ Stop delegating and ask the maintainer when:
 - **Links, not text.** Hand work over by linking PRs, comments and commits, so the record lives on GitHub and your context stays small.
 - **One commit per review.** Each review names the commit it reviewed. A new commit gets a new review.
 - **Parallel tickets:** run at most two at once, on tickets whose shared files barely overlap. Merge one first, then tell the other implementing session to update from `main` (merge, not rebase) and request a new review.
-- **No input to the game.** In-game actions go through the developer channel (#32). Computer use is for screenshots only, to check layout. Clicks are only on Blish HUD's own windows, only when the maintainer has allowed them, and never keyboard input.
+- **No mouse or keyboard input.** Agents act in game through the developer channel scripts and see it through `dev-shot.ps1` and the log. The maintainer makes every click, so relay what the in-game check asks for.
 - **Your own changes:** if the process itself needs to change (a manual, `AGENTS.md`), propose it to the maintainer instead of editing it mid-ticket.
