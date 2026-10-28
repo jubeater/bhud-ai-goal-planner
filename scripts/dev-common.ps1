@@ -10,11 +10,9 @@
 $script:DevRoot = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Guild Wars 2\addons\blishhud\aigoalplanner\dev'
 $script:DevInbox = Join-Path $script:DevRoot 'inbox'
 $script:DevOutbox = Join-Path $script:DevRoot 'outbox'
-$script:DevCounter = 0
 
 function New-DevId {
-    $script:DevCounter++
-    return 'ps-{0}-{1}-{2}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $PID, $script:DevCounter
+    return [guid]::NewGuid().ToString()
 }
 
 <#

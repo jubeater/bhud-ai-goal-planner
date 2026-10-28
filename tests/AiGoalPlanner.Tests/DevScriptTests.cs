@@ -24,7 +24,7 @@ namespace jubeater.aigoalplanner.Tests
 
             Assert.Equal(0, firstExit);
             Assert.Equal(0, secondExit);
-            Assert.Matches(@"^ps-\d{8}-\d{6}-\d+-\d+$", first);
+            Assert.Matches(@"^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", first);
             Assert.NotEqual(first, second);
         }
 
@@ -78,7 +78,7 @@ namespace jubeater.aigoalplanner.Tests
             string[] lines = output.Split(new[] { "\n" }, StringSplitOptions.None);
 
             Assert.Equal(2, lines.Length);
-            Assert.Matches(@"^ps-\d{8}-\d{6}-\d+-\d+$", lines[0].Trim());
+            Assert.Matches(@"^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", lines[0].Trim());
             Assert.Equal("True", lines[1].Trim());
         }
 
