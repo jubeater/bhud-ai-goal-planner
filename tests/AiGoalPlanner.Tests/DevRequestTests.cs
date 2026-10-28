@@ -142,6 +142,26 @@ namespace jubeater.aigoalplanner.Tests
         public void Only_a_name_that_cannot_escape_the_outbox_is_an_id(string name, bool valid) {
             Assert.Equal(valid, DevRequest.IsValidId(name));
         }
+
+        [Theory]
+        [InlineData("{ \"id\": \"a1\", \"op\": \"apply\", \"actions\": [2147483648] }")]
+        [InlineData("{ \"id\": \"a1\", \"op\": \"apply\", \"actions\": [-2147483649] }")]
+        [InlineData("{ \"id\": \"a1\", \"op\": \"apply\", \"actions\": [99999999999999999999999] }")]
+        public void An_action_index_outside_Int32_range_is_rejected_without_throwing(string json) {
+            Assert.False(DevRequest.TryParse(json, out DevRequest request, out string error));
+
+            Assert.Null(request);
+            Assert.False(string.IsNullOrEmpty(error));
+        }
+
+        [Fact]
+        public void The_largest_Int32_action_index_still_parses() {
+            Assert.True(DevRequest.TryParse("{ \"id\": \"a1\", \"op\": \"apply\", \"actions\": [2147483647] }",
+                                            out DevRequest request, out string error),
+                        "Should parse: " + error);
+
+            Assert.Equal(new[] { int.MaxValue }, request.Actions);
+        }
     }
 #endif
 }

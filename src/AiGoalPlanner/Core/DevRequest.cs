@@ -210,7 +210,21 @@ namespace jubeater.aigoalplanner.Core
                     return false;
                 }
 
-                picked.Add((int)member);
+                long index;
+
+                try {
+                    index = (long)member;
+                } catch {
+                    error = "bad_actions";
+                    return false;
+                }
+
+                if (index < int.MinValue || index > int.MaxValue) {
+                    error = "bad_actions";
+                    return false;
+                }
+
+                picked.Add((int)index);
             }
 
             if (picked.Count == 0) {

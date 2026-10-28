@@ -281,6 +281,24 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_rejected_file_is_answered_and_the_watcher_carries_on() {
+            var model = new ScriptedChatClient();
+            model.WillReply("An answer.");
+
+            var chat = NewChannelChat(model, PlayerWorld());
+
+            var inbox = new FakeDevInbox();
+            inbox.AddFile("a0.json", "{ \"id\": \"a0\", \"op\": \"apply\", \"actions\": [99999999999999999999999] }");
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"Hello\" }");
+
+            Assert.Equal("a0", await PollAsync(chat, inbox));
+            Assert.Equal(DevErrors.BadRequest, (string)Response(inbox, "a0")["error"]);
+
+            Assert.Equal("a1", await PollAsync(chat, inbox));
+            Assert.True((bool)Response(inbox, "a1")["ok"]);
+        }
+
+        [Fact]
         public async Task A_file_whose_name_is_not_an_id_is_left_alone() {
             var model = new ScriptedChatClient();
 
