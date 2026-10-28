@@ -295,5 +295,32 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains(chat.Messages, m => m.Author == ChatMessageAuthor.Report && m.Text.Contains("install and enable it"));
             Assert.Contains(chat.Messages, m => m.Author == ChatMessageAuthor.Report && m.Text.Contains("Show trails"));
         }
+
+        [Fact]
+        public async Task Existing_module_is_not_sent_to_installer() {
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.dependency", "Dependency", "1.0.0", "A dependency", new[] { "bh.blishhud" })
+                }
+            };
+            world.Modules.Add(new InstalledModuleInfo("bh.dependency", "Old name", "0.9.0", "", enabled: true));
+
+            var plan = new Plan("Install Dependency", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "Dependency", null, null,
+                               "Need dependency", isSideEffect: false, gap: "Missing feature")
+            });
+
+            var applier = new PlanApplier(world);
+            var reviewed = new ReviewedAction(plan.Actions[0], "bh.dependency", "Dependency", null, "Dependency",
+                                              "not installed", "installed", null);
+            var review = new PlanReview(plan, new[] { reviewed });
+
+            AppliedPlan applied = await applier.ApplyAsync(review, new[] { 0 }, CancellationToken.None);
+
+            Assert.Equal(0, world.InstallCalls);
+            ApplyOutcome outcome = Assert.Single(applied.Outcomes);
+            Assert.False(outcome.Succeeded);
+            Assert.Contains("already installed", outcome.Problem);
+        }
     }
 }

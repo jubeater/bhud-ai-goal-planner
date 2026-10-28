@@ -223,9 +223,10 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             string ns = existing?.Namespace ?? @namespace;
             string version = existing?.Version ?? "1.0.0";
             string desc = existing?.Description ?? string.Empty;
-            if (!Modules.Any(m => string.Equals(m.Namespace, ns, StringComparison.OrdinalIgnoreCase))) {
-                Modules.Add(new InstalledModuleInfo(ns, name, version, desc, enabled: false));
+            if (Modules.Any(m => string.Equals(m.Namespace, ns, StringComparison.OrdinalIgnoreCase))) {
+                return Task.FromResult(new ModuleInstallChange(false, false, name, ns, version, name + " is already installed."));
             }
+            Modules.Add(new InstalledModuleInfo(ns, name, version, desc, enabled: false));
             Writes.Add("install " + ns);
             return Task.FromResult(new ModuleInstallChange(true, true, name, ns, version));
         }

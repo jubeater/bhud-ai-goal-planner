@@ -325,11 +325,6 @@ namespace jubeater.aigoalplanner.Core
                     return Reject(action, null, "The action does not say which module to install.");
                 }
 
-                InstalledModuleInfo installed = Resolve(wanted);
-                if (installed != null) {
-                    return Reject(action, installed, installed.Name + " is already installed.");
-                }
-
                 if (_catalogModules == null) {
                     _catalogModules = await _world.GetCatalogAsync(_cancellationToken).ConfigureAwait(false);
                 }
@@ -339,7 +334,16 @@ namespace jubeater.aigoalplanner.Core
                     string.Equals(candidate.Name, wanted, StringComparison.OrdinalIgnoreCase));
 
                 if (catalogModule == null) {
+                    InstalledModuleInfo installedByName = Resolve(wanted);
+                    if (installedByName != null) {
+                        return Reject(action, installedByName, installedByName.Name + " is already installed.");
+                    }
                     return Reject(action, null, "\"" + wanted + "\" is not in the module catalog.");
+                }
+
+                InstalledModuleInfo installed = Resolve(catalogModule.Namespace) ?? Resolve(catalogModule.Name) ?? Resolve(wanted);
+                if (installed != null) {
+                    return Reject(action, installed, installed.Name + " is already installed.");
                 }
 
                 if (!_installs.Add(catalogModule.Namespace)) {

@@ -196,5 +196,23 @@ namespace jubeater.aigoalplanner.Tests
             Assert.True(review.Actions[0].IsAccepted);
             Assert.True(review.Actions[1].IsAccepted);
         }
+
+        [Fact]
+        public async Task Installing_by_catalog_name_must_reject_installed_namespace() {
+            _world.Modules.Add(new InstalledModuleInfo("bh.dependency", "Old name", "0.9.0", "", enabled: true));
+            _world.CatalogModules.Add(new CatalogModuleInfo("bh.dependency", "Dependency", "1.0.0", "A dependency", new[] { "bh.blishhud" }));
+
+            var plan = new Plan("Install Dependency", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "Dependency", null, null,
+                               "Need dependency", isSideEffect: false, gap: "Missing feature")
+            });
+
+            PlanReview review = await PlanValidator.ReviewAsync(plan, _world, CancellationToken.None);
+
+            ReviewedAction action = Assert.Single(review.Actions);
+            Assert.False(action.IsAccepted);
+            Assert.False(action.CanApply);
+            Assert.Contains("is already installed", action.Problem);
+        }
     }
 }

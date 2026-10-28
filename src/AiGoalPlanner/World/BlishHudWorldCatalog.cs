@@ -122,14 +122,26 @@ namespace jubeater.aigoalplanner.World
                     return new ModuleInstallChange(false, false, wanted, wanted, null, "Module not found in the catalog.");
                 }
 
+                string name = target.Name;
+                string ns = target.Namespace;
+                string version = VersionTextOf(target);
+
+                if (GameService.Module?.Modules != null) {
+                    foreach (var module in GameService.Module.Modules) {
+                        if (string.Equals(module.Manifest?.Namespace, ns, StringComparison.OrdinalIgnoreCase)) {
+                            return new ModuleInstallChange(false, false, name, ns, version, name + " is already installed.");
+                        }
+                    }
+                }
+
                 (ModuleManager NewModule, bool Success, string Error) result = await repoHandler.InstallPackage(target, null, null).ConfigureAwait(false);
 
                 if (!result.Success) {
                     _logWarn?.Invoke("Module failed to install: " + (result.Error != null ? "install error" : "unknown"));
-                    return new ModuleInstallChange(false, false, target.Name, target.Namespace, VersionTextOf(target), "Blish HUD could not install " + target.Name + ".");
+                    return new ModuleInstallChange(false, false, name, ns, version, "Blish HUD could not install " + name + ".");
                 }
 
-                return new ModuleInstallChange(true, true, target.Name, target.Namespace, VersionTextOf(target));
+                return new ModuleInstallChange(true, true, name, ns, version);
             } catch (Exception ex) {
                 _logWarn?.Invoke("Module failed to install: " + ex.GetType().Name);
                 return new ModuleInstallChange(false, false, wanted, wanted, null, "Blish HUD could not install " + wanted + ".");

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -185,6 +186,12 @@ namespace jubeater.aigoalplanner.Core
 
         private async Task<ApplyOutcome> InstallModuleAsync(ReviewedAction action, List<UndoStep> undo,
                                                             CancellationToken cancellationToken) {
+            IReadOnlyList<InstalledModuleInfo> installed = await _world.ListInstalledModulesAsync(cancellationToken).ConfigureAwait(false);
+            if (installed != null && installed.Any(m => string.Equals(m.Namespace, action.ModuleNamespace, StringComparison.OrdinalIgnoreCase) ||
+                                                        string.Equals(m.Name, action.ModuleName, StringComparison.OrdinalIgnoreCase))) {
+                return new ApplyOutcome(action, false, action.ModuleName + " is already installed.", changed: false);
+            }
+
             ModuleInstallChange change = await _world.InstallModuleAsync(action.ModuleNamespace, cancellationToken)
                                                      .ConfigureAwait(false);
 
