@@ -42,16 +42,21 @@ namespace jubeater.aigoalplanner.Core
             var outcomes = new List<ApplyOutcome>();
             var undo     = new List<UndoStep>();
 
-            IReadOnlyList<InstalledModuleInfo> initialModules = await _world.ListInstalledModulesAsync(cancellationToken).ConfigureAwait(false);
-            var installedModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (initialModules != null) {
-                foreach (var m in initialModules) {
-                    if (!string.IsNullOrWhiteSpace(m.Namespace)) installedModules.Add(m.Namespace);
-                    if (!string.IsNullOrWhiteSpace(m.Name)) installedModules.Add(m.Name);
+            List<ReviewedAction> chosen = Chosen(review, actionIndexes);
+            HashSet<string> installedModules = null;
+            if (chosen.Any(a => a.Action.Kind == PlanActionKind.Install)) {
+                IReadOnlyList<InstalledModuleInfo> initialModules = await _world.ListInstalledModulesAsync(cancellationToken).ConfigureAwait(false);
+                installedModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (initialModules != null) {
+                    foreach (var m in initialModules) {
+                        if (!string.IsNullOrWhiteSpace(m.Namespace)) installedModules.Add(m.Namespace);
+                        if (!string.IsNullOrWhiteSpace(m.Name)) installedModules.Add(m.Name);
+                    }
                 }
+
             }
 
-            foreach (ReviewedAction action in Chosen(review, actionIndexes)) {
+            foreach (ReviewedAction action in chosen) {
                 try {
                     outcomes.Add(await ApplyOneAsync(action, undo, installedModules, cancellationToken).ConfigureAwait(false));
                 } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {

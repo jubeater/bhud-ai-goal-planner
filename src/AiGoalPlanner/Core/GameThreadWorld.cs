@@ -177,7 +177,7 @@ namespace jubeater.aigoalplanner.Core
                     "Installation completed, but enabling was cancelled.");
             } catch (Exception ex) {
                 return new ModuleInstallChange(true, true, change.ModuleName, change.Namespace, change.Version,
-                    ProblemOr(ex.Message, "Blish HUD could not enable " + change.ModuleName + "."));
+                    "Blish HUD could not enable " + change.ModuleName + " (" + ex.GetType().Name + ").");
             }
         }
 
