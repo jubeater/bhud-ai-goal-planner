@@ -100,27 +100,34 @@ namespace jubeater.aigoalplanner.Core
 
                 string what = string.IsNullOrEmpty(answer.LogDetail) ? "ok" : answer.LogDetail;
 
+                // One sample for both outputs: the response and the log line report the same time.
+                long elapsedMs = clock.ElapsedMilliseconds;
+
 #if DEBUG
-                Completed?.Invoke(this, new LookupOutcome(_name, clock.ElapsedMilliseconds, what, answer.Text.Length));
+                Completed?.Invoke(this, new LookupOutcome(_name, elapsedMs, what, answer.Text.Length));
 #endif
 
-                Log(clock, DescribeForLog(answer));
+                Log(elapsedMs, DescribeForLog(answer));
 
                 return answer.Text;
             } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
-                Log(clock, "cancelled");
+                long elapsedMs = clock.ElapsedMilliseconds;
+
+                Log(elapsedMs, "cancelled");
 
 #if DEBUG
-                Completed?.Invoke(this, new LookupOutcome(_name, clock.ElapsedMilliseconds, "cancelled", 0));
+                Completed?.Invoke(this, new LookupOutcome(_name, elapsedMs, "cancelled", 0));
 #endif
 
                 throw;
             } catch (Exception exception) {
                 // The type, not the message: a message can carry a Setting's value back out.
-                Log(clock, "failed: " + exception.GetType().Name);
+                long elapsedMs = clock.ElapsedMilliseconds;
+
+                Log(elapsedMs, "failed: " + exception.GetType().Name);
 
 #if DEBUG
-                Completed?.Invoke(this, new LookupOutcome(_name, clock.ElapsedMilliseconds, "failed: " + exception.GetType().Name, 0));
+                Completed?.Invoke(this, new LookupOutcome(_name, elapsedMs, "failed: " + exception.GetType().Name, 0));
 #endif
 
                 throw;
@@ -138,10 +145,10 @@ namespace jubeater.aigoalplanner.Core
             return what + ", " + answer.Text.Length + " chars";
         }
 
-        private void Log(Stopwatch clock, string what) {
+        private void Log(long elapsedMs, string what) {
             if (_logDebug == null) return;
 
-            _logDebug("Lookup " + _name + ": " + clock.ElapsedMilliseconds + " ms, " + what);
+            _logDebug("Lookup " + _name + ": " + elapsedMs + " ms, " + what);
         }
     }
 }

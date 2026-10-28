@@ -476,6 +476,79 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task Round_trip_durations_in_the_response_equal_the_logged_ones() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool("list_installed_modules", "call_1");
+            model.WillReply("You have Pathing installed.");
+            model.WillFail(ProviderFailure.Unexpected);
+
+            var world = PlayerWorld();
+            var log   = new List<string>();
+            var chat  = NewChannelChat(model, world, log);
+
+            var inbox = new FakeDevInbox();
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"What modules do I have?\" }");
+            inbox.AddFile("a2.json", "{ \"id\": \"a2\", \"op\": \"send\", \"text\": \"Hello again\" }");
+
+            var channel = new DevChannel(chat, isOpen: () => true, logDebug: log.Add, inbox: inbox);
+
+            Assert.Equal("a1", await channel.PollAsync());
+
+            foreach (JObject trip in Response(inbox, "a1")["roundTrips"].OfType<JObject>()) {
+                Assert.Contains(": " + trip["durationMs"] + " ms, finish_reason=" + trip["finishReason"]
+                                + ", tool_calls=" + trip["toolCalls"], string.Join("\n", log));
+            }
+
+            log.Clear();
+
+            Assert.Equal("a2", await channel.PollAsync());
+
+            JObject failed = Assert.Single(Response(inbox, "a2")["roundTrips"].OfType<JObject>());
+
+            Assert.Contains("Provider round trip 1 failed after " + failed["durationMs"] + " ms: Unexpected",
+                            string.Join("\n", log));
+        }
+
+        [Fact]
+        public async Task Lookup_durations_in_the_response_equal_the_logged_ones() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool("get_module_settings", "call_1",
+                                new Dictionary<string, object> { ["namespace"] = "bh.mounts" });
+            model.WillReply("Mounts shows markers.");
+
+            var world = PlayerWorld();
+            var log   = new List<string>();
+
+            var plans = new Plans(world, () => false);
+            ToolRegistry tools = Lookups.For(world, log.Add);
+
+            plans.AddTo(tools);
+
+            // Slow the Completed dispatch: the log line is written after every subscriber returns,
+            // so sampling the clock twice would separate the two durations by at least this delay.
+            Assert.True(tools.TryGet("get_module_settings", out RegisteredTool registration));
+
+            ((LookupFunction)registration.Function).Completed += (sender, outcome) => Thread.Sleep(50);
+
+            var chat = new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"),
+                                tools, log.Add, plans);
+
+            var inbox = new FakeDevInbox();
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"What is in the Mounts settings?\" }");
+
+            var channel = new DevChannel(chat, isOpen: () => true, logDebug: log.Add, inbox: inbox);
+
+            Assert.Equal("a1", await channel.PollAsync());
+
+            JObject json = Response(inbox, "a1");
+            JObject lookup = Assert.Single(json["lookups"].OfType<JObject>());
+
+            Assert.Equal("get_module_settings", (string)lookup["name"]);
+            Assert.Contains("Lookup get_module_settings: " + lookup["durationMs"] + " ms",
+                            string.Join("\n", log));
+        }
+
+        [Fact]
         public async Task New_chat_on_an_unavailable_Chat_reports_its_Notice() {
             var chat = Chat.Unavailable("Provider could not load.");
 

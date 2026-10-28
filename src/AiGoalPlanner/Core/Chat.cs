@@ -1085,15 +1085,18 @@ namespace jubeater.aigoalplanner.Core
         /// Player's key was used to buy, and the log is not the place for it.
         /// </summary>
         private void LogRound(int round, Stopwatch clock, ChatResponse response, int toolCalls) {
+            // One sample for both outputs: the response and the log line report the same time.
+            long elapsedMs = clock.ElapsedMilliseconds;
+
 #if DEBUG
             lock (_messagesLock) {
-                _roundTrips.Add(new DevRoundTrip(clock.ElapsedMilliseconds, FinishReasonText(response.FinishReason), toolCalls));
+                _roundTrips.Add(new DevRoundTrip(elapsedMs, FinishReasonText(response.FinishReason), toolCalls));
             }
 #endif
 
             if (_logDebug == null) return;
 
-            _logDebug("Provider round trip " + round + ": " + clock.ElapsedMilliseconds + " ms, finish_reason="
+            _logDebug("Provider round trip " + round + ": " + elapsedMs + " ms, finish_reason="
                     + FinishReasonText(response.FinishReason) + ", tool_calls=" + toolCalls);
         }
 
@@ -1125,15 +1128,18 @@ namespace jubeater.aigoalplanner.Core
         /// echo the request, and with it the key.
         /// </summary>
         private void LogRoundFailed(int round, Stopwatch clock, string failure) {
+            // One sample for both outputs, like a round trip that came back.
+            long elapsedMs = clock.ElapsedMilliseconds;
+
 #if DEBUG
             lock (_messagesLock) {
-                _roundTrips.Add(new DevRoundTrip(clock.ElapsedMilliseconds, failure, 0));
+                _roundTrips.Add(new DevRoundTrip(elapsedMs, failure, 0));
             }
 #endif
 
             if (_logDebug == null) return;
 
-            _logDebug("Provider round trip " + round + " failed after " + clock.ElapsedMilliseconds + " ms: " + failure);
+            _logDebug("Provider round trip " + round + " failed after " + elapsedMs + " ms: " + failure);
         }
 
         private static string Describe(ProviderFailure failure) {
