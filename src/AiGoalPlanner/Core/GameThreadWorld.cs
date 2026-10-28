@@ -72,35 +72,76 @@ namespace jubeater.aigoalplanner.Core
 
         public async Task<MarkerPackChange> DownloadMarkerPackAsync(string pack, CancellationToken cancellationToken) {
             MarkerPackChange change = await _world.DownloadMarkerPackAsync(pack, cancellationToken).ConfigureAwait(false);
-            if (!change.Applied || !change.Changed) {
-                return change;
+            if (!change.Applied || !change.Changed) return change;
+
+            string restartProblem = await RestartPathingIfEnabledAsync().ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(restartProblem)) {
+                return new MarkerPackChange(change.Applied, change.Changed, change.PackName, change.FileName, change.SizeMb, restartProblem);
             }
 
-            await RestartPathingIfEnabledAsync(cancellationToken).ConfigureAwait(false);
             return change;
         }
 
         public async Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
             MarkerPackChange change = await _world.DeleteMarkerPackAsync(fileName, cancellationToken).ConfigureAwait(false);
-            if (!change.Applied || !change.Changed) {
-                return change;
+            if (!change.Applied || !change.Changed) return change;
+
+            string restartProblem = await RestartPathingIfEnabledAsync().ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(restartProblem)) {
+                return new MarkerPackChange(change.Applied, change.Changed, change.PackName, change.FileName, change.SizeMb, restartProblem);
             }
 
-            await RestartPathingIfEnabledAsync(cancellationToken).ConfigureAwait(false);
             return change;
         }
 
-        private async Task RestartPathingIfEnabledAsync(CancellationToken cancellationToken) {
-            IReadOnlyList<InstalledModuleInfo> modules = await ListInstalledModulesAsync(cancellationToken).ConfigureAwait(false);
+        private async Task<string> RestartPathingIfEnabledAsync() {
+            IReadOnlyList<InstalledModuleInfo> modules;
+            try {
+                modules = await ListInstalledModulesAsync(CancellationToken.None).ConfigureAwait(false);
+            } catch (Exception ex) {
+                return "Failed to check Pathing module state (" + ex.GetType().Name + ").";
+            }
+
             InstalledModuleInfo pathing = modules?.FirstOrDefault(m =>
                 string.Equals(m.Namespace, "bh.community.pathing", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(m.Namespace, "bh.pathing", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(m.Name, "Pathing", StringComparison.OrdinalIgnoreCase));
 
-            if (pathing != null && pathing.Enabled && !string.IsNullOrEmpty(pathing.Namespace)) {
-                await SetModuleEnabledAsync(pathing.Namespace, false, cancellationToken).ConfigureAwait(false);
-                await SetModuleEnabledAsync(pathing.Namespace, true, cancellationToken).ConfigureAwait(false);
+            if (pathing == null || !pathing.Enabled || string.IsNullOrEmpty(pathing.Namespace)) {
+                return null;
             }
+
+            string problem = null;
+            bool wasDisabled = false;
+            try {
+                ModuleChange disableChange = await SetModuleEnabledAsync(pathing.Namespace, false, CancellationToken.None).ConfigureAwait(false);
+                if (!disableChange.Applied) {
+                    problem = ProblemOr(disableChange.Problem, "Pathing could not be disabled to reload marker packs.");
+                } else {
+                    wasDisabled = true;
+                }
+            } catch (Exception ex) {
+                problem = "Failed to disable Pathing (" + ex.GetType().Name + ").";
+            } finally {
+                if (wasDisabled) {
+                    try {
+                        ModuleChange enableChange = await SetModuleEnabledAsync(pathing.Namespace, true, CancellationToken.None).ConfigureAwait(false);
+                        if (!enableChange.Applied) {
+                            string enableProblem = ProblemOr(enableChange.Problem, "Pathing could not be re-enabled after installing the marker pack.");
+                            problem = string.IsNullOrEmpty(problem) ? enableProblem : problem + " " + enableProblem;
+                        }
+                    } catch (Exception ex) {
+                        string enableProblem = "Failed to re-enable Pathing (" + ex.GetType().Name + ").";
+                        problem = string.IsNullOrEmpty(problem) ? enableProblem : problem + " " + enableProblem;
+                    }
+                }
+            }
+
+            return problem;
+        }
+
+        private static string ProblemOr(string problem, string fallback) {
+            return string.IsNullOrEmpty(problem) ? fallback : problem;
         }
 
         /// <summary>

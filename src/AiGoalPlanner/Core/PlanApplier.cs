@@ -50,7 +50,7 @@ namespace jubeater.aigoalplanner.Core
                 }
             }
 
-            return new AppliedPlan(outcomes, undo);
+            return new AppliedPlan(outcomes, undo, cancelled: cancellationToken.IsCancellationRequested);
         }
 
         /// <summary>
@@ -173,6 +173,10 @@ namespace jubeater.aigoalplanner.Core
 
             undo.Add(new UndoStep(PlanActionKind.DownloadPack, null, null, null, change.PackName, change.FileName));
 
+            if (!string.IsNullOrEmpty(change.Problem)) {
+                return new ApplyOutcome(action, false, change.Problem);
+            }
+
             return new ApplyOutcome(action, true);
         }
 
@@ -181,8 +185,9 @@ namespace jubeater.aigoalplanner.Core
                 MarkerPackChange pack = await _world.DeleteMarkerPackAsync(step.Value, cancellationToken)
                                                     .ConfigureAwait(false);
 
-                return new UndoOutcome(step, pack.Applied,
-                                       pack.Applied ? null : ProblemOr(pack.Problem, "the marker pack could not be deleted"));
+                bool succeeded = pack.Applied && string.IsNullOrEmpty(pack.Problem);
+                return new UndoOutcome(step, succeeded,
+                                       succeeded ? null : ProblemOr(pack.Problem, "the marker pack could not be deleted"));
             }
 
             if (step.Kind == PlanActionKind.SetSetting) {
