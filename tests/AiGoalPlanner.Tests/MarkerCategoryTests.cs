@@ -461,5 +461,116 @@ namespace jubeater.aigoalplanner.Tests
             var foundNamespaces = result.Categories.Select(c => c.Namespace).OrderBy(x => x).ToList();
             Assert.Equal(new[] { "root.alpha", "root.bravo" }, foundNamespaces);
         }
+
+        [Fact]
+        public void Review_changed_unpacked_xml_invalidates_cache_even_when_another_xml_is_newer() {
+            string unpackedDir = Path.Combine(_markersDir, "unpacked_pack");
+            Directory.CreateDirectory(unpackedDir);
+
+            string catFile = Path.Combine(unpackedDir, "_markerCategories.xml");
+            string mapFile = Path.Combine(unpackedDir, "map1210.xml");
+
+            string xmlAlpha = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<overlaydata>
+  <markercategory name=""alpha"" displayname=""Alpha"" />
+</overlaydata>";
+
+            string mapXml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<overlaydata>
+  <pois>
+    <poi type=""alpha"" mapid=""1210"" />
+  </pois>
+</overlaydata>";
+
+            File.WriteAllText(catFile, xmlAlpha, Encoding.UTF8);
+            File.WriteAllText(mapFile, mapXml, Encoding.UTF8);
+
+            DateTime time10 = new DateTime(2026, 10, 27, 10, 0, 0, DateTimeKind.Utc);
+            DateTime time11 = new DateTime(2026, 10, 27, 11, 0, 0, DateTimeKind.Utc);
+            DateTime time12 = new DateTime(2026, 10, 27, 12, 0, 0, DateTimeKind.Utc);
+
+            Directory.SetLastWriteTimeUtc(unpackedDir, time10);
+            File.SetLastWriteTimeUtc(catFile, time10);
+            File.SetLastWriteTimeUtc(mapFile, time12);
+
+            // 1. Initial parse and cache
+            var service1 = new MarkerCategoryService(_markersDir, _cacheDir);
+            MarkerCategoriesResult result1 = service1.FindCategories("alpha", 1210);
+            Assert.Single(result1.Categories);
+            Assert.Equal("alpha", result1.Categories[0].Namespace);
+
+            // 2. Equal-length update to _markerCategories.xml ("alpha"/"Alpha" -> "bravo"/"Bravo"), timestamp advances to 11:00 UTC
+            string xmlBravo = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<overlaydata>
+  <markercategory name=""bravo"" displayname=""Bravo"" />
+</overlaydata>";
+            File.WriteAllText(catFile, xmlBravo, Encoding.UTF8);
+            File.SetLastWriteTimeUtc(catFile, time11);
+
+            // 3. Fresh service instance using the disk cache
+            var service2 = new MarkerCategoryService(_markersDir, _cacheDir);
+            MarkerCategoriesResult result2 = service2.FindCategories("bravo", 1210);
+
+            Assert.Single(result2.Categories);
+            Assert.Equal("bravo", result2.Categories[0].Namespace);
+        }
+
+        [Fact]
+        public void Review_unreadable_saved_off_choice_must_not_be_reported_as_shown() {
+            string packZip = Path.Combine(_markersDir, "hp_pack.zip");
+            using (var zip = ZipFile.Open(packZip, ZipArchiveMode.Create)) {
+                var entry = zip.CreateEntry("_markerCategories.xml");
+                using (var w = new StreamWriter(entry.Open(), Encoding.UTF8)) {
+                    w.Write(@"<?xml version=""1.0"" encoding=""utf-8""?>
+<overlaydata>
+  <markercategory name=""hp"" displayname=""Hero Points"" defaulttoggle=""1"" />
+</overlaydata>");
+                }
+            }
+
+            string prefDir = Path.Combine(_markersDir, "data", "states");
+            Directory.CreateDirectory(prefDir);
+            string prefFile = Path.Combine(prefDir, "category_preferences.txt");
+            File.WriteAllText(prefFile, "-hp\n", Encoding.UTF8);
+
+            var service = new MarkerCategoryService(_markersDir, _cacheDir);
+            MarkerCategoriesResult result1 = service.FindCategories("Hero Points", 1210);
+            Assert.Single(result1.Categories);
+            Assert.False(result1.Categories[0].Shown);
+
+            // Hold the unchanged preferences file open with FileShare.None and repeat the lookup
+            using (var lockStream = new FileStream(prefFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
+                MarkerCategoriesResult result2 = service.FindCategories("Hero Points", 1210);
+                Assert.Single(result2.Categories);
+                Assert.False(result2.Categories[0].Shown);
+            }
+        }
+
+        [Fact]
+        public void Review_unreadable_preferences_without_cache_signals_unavailable_visibility() {
+            string packZip = Path.Combine(_markersDir, "hp_pack.zip");
+            using (var zip = ZipFile.Open(packZip, ZipArchiveMode.Create)) {
+                var entry = zip.CreateEntry("_markerCategories.xml");
+                using (var w = new StreamWriter(entry.Open(), Encoding.UTF8)) {
+                    w.Write(@"<?xml version=""1.0"" encoding=""utf-8""?>
+<overlaydata>
+  <markercategory name=""hp"" displayname=""Hero Points"" defaulttoggle=""1"" />
+</overlaydata>");
+                }
+            }
+
+            string prefDir = Path.Combine(_markersDir, "data", "states");
+            Directory.CreateDirectory(prefDir);
+            string prefFile = Path.Combine(prefDir, "category_preferences.txt");
+            File.WriteAllText(prefFile, "-hp\n", Encoding.UTF8);
+
+            using (var lockStream = new FileStream(prefFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
+                var service = new MarkerCategoryService(_markersDir, _cacheDir);
+                MarkerCategoriesResult result = service.FindCategories("Hero Points", 1210);
+                Assert.Single(result.Categories);
+                Assert.Null(result.Categories[0].Shown);
+                Assert.Equal("Pathing preferences could not be read; category visibility is unavailable.", result.Message);
+            }
+        }
     }
 }

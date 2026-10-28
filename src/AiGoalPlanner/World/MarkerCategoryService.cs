@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,6 +36,11 @@ namespace jubeater.aigoalplanner.World
         private readonly Dictionary<string, ParsedPack> _inMemoryPacks =
             new Dictionary<string, ParsedPack>(StringComparer.OrdinalIgnoreCase);
 
+        // Cached preferences
+        private Dictionary<string, bool> _cachedPreferences;
+        private long                     _cachedPrefsLength = -1;
+        private long                     _cachedPrefsTicks  = -1;
+
         public MarkerCategoryService(string markersDirectory, string cacheDirectory, Action<string> logWarn = null) {
             _markersDirectory = markersDirectory;
             _cacheDirectory   = string.IsNullOrWhiteSpace(cacheDirectory) ? null : Path.Combine(cacheDirectory, "marker_packs");
@@ -58,7 +64,7 @@ namespace jubeater.aigoalplanner.World
             }
 
             // 2. Read Player's preferences from markers/data/states/category_preferences.txt
-            Dictionary<string, bool> preferences = LoadPreferences(_markersDirectory);
+            PreferencesResult prefsResult = LoadPreferences(_markersDirectory);
 
             // 3. Parse or load cached packs
             var parsedPacks = new List<ParsedPack>();
@@ -100,7 +106,7 @@ namespace jubeater.aigoalplanner.World
                         pack.GetCountsForMap(mapId, cat.Namespace, out int markerCount, out int trailCount);
 
                         // Determine shown state
-                        bool isShown = DetermineShownState(cat, pack, preferences);
+                        bool? isShown = DetermineShownState(cat, pack, prefsResult);
 
                         matches.Add(new MarkerCategoryMatch(
                             pack.PackName,
@@ -124,6 +130,9 @@ namespace jubeater.aigoalplanner.World
             bool cut = totalMatches > MaxResults;
             List<MarkerCategoryMatch> resultList = sorted.Take(MaxResults).ToList();
             string message = cut ? "Showing top " + MaxResults + " of " + totalMatches + " matches." : null;
+            if (prefsResult.IsUnavailable && message == null) {
+                message = "Pathing preferences could not be read; category visibility is unavailable.";
+            }
 
             return new MarkerCategoriesResult(
                 MarkerCategoriesStatus.Ok,
@@ -159,7 +168,13 @@ namespace jubeater.aigoalplanner.World
             return true;
         }
 
-        private static bool DetermineShownState(ParsedCategory cat, ParsedPack pack, Dictionary<string, bool> preferences) {
+        private static bool? DetermineShownState(ParsedCategory cat, ParsedPack pack, PreferencesResult prefsResult) {
+            if (prefsResult == null || prefsResult.IsUnavailable) {
+                return null;
+            }
+
+            Dictionary<string, bool> preferences = prefsResult.Preferences;
+
             // Check ancestors from root down to category itself
             for (int i = 0; i < cat.Ancestors.Count; i++) {
                 string ancestorNs = cat.Ancestors[i];
@@ -190,7 +205,8 @@ namespace jubeater.aigoalplanner.World
                 if (string.Equals(ext, ".taco", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(ext, ".zip", StringComparison.OrdinalIgnoreCase)) {
                     var fi = new FileInfo(file);
-                    list.Add(new PackSource(file, fi.Name, isDirectory: false, fi.Length, fi.LastWriteTimeUtc.Ticks));
+                    string fingerprint = fi.Length + ":" + fi.LastWriteTimeUtc.Ticks;
+                    list.Add(new PackSource(file, fi.Name, isDirectory: false, fi.Length, fi.LastWriteTimeUtc.Ticks, fingerprint));
                 }
             }
 
@@ -205,55 +221,119 @@ namespace jubeater.aigoalplanner.World
                 // Check if directory contains any .xml files
                 string[] xmlFiles = Directory.GetFiles(dir, "*.xml", SearchOption.AllDirectories);
                 if (xmlFiles.Length > 0) {
+                    Array.Sort(xmlFiles, StringComparer.OrdinalIgnoreCase);
+                    var sb = new System.Text.StringBuilder();
                     long totalLength = 0;
                     long maxTicks = di.LastWriteTimeUtc.Ticks;
+                    int dirPrefixLen = dir.EndsWith(Path.DirectorySeparatorChar.ToString()) || dir.EndsWith(Path.AltDirectorySeparatorChar.ToString())
+                        ? dir.Length
+                        : dir.Length + 1;
+
                     foreach (string xml in xmlFiles) {
                         var fi = new FileInfo(xml);
                         totalLength += fi.Length;
                         if (fi.LastWriteTimeUtc.Ticks > maxTicks) {
                             maxTicks = fi.LastWriteTimeUtc.Ticks;
                         }
+                        string relPath = xml.Substring(dirPrefixLen).Replace('\\', '/');
+                        sb.Append(relPath).Append(':').Append(fi.Length).Append(':').Append(fi.LastWriteTimeUtc.Ticks).Append(';');
                     }
-                    list.Add(new PackSource(dir, di.Name, isDirectory: true, totalLength, maxTicks));
+                    string fingerprint = ComputeSha256(sb.ToString());
+                    list.Add(new PackSource(dir, di.Name, isDirectory: true, totalLength, maxTicks, fingerprint));
                 }
             }
 
             return list;
         }
 
-        private static Dictionary<string, bool> LoadPreferences(string markersDir) {
-            var prefs = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        private PreferencesResult LoadPreferences(string markersDir) {
             string prefFile = Path.Combine(markersDir, "data", "states", "category_preferences.txt");
 
             if (!File.Exists(prefFile)) {
-                return prefs;
+                lock (_lock) {
+                    _cachedPreferences = null;
+                    _cachedPrefsLength = -1;
+                    _cachedPrefsTicks  = -1;
+                }
+                return new PreferencesResult(null, isUnavailable: false);
             }
 
+            FileInfo fi;
             try {
-                string[] lines = File.ReadAllLines(prefFile);
-                foreach (string rawLine in lines) {
-                    string line = rawLine?.Trim();
-                    if (string.IsNullOrEmpty(line)) continue;
-
-                    if (line.StartsWith("+")) {
-                        string ns = line.Substring(1).Trim();
-                        if (ns.Length > 0) prefs[ns] = true;
-                    } else if (line.StartsWith("-")) {
-                        string ns = line.Substring(1).Trim();
-                        if (ns.Length > 0) prefs[ns] = false;
+                fi = new FileInfo(prefFile);
+            } catch {
+                lock (_lock) {
+                    if (_cachedPreferences != null) {
+                        return new PreferencesResult(_cachedPreferences, isUnavailable: false);
                     }
                 }
-            } catch {
-                // If preferences file cannot be read, ignore and use pack defaults.
+                return new PreferencesResult(null, isUnavailable: true);
             }
 
-            return prefs;
+            long currentLength = fi.Length;
+            long currentTicks  = fi.LastWriteTimeUtc.Ticks;
+
+            lock (_lock) {
+                if (_cachedPreferences != null &&
+                    _cachedPrefsLength == currentLength &&
+                    _cachedPrefsTicks == currentTicks) {
+                    return new PreferencesResult(_cachedPreferences, isUnavailable: false);
+                }
+            }
+
+            Exception lastEx = null;
+            for (int attempt = 0; attempt < 3; attempt++) {
+                try {
+                    var prefs = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+                    using (var fs = new FileStream(prefFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var reader = new StreamReader(fs, Encoding.UTF8)) {
+                        string rawLine;
+                        while ((rawLine = reader.ReadLine()) != null) {
+                            string line = rawLine.Trim();
+                            if (string.IsNullOrEmpty(line)) continue;
+
+                            if (line.StartsWith("+")) {
+                                string ns = line.Substring(1).Trim();
+                                if (ns.Length > 0) prefs[ns] = true;
+                            } else if (line.StartsWith("-")) {
+                                string ns = line.Substring(1).Trim();
+                                if (ns.Length > 0) prefs[ns] = false;
+                            }
+                        }
+                    }
+
+                    lock (_lock) {
+                        _cachedPreferences = prefs;
+                        _cachedPrefsLength = currentLength;
+                        _cachedPrefsTicks  = currentTicks;
+                    }
+
+                    return new PreferencesResult(prefs, isUnavailable: false);
+                } catch (Exception ex) {
+                    lastEx = ex;
+                    if (attempt < 2) {
+                        Thread.Sleep(20);
+                    }
+                }
+            }
+
+            lock (_lock) {
+                if (_cachedPreferences != null &&
+                    _cachedPrefsLength == currentLength &&
+                    _cachedPrefsTicks == currentTicks) {
+                    return new PreferencesResult(_cachedPreferences, isUnavailable: false);
+                }
+            }
+
+            _logWarn?.Invoke("Preferences file could not be read: " + lastEx?.GetType().Name);
+            return new PreferencesResult(null, isUnavailable: true);
         }
 
         private ParsedPack LoadOrParsePack(PackSource source) {
             lock (_lock) {
                 // Check memory cache
                 if (_inMemoryPacks.TryGetValue(source.Path, out ParsedPack cachedMem) &&
+                    string.Equals(cachedMem.Fingerprint, source.Fingerprint, StringComparison.Ordinal) &&
                     cachedMem.FileSize == source.Length &&
                     cachedMem.LastModifiedUtcTicks == source.LastModifiedTicks) {
                     return cachedMem;
@@ -268,6 +348,7 @@ namespace jubeater.aigoalplanner.World
                     CachedPackData cachedData = JsonConvert.DeserializeObject<CachedPackData>(json);
                     if (cachedData != null &&
                         string.Equals(cachedData.Identifier, source.Identifier, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(cachedData.Fingerprint, source.Fingerprint, StringComparison.Ordinal) &&
                         cachedData.FileSize == source.Length &&
                         cachedData.LastModifiedUtcTicks == source.LastModifiedTicks) {
                         ParsedPack packFromCache = BuildParsedPackFromCache(source, cachedData);
@@ -309,11 +390,15 @@ namespace jubeater.aigoalplanner.World
             return Path.Combine(_cacheDirectory, safeName + "_" + hash + ".json");
         }
 
-        private static string ComputeHash(string input) {
+        private static string ComputeSha256(string input) {
             using (var sha = System.Security.Cryptography.SHA256.Create()) {
                 byte[] bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(input ?? string.Empty));
-                return BitConverter.ToString(bytes).Replace("-", string.Empty).Substring(0, 16).ToLowerInvariant();
+                return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
             }
+        }
+
+        private static string ComputeHash(string input) {
+            return ComputeSha256(input).Substring(0, 16);
         }
 
         private static void SaveCache(string cacheFilePath, PackSource source, ParsedPack pack) {
@@ -327,6 +412,7 @@ namespace jubeater.aigoalplanner.World
                 PackName             = pack.PackName,
                 FileSize             = source.Length,
                 LastModifiedUtcTicks = source.LastModifiedTicks,
+                Fingerprint          = source.Fingerprint,
                 Categories           = pack.Categories.Select(c => new CachedCategoryData {
                     Namespace     = c.Namespace,
                     DisplayPath   = c.DisplayPath,
@@ -355,6 +441,7 @@ namespace jubeater.aigoalplanner.World
                 data.PackName ?? Path.GetFileNameWithoutExtension(source.Identifier),
                 source.Length,
                 source.LastModifiedTicks,
+                source.Fingerprint,
                 categories,
                 lookup,
                 data.MapCounts ?? new Dictionary<int, Dictionary<string, int[]>>());
@@ -392,7 +479,7 @@ namespace jubeater.aigoalplanner.World
                 }
 
                 return new ParsedPack(source.Identifier, discoveredPackName, source.Length, source.LastModifiedTicks,
-                                      categories, lookup, mapCounts);
+                                      source.Fingerprint, categories, lookup, mapCounts);
             }
         }
 
@@ -422,7 +509,7 @@ namespace jubeater.aigoalplanner.World
             }
 
             return new ParsedPack(source.Identifier, discoveredPackName, source.Length, source.LastModifiedTicks,
-                                  categories, lookup, mapCounts);
+                                  source.Fingerprint, categories, lookup, mapCounts);
         }
 
         private static int ExtractMapIdFromFileName(string path) {
@@ -563,14 +650,26 @@ namespace jubeater.aigoalplanner.World
             }
         }
 
+        private sealed class PreferencesResult
+        {
+            public PreferencesResult(Dictionary<string, bool> preferences, bool isUnavailable) {
+                Preferences   = preferences;
+                IsUnavailable = isUnavailable;
+            }
+
+            public Dictionary<string, bool> Preferences   { get; }
+            public bool                     IsUnavailable { get; }
+        }
+
         private sealed class PackSource
         {
-            public PackSource(string path, string identifier, bool isDirectory, long length, long lastModifiedTicks) {
+            public PackSource(string path, string identifier, bool isDirectory, long length, long lastModifiedTicks, string fingerprint) {
                 Path              = path;
                 Identifier        = identifier;
                 IsDirectory       = isDirectory;
                 Length            = length;
                 LastModifiedTicks = lastModifiedTicks;
+                Fingerprint       = fingerprint;
             }
 
             public string Path              { get; }
@@ -578,6 +677,7 @@ namespace jubeater.aigoalplanner.World
             public bool   IsDirectory       { get; }
             public long   Length            { get; }
             public long   LastModifiedTicks { get; }
+            public string Fingerprint       { get; }
         }
 
         private sealed class ParsedCategory
@@ -598,23 +698,26 @@ namespace jubeater.aigoalplanner.World
         private sealed class ParsedPack
         {
             public ParsedPack(string identifier, string packName, long fileSize, long lastModifiedUtcTicks,
+                              string fingerprint,
                               List<ParsedCategory> categories, Dictionary<string, ParsedCategory> categoryLookup,
                               Dictionary<int, Dictionary<string, int[]>> mapCounts) {
                 Identifier           = identifier;
                 PackName             = packName;
                 FileSize             = fileSize;
                 LastModifiedUtcTicks = lastModifiedUtcTicks;
+                Fingerprint          = fingerprint;
                 Categories           = categories;
                 CategoryLookup       = categoryLookup;
                 MapCounts            = mapCounts;
             }
 
-            public string                                    Identifier           { get; }
-            public string                                    PackName             { get; }
-            public long                                      FileSize             { get; }
-            public long                                      LastModifiedUtcTicks { get; }
-            public List<ParsedCategory>                      Categories           { get; }
-            public Dictionary<string, ParsedCategory>        CategoryLookup       { get; }
+            public string                                     Identifier           { get; }
+            public string                                     PackName             { get; }
+            public long                                       FileSize             { get; }
+            public long                                       LastModifiedUtcTicks { get; }
+            public string                                     Fingerprint          { get; }
+            public List<ParsedCategory>                       Categories           { get; }
+            public Dictionary<string, ParsedCategory>         CategoryLookup       { get; }
             public Dictionary<int, Dictionary<string, int[]>> MapCounts            { get; }
 
             public void GetCountsForMap(int mapId, string categoryNs, out int markerCount, out int trailCount) {
@@ -639,11 +742,12 @@ namespace jubeater.aigoalplanner.World
 
         private sealed class CachedPackData
         {
-            public string                                    Identifier           { get; set; }
-            public string                                    PackName             { get; set; }
-            public long                                      FileSize             { get; set; }
-            public long                                      LastModifiedUtcTicks { get; set; }
-            public List<CachedCategoryData>                  Categories           { get; set; }
+            public string                                     Identifier           { get; set; }
+            public string                                     PackName             { get; set; }
+            public long                                       FileSize             { get; set; }
+            public long                                       LastModifiedUtcTicks { get; set; }
+            public string                                     Fingerprint          { get; set; }
+            public List<CachedCategoryData>                   Categories           { get; set; }
             public Dictionary<int, Dictionary<string, int[]>> MapCounts            { get; set; }
         }
 

@@ -23,7 +23,7 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     public sealed class MarkerCategoryMatch
     {
-        public MarkerCategoryMatch(string packName, string displayPath, string @namespace, bool shown,
+        public MarkerCategoryMatch(string packName, string displayPath, string @namespace, bool? shown,
                                    int markerCount, int trailCount) {
             PackName    = packName ?? string.Empty;
             DisplayPath = displayPath ?? string.Empty;
@@ -42,8 +42,8 @@ namespace jubeater.aigoalplanner.Core
         /// <summary>The full category namespace, e.g. "tw_guides.tw_mc_pof.tw_mc_pof_trails_hp".</summary>
         public string Namespace { get; }
 
-        /// <summary>Whether this category is currently shown in Pathing.</summary>
-        public bool Shown { get; }
+        /// <summary>Whether this category is currently shown in Pathing, or null if preferences are unavailable.</summary>
+        public bool? Shown { get; }
 
         /// <summary>How many POIs (markers) exist under this category on the queried map.</summary>
         public int MarkerCount { get; }
