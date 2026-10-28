@@ -67,6 +67,7 @@ namespace jubeater.aigoalplanner.Core
         public string Summary {
             get {
                 switch (Kind) {
+                    case PlanActionKind.Install:       return ModuleName + ": disable it";
                     case PlanActionKind.EnableModule:  return ModuleName + ": enable it";
                     case PlanActionKind.DisableModule: return ModuleName + ": disable it";
                     case PlanActionKind.DownloadPack:

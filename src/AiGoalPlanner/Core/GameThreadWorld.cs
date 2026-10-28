@@ -151,6 +151,23 @@ namespace jubeater.aigoalplanner.Core
         /// that awaited something would resume wherever that await completed, off the game thread,
         /// which is exactly what ADR-0009 is here to prevent.
         /// </summary>
+        public Task<IReadOnlyList<CatalogModuleInfo>> GetCatalogAsync(CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.GetCatalogAsync(cancellationToken), cancellationToken);
+        }
+
+        public async Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            ModuleInstallChange change = await ReadAsync(() => _world.InstallModuleAsync(@namespace, cancellationToken), cancellationToken).ConfigureAwait(false);
+            if (!change.Applied || !change.Changed) return change;
+
+            ModuleChange enableChange = await SetModuleEnabledAsync(change.Namespace, true, cancellationToken).ConfigureAwait(false);
+            if (!enableChange.Applied) {
+                return new ModuleInstallChange(false, false, change.ModuleName, change.Namespace, change.Version,
+                    ProblemOr(enableChange.Problem, "Blish HUD could not enable " + change.ModuleName + "."));
+            }
+
+            return change;
+        }
+
         private async Task<T> ReadAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken) {
             Task<T> queued = await _gameThread.RunAsync(read, cancellationToken).ConfigureAwait(false);
 

@@ -105,6 +105,9 @@ namespace jubeater.aigoalplanner.Core
                     case PlanActionKind.SetSetting:
                         return await SetSettingAsync(action, undo, cancellationToken).ConfigureAwait(false);
 
+                    case PlanActionKind.Install:
+                        return await InstallModuleAsync(action, undo, cancellationToken).ConfigureAwait(false);
+
                     case PlanActionKind.DownloadPack:
                         return await DownloadPackAsync(action, undo, cancellationToken).ConfigureAwait(false);
 
@@ -180,7 +183,32 @@ namespace jubeater.aigoalplanner.Core
             return new ApplyOutcome(action, true);
         }
 
+        private async Task<ApplyOutcome> InstallModuleAsync(ReviewedAction action, List<UndoStep> undo,
+                                                            CancellationToken cancellationToken) {
+            ModuleInstallChange change = await _world.InstallModuleAsync(action.ModuleNamespace, cancellationToken)
+                                                     .ConfigureAwait(false);
+
+            if (!change.Applied) {
+                return new ApplyOutcome(action, false, ProblemOr(change.Problem, "the module could not be installed"));
+            }
+
+            if (!change.Changed) return new ApplyOutcome(action, true, changed: false);
+
+            undo.Add(new UndoStep(PlanActionKind.Install, action.ModuleNamespace, action.ModuleName, null, null, null));
+
+            return new ApplyOutcome(action, true);
+        }
+
         private async Task<UndoOutcome> UndoTaking(UndoStep step, CancellationToken cancellationToken) {
+            if (step.Kind == PlanActionKind.Install) {
+                ModuleChange installChange = await _world.SetModuleEnabledAsync(step.ModuleNamespace,
+                                                                                false,
+                                                                                cancellationToken)
+                                                         .ConfigureAwait(false);
+
+                return new UndoOutcome(step, installChange.Applied,
+                                       installChange.Applied ? null : ProblemOr(installChange.Problem, "the module did not accept the change"));
+            }
             if (step.Kind == PlanActionKind.DownloadPack) {
                 MarkerPackChange pack = await _world.DeleteMarkerPackAsync(step.Value, cancellationToken)
                                                     .ConfigureAwait(false);
