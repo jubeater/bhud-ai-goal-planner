@@ -183,6 +183,15 @@ internal static class Program
         public Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
             return Task.FromResult(new MarkerPackChange(false, false, null, fileName, 0, "Stj5Check does not delete packs."));
         }
+        public Task<IReadOnlyList<CatalogModuleInfo>> GetCatalogAsync(CancellationToken cancellationToken) {
+            return Task.FromResult<IReadOnlyList<CatalogModuleInfo>>(new[] {
+                new CatalogModuleInfo("bh.pathing", "Pathing", "3.2.1", "Shows markers and trails.", new[] { "bh.blishhud" }, false)
+            });
+        }
+
+        public Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            return Task.FromResult(new ModuleInstallChange(false, false, @namespace, @namespace, null, "Stj5Check does not install modules."));
+        }
     }
 
     private sealed class StubProvider : HttpMessageHandler

@@ -91,6 +91,16 @@ namespace jubeater.aigoalplanner.Core
         /// Deletes a marker pack file from the markers directory and restarts Pathing.
         /// </summary>
         Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Retrieves available modules from the official Blish HUD module catalog.
+        /// </summary>
+        Task<IReadOnlyList<CatalogModuleInfo>> GetCatalogAsync(CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Installs a module from the official Blish HUD catalog by its namespace.
+        /// </summary>
+        Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken);
     }
 
     /// <summary>

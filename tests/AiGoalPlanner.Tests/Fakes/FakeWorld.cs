@@ -201,6 +201,35 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             return Task.FromResult(new MarkerPackChange(applied: true, changed: true, packName: fileName, fileName: fileName, sizeMb: 0));
         }
 
+        public List<CatalogModuleInfo> CatalogModules { get; } = new List<CatalogModuleInfo>();
+        public int CatalogCalls { get; private set; }
+        public int InstallCalls { get; private set; }
+        public Func<CancellationToken, Task<IReadOnlyList<CatalogModuleInfo>>> AnswerGetCatalog { get; set; }
+        public Func<string, CancellationToken, Task<ModuleInstallChange>> AnswerInstallModule { get; set; }
+
+        public Task<IReadOnlyList<CatalogModuleInfo>> GetCatalogAsync(CancellationToken cancellationToken) {
+            CatalogCalls++;
+            if (AnswerGetCatalog != null) return AnswerGetCatalog(cancellationToken);
+            return Task.FromResult<IReadOnlyList<CatalogModuleInfo>>(CatalogModules.ToList());
+        }
+
+        public Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            InstallCalls++;
+            if (AnswerInstallModule != null) return AnswerInstallModule(@namespace, cancellationToken);
+            CatalogModuleInfo existing = CatalogModules.FirstOrDefault(m =>
+                string.Equals(m.Namespace, @namespace, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, @namespace, StringComparison.OrdinalIgnoreCase));
+            string name = existing?.Name ?? @namespace;
+            string ns = existing?.Namespace ?? @namespace;
+            string version = existing?.Version ?? "1.0.0";
+            string desc = existing?.Description ?? string.Empty;
+            if (!Modules.Any(m => string.Equals(m.Namespace, ns, StringComparison.OrdinalIgnoreCase))) {
+                Modules.Add(new InstalledModuleInfo(ns, name, version, desc, enabled: false));
+            }
+            Writes.Add("install " + ns);
+            return Task.FromResult(new ModuleInstallChange(true, true, name, ns, version));
+        }
+
         private void RestartPathingIfEnabled() {
             InstalledModuleInfo pathing = Modules.FirstOrDefault(m =>
                 (Same(m.Namespace, "bh.community.pathing") || Same(m.Namespace, "bh.pathing") || Same(m.Name, "Pathing")) && m.Enabled);
