@@ -58,5 +58,29 @@ namespace jubeater.aigoalplanner.Tests
             Assert.NotNull(preset);
             Assert.Equal("XP", preset.Name);
         }
+
+        [Fact]
+        public void The_prompt_section_names_each_preset_and_carries_its_hints() {
+            string section = PresetLibrary.SectionFor(PresetLibrary.Load());
+
+            foreach (Preset preset in PresetLibrary.Load()) {
+                Assert.Contains(preset.Name, section);
+                Assert.Contains(preset.Hints, section);
+            }
+        }
+
+        [Fact]
+        public void The_prompt_section_is_plain_text() {
+            string section = PresetLibrary.SectionFor(PresetLibrary.Load());
+
+            Assert.DoesNotContain("**", section);
+            Assert.DoesNotContain("```", section);
+        }
+
+        [Fact]
+        public void No_presets_means_no_prompt_section() {
+            Assert.Equal(string.Empty, PresetLibrary.SectionFor(new Preset[0]));
+            Assert.Equal(string.Empty, PresetLibrary.SectionFor(null));
+        }
     }
 }

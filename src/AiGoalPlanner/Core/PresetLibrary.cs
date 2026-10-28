@@ -41,5 +41,26 @@ namespace jubeater.aigoalplanner.Core
 
             return presets;
         }
+
+        /// <summary>
+        /// The presets as one more paragraph of the system prompt: each button's name and the
+        /// hints the AI follows when the Chat is about that goal. Empty when there are no
+        /// presets, so the prompt reads as if they were never there.
+        /// </summary>
+        public static string SectionFor(IReadOnlyList<Preset> presets) {
+            if (presets == null || presets.Count == 0) return string.Empty;
+
+            var lines = new List<string> {
+                "The Player can also start from a Preset button, which fills the text box with a "
+              + "starter Request the Player may edit before sending. When a Request matches one of "
+              + "these goals, follow its hints:"
+            };
+
+            foreach (Preset preset in presets) {
+                lines.Add("- " + preset.Name + ": " + preset.Hints);
+            }
+
+            return string.Join("\n", lines);
+        }
     }
 }
