@@ -89,10 +89,13 @@ namespace jubeater.aigoalplanner.Core
                 response = DevResponse.Failed(DevErrors.ChannelOff);
             } else if (await _gate.WaitAsync(_busyTimeout, cancellationToken).ConfigureAwait(false)) {
                 try {
-                    if (await WaitForChatAsync(_busyTimeout, cancellationToken).ConfigureAwait(false)) {
-                        response = await ExecuteWithTimeoutAsync(request, cancellationToken).ConfigureAwait(false);
-                    } else {
+                    if (!await WaitForChatAsync(_busyTimeout, cancellationToken).ConfigureAwait(false)) {
                         response = DevResponse.Failed(DevErrors.Busy);
+                    } else if (!_isOpen()) {
+                        // The gate closed while this request waited its turn: it never runs.
+                        response = DevResponse.Failed(DevErrors.ChannelOff);
+                    } else {
+                        response = await ExecuteWithTimeoutAsync(request, cancellationToken).ConfigureAwait(false);
                     }
                 } catch (Exception exception) {
                     // The type, not the message: a message can carry a Setting's value back out.
