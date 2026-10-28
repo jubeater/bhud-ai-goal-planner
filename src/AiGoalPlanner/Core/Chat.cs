@@ -491,6 +491,11 @@ namespace jubeater.aigoalplanner.Core
                 _progressLines.Clear();
                 _review              = null;
                 _appliedBeforeReview = null;
+#if DEBUG
+                _roundTrips.Clear();
+                _lookups.Clear();
+                _lastApply = null;
+#endif
                 Interlocked.Increment(ref _generation);
             }
 

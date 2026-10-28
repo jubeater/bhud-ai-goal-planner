@@ -44,19 +44,22 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
-        public async Task State_changes_nothing_but_reports_everything() {
+        public async Task State_changes_nothing_but_reports_the_current_state() {
             var model = new ScriptedChatClient();
-            model.WillCallTool("list_installed_modules", "call_1");
-            model.WillReply("You have Pathing installed.");
+            model.WillCallTool(SubmitPlanTool.Name, "call_1",
+                                Plan("I suggest hiding the mount markers.",
+                                     Action("set_setting", "bh.mounts", key: "Show markers", value: "false",
+                                            reason: "You asked for the markers to go.")));
 
-            var world = PlayerWorld();
-            var chat  = NewChannelChat(model, world);
-
-            await chat.SendAsync("What modules do I have?");
-            int messages = chat.Messages.Count;
+            var chat = NewChannelChat(model, PlayerWorld());
 
             var inbox = new FakeDevInbox();
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"turn off the markers in Mounts\" }");
             inbox.AddFile("a6.json", "{ \"id\": \"a6\", \"op\": \"state\" }");
+
+            await PollAsync(chat, inbox);
+
+            int messages = chat.Messages.Count;
 
             await PollAsync(chat, inbox);
 
@@ -65,9 +68,9 @@ namespace jubeater.aigoalplanner.Tests
             JObject json = Response(inbox, "a6");
 
             Assert.True((bool)json["ok"]);
-            Assert.Equal(messages, json["messages"].Count());
-            Assert.Equal("list_installed_modules", (string)json["lookups"][0]["name"]);
-            Assert.Equal(2, json["roundTrips"].Count());
+            Assert.Empty(json["messages"]);
+            Assert.NotNull(chat.Review);
+            Assert.Single(json["review"]["actions"]);
             Assert.False((bool)json["undoAvailable"]);
         }
 
@@ -340,6 +343,54 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task Each_send_reports_only_what_it_added() {
+            var model = new ScriptedChatClient();
+            model.WillReply("First answer.");
+            model.WillReply("Second answer.");
+
+            var chat  = NewChannelChat(model, PlayerWorld());
+            var inbox = new FakeDevInbox();
+
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"First request\" }");
+            inbox.AddFile("a2.json", "{ \"id\": \"a2\", \"op\": \"send\", \"text\": \"Second request\" }");
+
+            Assert.Equal("a1", await PollAsync(chat, inbox));
+            Assert.Equal("a2", await PollAsync(chat, inbox));
+
+            JArray second = (JArray)Response(inbox, "a2")["messages"];
+
+            Assert.Equal(2, second.Count);
+            Assert.Equal("Second request", (string)second[0]["text"]);
+            Assert.Equal("Second answer.", (string)second[1]["text"]);
+        }
+
+        [Fact]
+        public async Task New_chat_reports_no_Lookups_or_round_trips_from_before() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool("list_installed_modules", "call_1");
+            model.WillReply("You have Pathing installed.");
+
+            var chat  = NewChannelChat(model, PlayerWorld());
+            var inbox = new FakeDevInbox();
+
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"What modules do I have?\" }");
+            inbox.AddFile("a5.json", "{ \"id\": \"a5\", \"op\": \"new_chat\" }");
+
+            Assert.Equal("a1", await PollAsync(chat, inbox));
+            Assert.NotEmpty(Response(inbox, "a1")["lookups"]);
+
+            Assert.Equal("a5", await PollAsync(chat, inbox));
+
+            JObject fresh = Response(inbox, "a5");
+
+            Assert.True((bool)fresh["ok"]);
+            Assert.Empty(fresh["messages"]);
+            Assert.Empty(fresh["lookups"]);
+            Assert.Empty(fresh["roundTrips"]);
+            Assert.Equal(JTokenType.Null, fresh["review"].Type);
+        }
+
+        [Fact]
         public async Task A_direct_request_with_a_gate_missing_answers_channel_off() {
             var model = new ScriptedChatClient();
 
@@ -455,10 +506,10 @@ namespace jubeater.aigoalplanner.Tests
 
             Assert.Equal("First file", (string)Response(inbox, "a2")["messages"][0]["text"]);
 
-            JArray both = (JArray)Response(inbox, "b1")["messages"];
+            JArray second = (JArray)Response(inbox, "b1")["messages"];
 
-            Assert.Equal(4, both.Count);
-            Assert.Equal("Second file", (string)both[2]["text"]);
+            Assert.Equal(2, second.Count);
+            Assert.Equal("Second file", (string)second[0]["text"]);
         }
 
         [Fact]

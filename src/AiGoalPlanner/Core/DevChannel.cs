@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -237,37 +239,45 @@ namespace jubeater.aigoalplanner.Core
         }
 
         private async Task<DevResponse> ExecuteAsync(DevRequest request, CancellationToken cancellationToken) {
+            // What the Chat held before this operation: the response reports only what the operation
+            // added, not the earlier conversation.
+            int messagesBefore = _chat.Messages.Count;
+            AppliedPlan applied = null;
+
             switch (request.Op) {
                 case DevRequestOp.Send:
                     await _chat.SendAsync(request.Text, cancellationToken).ConfigureAwait(false);
-                    return Ok(_chat);
+                    break;
 
                 case DevRequestOp.Apply:
                     await _chat.ApplyAsync(request.Actions, cancellationToken).ConfigureAwait(false);
-                    return Ok(_chat, _chat.LastApply);
+                    applied = _chat.LastApply;
+                    break;
 
                 case DevRequestOp.CancelReview:
                     _chat.CancelReview();
-                    return Ok(_chat);
+                    break;
 
                 case DevRequestOp.Undo:
                     await _chat.UndoAsync(cancellationToken).ConfigureAwait(false);
-                    return Ok(_chat);
+                    break;
 
                 case DevRequestOp.NewChat:
                     _chat.StartNewChat();
-                    return Ok(_chat);
+                    break;
 
                 case DevRequestOp.State:
-                    return Ok(_chat);
+                    break;
 
                 default:
                     return DevResponse.Failed(DevErrors.BadRequest);
             }
+
+            return Ok(_chat, _chat.Messages.Skip(messagesBefore).ToList(), applied);
         }
 
-        private static DevResponse Ok(Chat chat, AppliedPlan applied = null) {
-            return new DevResponse(true, null, chat.Messages, chat.Review, chat.CanUndo,
+        private static DevResponse Ok(Chat chat, IReadOnlyList<ChatMessage> added, AppliedPlan applied = null) {
+            return new DevResponse(true, null, added, chat.Review, chat.CanUndo,
                                    chat.RoundTrips, chat.Lookups, applied);
         }
 
