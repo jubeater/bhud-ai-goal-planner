@@ -27,10 +27,10 @@ namespace jubeater.aigoalplanner.UI
         private const string WindowId = "jubeater.aigoalplanner.chat";
 
         private const int WindowWidth       = 560;
-        private const int WindowHeight      = 780;
+        private const int WindowHeight      = 796;
 
         /// <summary>
-        /// What is left of the window inside its frame: 690 px of the 780, as the frame takes 50 above
+        /// What is left of the window inside its frame: 706 px of the 796, as the frame takes 50 above
         /// the content and 40 below it.
         /// </summary>
         private const int ContentHeight     = WindowHeight - 90;
@@ -51,6 +51,32 @@ namespace jubeater.aigoalplanner.UI
 
         private const int InputRowTop       = 574;
         private const int ProviderRowTop    = 608;
+
+        /// <summary>
+        /// The Preset buttons sit on their own rows under the per-Chat token line, so a new preset
+        /// never moves the conversation, the Review or the input row.
+        /// </summary>
+        private const int PresetRowTop      = 672;
+        private const int PresetRowGap      = 4;
+        private const int PresetButtonGap   = 6;
+        private const int PresetButtonPad   = 24;
+
+        /// <summary>
+        /// Room for the "Presets:" label at the start of the first row, before the buttons.
+        /// </summary>
+        private const int PresetLabelWidth  = 70;
+
+        /// <summary>
+        /// The content region's width. The window is created from it, and the Preset rows are
+        /// measured against it before the window exists.
+        /// </summary>
+        private const int ContentWidth      = 540;
+
+        /// <summary>
+        /// A button narrower than this stops being a button, so a preset that cannot even have
+        /// this much room is left out rather than drawn as a sliver.
+        /// </summary>
+        private const int MinPresetButtonWidth = 60;
         private const int RequestBoxWidth   = 300;
         private const int UndoButtonWidth   = 90;
 
@@ -107,6 +133,11 @@ namespace jubeater.aigoalplanner.UI
         private readonly StandardButton _newChatButton;
         private readonly StandardButton _providerButton;
         private readonly StandardButton _undoButton;
+
+        /// <summary>
+        /// Which starter Request each Preset button fills, so one shared handler serves them all.
+        /// </summary>
+        private readonly Dictionary<StandardButton, string> _presetRequests = new Dictionary<StandardButton, string>();
         private readonly List<Control>  _messageControls = new List<Control>();
 
         private readonly Label          _reviewTitle;
@@ -152,17 +183,27 @@ namespace jubeater.aigoalplanner.UI
                           AsyncTexture2D windowBackground,
                           Texture2D     emblem,
                           Action        openProviderSettings,
-                          Func<string>  describeProvider) {
+                          Func<string>  describeProvider,
+                          IReadOnlyList<Preset> presets) {
             _chat                 = chat ?? throw new ArgumentNullException(nameof(chat));
             _openProviderSettings = openProviderSettings ?? throw new ArgumentNullException(nameof(openProviderSettings));
             _describeProvider     = describeProvider ?? throw new ArgumentNullException(nameof(describeProvider));
 
+            IReadOnlyList<Preset> presetList = presets ?? new Preset[0];
+            IReadOnlyList<IReadOnlyList<int>> presetRows = FitPresetRows(presetList);
+
+            // A full row wraps onto further rows, so the window grows with them: one row is the
+            // base size, each extra row adds a button height and its gap.
+            int windowHeight = WindowHeight
+                             + Math.Max(0, presetRows.Count - 1) * (StandardButton.STANDARD_CONTROL_HEIGHT + PresetRowGap);
+            int contentHeight = windowHeight - 90;
+
             _window = new StandardWindow(
                 windowBackground,
-                new Rectangle(25, 26, WindowWidth, WindowHeight),
+                new Rectangle(25, 26, WindowWidth, windowHeight),
                 // The content region is the part inside the frame: the conversation, the Review, the
                 // input row and the Provider row all have to fit in it, so it grows with the window.
-                new Rectangle(40, 50, 540, ContentHeight)) {
+                new Rectangle(40, 50, ContentWidth, contentHeight)) {
                 Parent        = GameService.Graphics.SpriteScreen,
                 Title         = "AI Goal Planner",
                 Subtitle      = "Describe a goal",
@@ -291,6 +332,8 @@ namespace jubeater.aigoalplanner.UI
                 Text      = string.Empty
             };
 
+            BuildPresetRow(content, presetList, presetRows);
+
             // The Review: what the AI proposed, one row per Action, and the two buttons that decide
             // what happens to it. It is its own area so a long Plan cannot push the conversation out
             // of the window.
@@ -349,10 +392,66 @@ namespace jubeater.aigoalplanner.UI
         }
 
         /// <summary>
+        /// How the Preset buttons divide into rows: each button's natural width, wrapped by the
+        /// row policy, against the room the first row leaves after the label.
+        /// </summary>
+        private static IReadOnlyList<IReadOnlyList<int>> FitPresetRows(IReadOnlyList<Preset> presets) {
+            var naturalWidths = new List<int>(presets.Count);
+
+            foreach (Preset preset in presets) {
+                float textWidth = GameService.Content.DefaultFont16.MeasureString(preset.Name).Width;
+                naturalWidths.Add((int)Math.Ceiling(textWidth) + PresetButtonPad);
+            }
+
+            return PresetLayout.FitRows(naturalWidths, ContentWidth - TextRightMargin - PresetLabelWidth,
+                                        PresetButtonGap, MinPresetButtonWidth);
+        }
+
+        /// <summary>
+        /// One button per Preset on rows of their own under the token line. Every Preset gets a
+        /// button: a full row wraps onto the next one, which the window grew room for before it
+        /// was created.
+        /// </summary>
+        private void BuildPresetRow(Panel content, IReadOnlyList<Preset> presets,
+                                    IReadOnlyList<IReadOnlyList<int>> rows) {
+            var presetLabel = new Label {
+                Parent    = content,
+                Location  = new Point(0, PresetRowTop + 6),
+                Size      = new Point(64, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
+                Text      = presets.Count == 0 ? string.Empty : "Presets:"
+            };
+
+            int flat = 0;
+
+            for (int row = 0; row < rows.Count; row++) {
+                int top  = PresetRowTop + row * (StandardButton.STANDARD_CONTROL_HEIGHT + PresetRowGap);
+                int left = PresetLabelWidth;
+
+                foreach (int width in rows[row]) {
+                    Preset preset = presets[flat++];
+
+                    var button = new StandardButton {
+                        Parent           = content,
+                        Location         = new Point(left, top),
+                        Size             = new Point(width, StandardButton.STANDARD_CONTROL_HEIGHT),
+                        Text             = preset.Name,
+                        BasicTooltipText = preset.Request
+                    };
+
+                    button.Click += OnPresetClicked;
+                    _presetRequests[button] = preset.Request;
+
+                    left += width + PresetButtonGap;
+                }
+            }
+        }
+
+        /// <summary>
         /// Shows the Chat window if it is hidden, and hides it if it is showing.
         /// </summary>
-        public void Toggle() {
-            if (_window.Visible) {
+        public void Toggle() {            if (_window.Visible) {
                 _window.Hide();
                 return;
             }
@@ -402,6 +501,12 @@ namespace jubeater.aigoalplanner.UI
             _cancelReviewButton.Click -= OnCancelReviewClicked;
             _undoButton.Click        -= OnUndoClicked;
 
+            foreach (StandardButton button in new List<StandardButton>(_presetRequests.Keys)) {
+                button.Click -= OnPresetClicked;
+            }
+
+            _presetRequests.Clear();
+
             _window.Dispose();
         }
 
@@ -411,6 +516,20 @@ namespace jubeater.aigoalplanner.UI
 
         private void OnSendClicked(object sender, MouseEventArgs e) {
             SendRequest();
+        }
+
+        /// <summary>
+        /// Fills the text box with the preset's starter Request and hands it focus, so the Player
+        /// can edit it before sending. Filling is all it does: nothing is sent until the Player
+        /// presses Send.
+        /// </summary>
+        private void OnPresetClicked(object sender, MouseEventArgs e) {
+            if (_disposed) return;
+
+            if (sender is StandardButton button && _presetRequests.TryGetValue(button, out string request)) {
+                _requestBox.Text    = request;
+                _requestBox.Focused = true;
+            }
         }
 
         private void OnNewChatClicked(object sender, MouseEventArgs e) {
