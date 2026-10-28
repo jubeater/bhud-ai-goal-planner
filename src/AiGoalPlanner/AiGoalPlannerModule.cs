@@ -91,7 +91,7 @@ namespace jubeater.aigoalplanner
 #endif
         private SavedProviders       _savedProviders;
         private TokenPrices          _tokenPrices;
-        private ProviderKeyStore     _keyStore;
+        private IReadOnlyList<Preset> _presets = new Preset[0];        private ProviderKeyStore     _keyStore;
         private ToolCallingCapabilityStore _capabilityStore;
         private HttpClient           _httpClient;
 
@@ -145,6 +145,8 @@ namespace jubeater.aigoalplanner
                 _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug, LogWarn, _plans,
                     () => ReadTokenBudgetSnapshot(),
                     () => _tokenPrices.GetPrice(ReadTokenEndpointSnapshot()));
+
+                _presets = LoadPresets();
             } catch (Exception exception) {
                 Logger.Error(exception, "AI Goal Planner failed to load its planning core. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
@@ -270,6 +272,25 @@ namespace jubeater.aigoalplanner
             return false;
         }
 #endif
+
+        /// <summary>
+        /// The Presets bundled with the module: every <c>Presets/*.json</c> data file. A bad file
+        /// is left out by the library; a failure to read them at all leaves the Chat without
+        /// preset buttons rather than without a Chat.
+        /// </summary>
+        private static IReadOnlyList<Preset> LoadPresets() {
+            try {
+                IReadOnlyList<Preset> presets = PresetLibrary.Load(LogDebug);
+
+                LogDebug("Loaded " + presets.Count + " presets.");
+
+                return presets;
+            } catch (Exception exception) {
+                Logger.Warn(exception, "AI Goal Planner could not load its presets; the Chat has no preset buttons this session.");
+
+                return new Preset[0];
+            }
+        }
 
         /// <summary>
         /// Builds the Provider client for the current Settings. A change in Settings takes effect on
@@ -406,7 +427,8 @@ namespace jubeater.aigoalplanner
                 AsyncTexture2D.FromAssetId(WindowBackgroundAssetId),
                 _iconTexture,
                 OpenProviderSettings,
-                DescribeProvider);
+                DescribeProvider,
+                _presets);
         }
 
         private void OnCornerIconClicked(object sender, MouseEventArgs e) {
@@ -536,10 +558,14 @@ namespace jubeater.aigoalplanner
         /// <summary>
         /// The identity message the Chat puts ahead of the Player's words. It is built from the same
         /// Settings as the Provider client, so the model and the host it names are the ones the next
-        /// Request really uses.
+        /// Request really uses. The Presets' hints join it, so a Request a preset button filled in is
+        /// answered the way its data file says; with no presets the prompt reads as before.
         /// </summary>
         private string BuildSystemPrompt() {
-            return SystemPrompt.For(_modelSetting.Value, _endpointSetting.Value);
+            string prompt = SystemPrompt.For(_modelSetting.Value, _endpointSetting.Value);
+            string presets = PresetLibrary.SystemPromptSectionFor(_presets);
+
+            return presets.Length == 0 ? prompt : prompt + "\n\n" + presets;
         }
 
         /// <summary>
