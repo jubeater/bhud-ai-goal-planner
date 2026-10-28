@@ -17,6 +17,39 @@ function New-DevId {
 
 <#
 .SYNOPSIS
+    Reads a window rectangle through user32, for dev-shot.ps1.
+
+.DESCRIPTION
+    Answers the window's bounds as a System.Drawing.Rectangle, or $null when the handle has no
+    window (an invisible or missing window is not an error: the caller falls back to the screen).
+    The generated interop type is referenced explicitly, since -PassThru emits every nested type
+    and the array it returns has no static methods.
+#>
+function Get-DevWindowRect {
+    param(
+        [Parameter(Mandatory = $true)]
+        [IntPtr] $Handle
+    )
+
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -MemberDefinition @'
+[DllImport("user32.dll")]
+public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+'@ -Name 'DevShotNative' -Namespace 'DevShot' | Out-Null
+
+    $rect = New-Object DevShot.DevShotNative+RECT
+
+    if ([DevShot.DevShotNative]::GetWindowRect($Handle, [ref]$rect)) {
+        return New-Object System.Drawing.Rectangle($rect.Left, $rect.Top,
+                                                   ($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top))
+    }
+
+    return $null
+}
+
+<#
+.SYNOPSIS
     Normalizes the apply indexes from dev-op.ps1 into integers.
 
 .DESCRIPTION

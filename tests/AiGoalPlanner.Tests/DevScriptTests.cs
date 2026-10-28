@@ -82,6 +82,17 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("True", lines[1].Trim());
         }
 
+        [Fact]
+        public void Window_rect_lookup_resolves_its_native_method() {
+            int exit;
+            string inbox;
+            string output = RunDevCommon("$rect = Get-DevWindowRect -Handle ([IntPtr]::Zero); Write-Output ($rect -eq $null)",
+                                         "inbox", out inbox, out exit);
+
+            Assert.Equal(0, exit);
+            Assert.Equal("True", output);
+        }
+
         /// <summary>
         /// Runs a snippet with the channel helpers loaded and the inbox pointed at an isolated folder
         /// under the test output. Answers the trimmed standard output and the process exit code, and
@@ -96,7 +107,7 @@ namespace jubeater.aigoalplanner.Tests
 
             try {
                 string script  = Path.Combine(SolutionDir(), "scripts", "dev-common.ps1");
-                string command = ". '" + Escape(script) + "'; $script:DevInbox = '" + Escape(inboxDir) + "'; "
+                string command = "$ErrorActionPreference = 'Stop'; . '" + Escape(script) + "'; $script:DevInbox = '" + Escape(inboxDir) + "'; "
                                + "$script:DevOutbox = '" + Escape(inboxDir + "-outbox") + "'; " + snippet;
 
                 var start = new ProcessStartInfo(Shell, "-NoProfile -ExecutionPolicy Bypass -Command \"" + command + "\"") {

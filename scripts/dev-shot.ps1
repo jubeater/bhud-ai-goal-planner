@@ -19,24 +19,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path (Split-Path -Parent $PSCommandPath) 'dev-common.ps1')
+
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
-
-$native = Add-Type -MemberDefinition @'
-[DllImport("user32.dll")]
-public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
-public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-'@ -Name 'DevShotNative' -Namespace 'DevShot' -PassThru
 
 $bounds = $null
 $game = Get-Process -Name 'Gw2-64' -ErrorAction SilentlyContinue | Select-Object -First 1
 
 if ($game -ne $null -and $game.MainWindowHandle -ne [IntPtr]::Zero) {
-    $rect = New-Object DevShot.DEVSHOTNATIVE+RECT
-    if ($native::GetWindowRect($game.MainWindowHandle, [ref]$rect)) {
-        $bounds = New-Object System.Drawing.Rectangle(
-            $rect.Left, $rect.Top, ($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top))
-    }
+    $bounds = Get-DevWindowRect -Handle $game.MainWindowHandle
 }
 
 if ($bounds -eq $null -or $bounds.Width -le 0 -or $bounds.Height -le 0) {
