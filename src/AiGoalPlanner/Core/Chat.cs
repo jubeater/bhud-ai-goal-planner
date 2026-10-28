@@ -135,6 +135,9 @@ namespace jubeater.aigoalplanner.Core
         /// did (ADR-0010).
         /// </summary>
         private AppliedPlan _appliedBeforeReview;
+        private readonly HashSet<string> _installedInThisChat = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _removableModules = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _awaitingRemoveConfirmation = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// The Token Budget one Chat may use before the Chat asks the Player whether to go on, or
@@ -511,6 +514,7 @@ namespace jubeater.aigoalplanner.Core
                 _lastApply = applied;
 #endif
 
+                RecordInstalledModules(applied);
                 ShowReport(generation, applied.Describe());
 
                 // Nothing was ticked and nothing was applied before the Review: there is nothing to
@@ -593,7 +597,21 @@ namespace jubeater.aigoalplanner.Core
             try {
                 UndoResult result = await _plans.UndoAsync(cancellationToken).ConfigureAwait(false);
 
-                ShowReport(generation, result.Describe());
+                List<RemovableModuleInfo> removable = new List<RemovableModuleInfo>();
+                lock (_messagesLock) {
+                    foreach (UndoOutcome outcome in result.Outcomes) {
+                        if (outcome.Succeeded && outcome.Step.Kind == PlanActionKind.Install) {
+                            string ns = outcome.Step.ModuleNamespace;
+                            if (!string.IsNullOrEmpty(ns) && _installedInThisChat.Contains(ns)) {
+                                string name = !string.IsNullOrEmpty(outcome.Step.ModuleName) ? outcome.Step.ModuleName : ns;
+                                removable.Add(new RemovableModuleInfo(ns, name));
+                                _removableModules[ns] = name;
+                            }
+                        }
+                    }
+                }
+
+                ShowReport(generation, result.Describe(), removable);
             } finally {
                 _sendLock.Release();
             }
@@ -609,7 +627,77 @@ namespace jubeater.aigoalplanner.Core
         /// progress line either gets there first and is cleared with the old Chat, or does not get
         /// there at all.
         /// </remarks>
+        public bool CanRemoveModule(string @namespace) {
+            if (string.IsNullOrWhiteSpace(@namespace)) return false;
+            lock (_messagesLock) {
+                return _removableModules.ContainsKey(@namespace.Trim());
+            }
+        }
+
+        public bool IsAwaitingRemoveConfirmation(string @namespace) {
+            if (string.IsNullOrWhiteSpace(@namespace)) return false;
+            lock (_messagesLock) {
+                return _awaitingRemoveConfirmation.Contains(@namespace.Trim());
+            }
+        }
+
+        public async Task<bool> RemoveModuleAsync(string @namespace, bool confirmed = false, CancellationToken cancellationToken = default) {
+            if (_plans == null) return false;
+            string wanted = (@namespace ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(wanted)) return false;
+
+            lock (_messagesLock) {
+                if (!_removableModules.ContainsKey(wanted)) return false;
+
+                if (!confirmed && !_awaitingRemoveConfirmation.Contains(wanted)) {
+                    _awaitingRemoveConfirmation.Add(wanted);
+                    MessagesChanged?.Invoke(this, EventArgs.Empty);
+                    return false;
+                }
+            }
+
+            int generation = Volatile.Read(ref _generation);
+
+            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            try {
+                ModuleChange change;
+                try {
+                    change = await _plans.DeleteModuleAsync(wanted, cancellationToken).ConfigureAwait(false);
+                } catch (Exception ex) {
+                    _logWarn?.Invoke("DeleteModule failed: " + ex.GetType().Name);
+                    TryAppendNotice(generation, "Removing the module failed.");
+                    return false;
+                }
+
+                if (!change.Applied) {
+                    TryAppendNotice(generation, "Removing the module failed.");
+                    return false;
+                }
+
+                string moduleName;
+                lock (_messagesLock) {
+                    _removableModules.TryGetValue(wanted, out moduleName);
+                    _removableModules.Remove(wanted);
+                    _awaitingRemoveConfirmation.Remove(wanted);
+                    _installedInThisChat.Remove(wanted);
+                }
+
+                if (string.IsNullOrEmpty(moduleName)) moduleName = wanted;
+
+                ShowReport(generation, "Removed " + moduleName + ". This cannot be undone.");
+                return true;
+            } finally {
+                _sendLock.Release();
+            }
+        }
+
         public void StartNewChat() {
+            lock (_messagesLock) {
+                _installedInThisChat.Clear();
+                _removableModules.Clear();
+                _awaitingRemoveConfirmation.Clear();
+            }
             lock (_messagesLock) {
                 _messages.Clear();
                 _modelHistory.Clear();
@@ -1065,8 +1153,21 @@ namespace jubeater.aigoalplanner.Core
         /// Shows the Player what an Apply or an Undo did, in the module's own voice: the AI did not do
         /// it, so it is not the AI that says it was done.
         /// </summary>
-        private void ShowReport(int generation, string text) {
-            TryAppend(generation, new ChatMessage(ChatMessageAuthor.Report, text));
+        private void ShowReport(int generation, string text, IReadOnlyList<RemovableModuleInfo> removableModules = null) {
+            TryAppend(generation, new ChatMessage(ChatMessageAuthor.Report, text, removableModules: removableModules));
+        }
+
+        private void RecordInstalledModules(AppliedPlan applied) {
+            if (applied == null || applied.Outcomes == null) return;
+            lock (_messagesLock) {
+                foreach (ApplyOutcome o in applied.Outcomes) {
+                    if (o.Action.Action.Kind == PlanActionKind.Install && o.Changed && !string.IsNullOrWhiteSpace(o.Action.ModuleNamespace)) {
+                        _installedInThisChat.Add(o.Action.ModuleNamespace);
+                        _removableModules.Remove(o.Action.ModuleNamespace);
+                        _awaitingRemoveConfirmation.Remove(o.Action.ModuleNamespace);
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -1112,6 +1213,7 @@ namespace jubeater.aigoalplanner.Core
                 if (generation != Volatile.Read(ref _generation)) return;
 
                 _appliedBeforeReview = applied;
+                RecordInstalledModules(applied);
             }
         }
 

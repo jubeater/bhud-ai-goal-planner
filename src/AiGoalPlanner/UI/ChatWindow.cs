@@ -594,6 +594,32 @@ namespace jubeater.aigoalplanner.UI
                 if (message.Author == ChatMessageAuthor.Ai && message.Usage != null && !message.Usage.IsEmpty) {
                     top = AddLabel("    " + message.Usage.DescribeWithCost(message.EstimatedCostUsd), HintColor, top);
                 }
+
+                if (message.Author == ChatMessageAuthor.Report && message.RemovableModules != null) {
+                    foreach (RemovableModuleInfo mod in message.RemovableModules) {
+                        if (_chat.CanRemoveModule(mod.Namespace)) {
+                            bool awaiting = _chat.IsAwaitingRemoveConfirmation(mod.Namespace);
+                            string buttonText = awaiting ? "Confirm remove " + mod.Name : "Remove " + mod.Name;
+                            BitmapFont font = GameService.Content.DefaultFont16;
+                            int buttonWidth = Math.Min(Math.Max(160, (int)font.MeasureString(buttonText).Width + 30), _messageList.Width - TextRightMargin);
+                            var removeButton = new StandardButton {
+                                Parent   = _messageList,
+                                Text     = buttonText,
+                                Location = new Point(0, top),
+                                Width    = buttonWidth,
+                                Height   = StandardButton.STANDARD_CONTROL_HEIGHT,
+                                Enabled  = !_requestInFlight
+                            };
+                            string modNs = mod.Namespace;
+                            removeButton.Click += (s, e) => {
+                                RunWhileInFlight("Removing the module failed.",
+                                                 ct => _chat.RemoveModuleAsync(modNs, _chat.IsAwaitingRemoveConfirmation(modNs), ct));
+                            };
+                            _messageControls.Add(removeButton);
+                            top = removeButton.Bottom + MessageSpacing;
+                        }
+                    }
+                }
             }
 
             foreach (string line in _chat.ProgressLines) {

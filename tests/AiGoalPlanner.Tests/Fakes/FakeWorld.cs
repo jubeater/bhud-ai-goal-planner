@@ -64,6 +64,8 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 
         /// <summary>When set, answers every Setting change instead of making it.</summary>
         public Func<string, string, string, ModuleSettingChange> AnswerSetSetting;
+        public Func<string, ModuleChange> AnswerDeleteModule { get; set; }
+        public int DeleteModuleCalls { get; private set; }
 
         /// <summary>
         /// Every change that was made through this world, in order, as "enable ns", "disable ns" or

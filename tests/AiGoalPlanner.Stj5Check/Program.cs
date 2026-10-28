@@ -201,6 +201,10 @@ internal static class Program
             return Task.FromResult(new CatalogModuleDetails(true, @namespace, "Pathing", "3.2.1", "Shows markers and trails."));
         }
 
+        public Task<ModuleChange> DeleteModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            return Task.FromResult(new ModuleChange(true, false, null, changed: true));
+        }
+
         public Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
             return Task.FromResult(new ModuleInstallChange(false, false, @namespace, @namespace, null, "Stj5Check does not install modules."));
         }

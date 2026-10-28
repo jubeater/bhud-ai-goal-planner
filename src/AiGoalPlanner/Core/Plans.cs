@@ -95,6 +95,13 @@ namespace jubeater.aigoalplanner.Core
             return result;
         }
 
+        /// <summary>
+        /// Permanently removes a module by deleting its file and unregistering it.
+        /// </summary>
+        public Task<ModuleChange> DeleteModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            return _world.DeleteModuleAsync(@namespace, cancellationToken);
+        }
+
         private void Log(string line) {
             _logDebug?.Invoke(line);
         }

@@ -82,6 +82,10 @@ namespace jubeater.aigoalplanner.Core
             return change;
         }
 
+        public Task<ModuleChange> DeleteModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.DeleteModuleAsync(@namespace, cancellationToken), cancellationToken);
+        }
+
         public async Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
             MarkerPackChange change = await _world.DeleteMarkerPackAsync(fileName, cancellationToken).ConfigureAwait(false);
             if (!change.Applied || !change.Changed) return change;

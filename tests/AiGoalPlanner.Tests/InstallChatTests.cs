@@ -13,14 +13,14 @@ namespace jubeater.aigoalplanner.Tests
 {
     public class InstallChatTests
     {
-        private static Chat NewChat(ScriptedChatClient model, FakeWorld world, bool autoApply = false) {
+        private static Chat NewChat(ScriptedChatClient model, FakeWorld world, bool autoApply = false, Action<string> logWarn = null) {
             IBlishHudWorld target = new GameThreadWorld(world, new ImmediateGameThread());
             var plans = new Plans(target, () => autoApply);
             var tools = Lookups.For(target);
             plans.AddTo(tools);
 
             return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"),
-                            tools, null, plans);
+                            tools, null, logWarn, plans);
         }
 
         private static IDictionary<string, object> Plan(string reply, params IDictionary<string, object>[] actions) {
@@ -43,6 +43,15 @@ namespace jubeater.aigoalplanner.Tests
         private static IDictionary<string, object> EnableAction(string module, string reason = "Enable module", bool sideEffect = false) {
             return new Dictionary<string, object> {
                 ["kind"]           = "enable_module",
+                ["module"]         = module,
+                ["reason"]         = reason,
+                ["is_side_effect"] = sideEffect
+            };
+        }
+
+        private static IDictionary<string, object> DisableAction(string module, string reason = "Disable module", bool sideEffect = false) {
+            return new Dictionary<string, object> {
+                ["kind"]           = "disable_module",
                 ["module"]         = module,
                 ["reason"]         = reason,
                 ["is_side_effect"] = sideEffect
@@ -561,6 +570,108 @@ namespace jubeater.aigoalplanner.Tests
             UndoStep undo = Assert.Single(applied.Undo);
             Assert.Equal(PlanActionKind.Install, undo.Kind);
             Assert.Equal("bh.community.pathing", undo.ModuleNamespace);
+        }
+
+        [Fact]
+        public async Task Install_undo_remove_requires_confirmation_calls_delete_once_and_omits_button_for_preexisting() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers and trails.", new[] { "bh.blishhud" })
+                }
+            };
+            world.Modules.Add(new InstalledModuleInfo("bh.preexisting", "PreExisting", "1.0.0", "Pre-existing module.", enabled: true));
+            world.SettingsByNamespace["bh.community.pathing"] = FakeWorld.Ok("Pathing");
+
+            model.WillCallTool("submit_plan", "call_plan",
+                               Plan("Install Pathing and disable PreExisting.",
+                                    InstallAction("bh.community.pathing", "Markers on map"),
+                                    DisableAction("bh.preexisting")));
+
+            var chat = NewChat(model, world);
+            await chat.SendAsync("Setup modules");
+
+            model.WillReply("Continuation reply.");
+            await chat.ApplyAsync(new[] { 0, 1 });
+
+            Assert.True(world.Modules.Any(m => m.Namespace == "bh.community.pathing"));
+
+            // Undo the apply (both changes undone)
+            world.Writes.Clear();
+            await chat.UndoAsync();
+
+            ChatMessage undoReport = Assert.Single(chat.Messages, m => m.Author == ChatMessageAuthor.Report && m.Text.Contains("Undid"));
+
+            // Pre-existing module does NOT get a remove button
+            Assert.False(chat.CanRemoveModule("bh.preexisting"));
+            Assert.DoesNotContain(undoReport.RemovableModules, rm => rm.Namespace == "bh.preexisting");
+
+            // Installed module DOES get a remove button
+            Assert.True(chat.CanRemoveModule("bh.community.pathing"));
+            RemovableModuleInfo removable = Assert.Single(undoReport.RemovableModules);
+            Assert.Equal("bh.community.pathing", removable.Namespace);
+            Assert.Equal("Pathing", removable.Name);
+
+            // First click: asks for confirmation, does not delete yet ("no confirm -> no delete")
+            bool removedWithoutConfirm = await chat.RemoveModuleAsync("bh.community.pathing");
+            Assert.False(removedWithoutConfirm);
+            Assert.Equal(0, world.DeleteModuleCalls);
+            Assert.True(chat.IsAwaitingRemoveConfirmation("bh.community.pathing"));
+
+            // Second click: confirmed, calls DeleteModule once ("remove calls DeleteModule once")
+            bool removedWithConfirm = await chat.RemoveModuleAsync("bh.community.pathing");
+            Assert.True(removedWithConfirm);
+            Assert.Equal(1, world.DeleteModuleCalls);
+            Assert.Contains("delete bh.community.pathing", world.Writes);
+            Assert.False(chat.CanRemoveModule("bh.community.pathing"));
+
+            // The Report says it was removed and cannot be undone
+            ChatMessage removeReport = chat.Messages.Last();
+            Assert.Equal(ChatMessageAuthor.Report, removeReport.Author);
+            Assert.Contains("Removed Pathing", removeReport.Text);
+            Assert.Contains("cannot be undone", removeReport.Text);
+        }
+
+        [Fact]
+        public async Task Remove_module_failure_shows_fixed_message_and_logs_exception_type() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers and trails.", new[] { "bh.blishhud" })
+                }
+            };
+            world.SettingsByNamespace["bh.community.pathing"] = FakeWorld.Ok("Pathing");
+            world.AnswerDeleteModule = _ => throw new InvalidOperationException("SecretDiskErrorDetailsThatMustNotLeak");
+
+            var warnings = new List<string>();
+            var chat = NewChat(model, world, logWarn: warnings.Add);
+
+            model.WillCallTool("submit_plan", "call_plan",
+                               Plan("Install Pathing.",
+                                    InstallAction("bh.community.pathing", "Markers on map")));
+
+            await chat.SendAsync("Setup");
+            model.WillReply("Applied.");
+            await chat.ApplyAsync(new[] { 0 });
+
+            await chat.UndoAsync();
+            Assert.True(chat.CanRemoveModule("bh.community.pathing"));
+
+            // First click asks confirm
+            await chat.RemoveModuleAsync("bh.community.pathing");
+
+            // Second click attempts remove, fails with InvalidOperationException
+            bool removed = await chat.RemoveModuleAsync("bh.community.pathing");
+            Assert.False(removed);
+
+            // Shows fixed message to Player
+            ChatMessage notice = Assert.Single(chat.Messages, m => m.Author == ChatMessageAuthor.Notice && m.Text.Contains("Removing the module failed."));
+            Assert.Equal("Removing the module failed.", notice.Text);
+
+            // Log contains only the exception type, not the exception message or player text
+            string warn = Assert.Single(warnings, w => w.Contains("DeleteModule failed:"));
+            Assert.Equal("DeleteModule failed: InvalidOperationException", warn);
+            Assert.DoesNotContain("SecretDiskErrorDetailsThatMustNotLeak", warn);
         }
     }
 }

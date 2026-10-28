@@ -13,6 +13,23 @@ namespace jubeater.aigoalplanner.Tests.Fakes
     /// </summary>
     internal sealed partial class FakeWorld
     {
+        public Task<ModuleChange> DeleteModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            DeleteModuleCalls++;
+            Writes.Add("delete " + @namespace);
+
+            Func<string, ModuleChange> answer = AnswerDeleteModule;
+            if (answer != null) return Task.FromResult(answer(@namespace));
+
+            int index = Modules.FindIndex(candidate => Same(candidate.Namespace, @namespace));
+            if (index < 0) {
+                return Task.FromResult(new ModuleChange(false, false, "No installed module has that namespace."));
+            }
+
+            InstalledModuleInfo module = Modules[index];
+            Modules.RemoveAt(index);
+            return Task.FromResult(new ModuleChange(true, module.Enabled, changed: true));
+        }
+
         public Task<ModuleChange> SetModuleEnabledAsync(string @namespace, bool enabled, CancellationToken cancellationToken) {
             ModuleWrites++;
 

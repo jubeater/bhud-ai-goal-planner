@@ -93,6 +93,12 @@ namespace jubeater.aigoalplanner.Core
         Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken);
 
         /// <summary>
+        /// Completely deletes an installed module from Blish HUD: disables it, unregisters it, and deletes
+        /// the module (.bhm) file from disk.
+        /// </summary>
+        Task<ModuleChange> DeleteModuleAsync(string @namespace, CancellationToken cancellationToken);
+
+        /// <summary>
         /// Retrieves available modules from the official Blish HUD module catalog.
         /// </summary>
         Task<IReadOnlyList<CatalogModuleInfo>> GetCatalogAsync(CancellationToken cancellationToken);
