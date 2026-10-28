@@ -24,11 +24,11 @@ namespace jubeater.aigoalplanner.Core
         private const string Description =
             "Searches the official Blish HUD module catalog for modules that can be installed when no "
           + "installed module covers the Player's goal. Returns each module's name, namespace, latest "
-          + "supported version, description, dependencies and preview flag.";
+          + "supported version, dependencies and preview flag.";
 
         private const string SchemaJson =
             "{\"type\":\"object\",\"properties\":{"
-          + "\"query\":{\"type\":\"string\",\"description\":\"Optional search text to filter catalog modules by name, namespace or description.\"}"
+          + "\"query\":{\"type\":\"string\",\"description\":\"Optional search text to filter catalog modules by name or namespace.\"}"
           + "}}";
 
         private static readonly JsonDocument Schema = JsonDocument.Parse(SchemaJson);
@@ -63,8 +63,7 @@ namespace jubeater.aigoalplanner.Core
             if (trimmed.Length > 0) {
                 filtered = filtered.Where(m =>
                     m.Name.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    m.Namespace.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    m.Description.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0);
+                    m.Namespace.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0);
             }
 
             var moduleList = filtered.ToList();
@@ -83,14 +82,9 @@ namespace jubeater.aigoalplanner.Core
                 ["namespace"]    = module.Namespace,
                 ["name"]         = module.Name,
                 ["version"]      = module.Version,
-                ["description"]  = module.Description,
                 ["dependencies"] = new JArray(module.Dependencies),
                 ["is_preview"]   = module.IsPreview
             };
-
-            if (module.ApiPermissions != null && module.ApiPermissions.Count > 0) {
-                obj["api_permissions"] = new JArray(module.ApiPermissions);
-            }
 
             return obj;
         }

@@ -22,7 +22,7 @@ namespace jubeater.aigoalplanner.Core
           + "Modules first, including enabling disabled ones; only propose an install from the catalog when no "
           + "Installed Module can do the job, and name the specific Gap it fills: the missing ability no installed "
           + "module provides. Never propose an install whose function overlaps with an installed module or one "
-          + "already in the plan; judge overlap from module descriptions. If an installed module looks abandoned, "
+          + "already in the plan; judge overlap from module descriptions checked with get_module_details. If an installed module looks abandoned, "
           + "mention it only as advice, never as an install. Every install action must name the gap. A disabled "
           + "module's settings cannot be read, so propose enabling it on its own, and configure it once the Player "
           + "has applied that. After installing a module, configure its settings in the continuation, and if it "

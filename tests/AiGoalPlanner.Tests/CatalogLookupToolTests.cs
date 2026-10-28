@@ -39,21 +39,32 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("bh.community.pathing", (string)module["namespace"]);
             Assert.Equal("Pathing", (string)module["name"]);
             Assert.Equal("3.2.1", (string)module["version"]);
-            Assert.Equal("Markers and trails for Guild Wars 2.", (string)module["description"]);
+            Assert.Null(module["description"]);
+            Assert.Null(module["api_permissions"]);
             Assert.False((bool)module["is_preview"]);
 
             JArray deps = (JArray)module["dependencies"];
             Assert.Single(deps);
             Assert.Equal("bh.blishhud", (string)deps[0]);
-
-            JArray perms = (JArray)module["api_permissions"];
-            Assert.Equal(2, perms.Count);
-            Assert.Equal("account", (string)perms[0]);
-            Assert.Equal("characters", (string)perms[1]);
         }
 
         [Fact]
-        public async Task It_filters_catalog_modules_by_query() {
+        public void Tool_description_does_not_mention_description() {
+            var world = new FakeWorld();
+            AIFunction tool = SearchCatalogTool.Create(world);
+            Assert.DoesNotContain("description", tool.Description, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Tool_schema_query_description_does_not_mention_module_description() {
+            var world = new FakeWorld();
+            AIFunction tool = SearchCatalogTool.Create(world);
+            string schema = tool.JsonSchema.GetRawText();
+            Assert.DoesNotContain("or description", schema, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task It_filters_catalog_modules_by_query_matching_name_or_namespace_only() {
             var world = new FakeWorld();
             world.CatalogModules.Add(new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers and trails.", new[] { "bh.blishhud" }));
             world.CatalogModules.Add(new CatalogModuleInfo("bh.mounts", "Mounts", "1.0.0", "Mount wheel and keybinds.", new[] { "bh.blishhud" }));
@@ -65,9 +76,14 @@ namespace jubeater.aigoalplanner.Tests
             object raw = await tool.InvokeAsync(args);
 
             JObject json = JObject.Parse(Assert.IsType<string>(raw));
-            Assert.Equal(1, (int)json["total_modules"]);
-            JArray modules = (JArray)json["modules"];
-            Assert.Equal("bh.community.pathing", (string)modules[0]["namespace"]);
+            // Should not match "trail" because it's only in the description, not name or namespace
+            Assert.Equal(0, (int)json["total_modules"]);
+            Assert.Empty((JArray)json["modules"]);
+
+            var argsName = new AIFunctionArguments { ["query"] = "mounts" };
+            object rawName = await tool.InvokeAsync(argsName);
+            JObject jsonName = JObject.Parse(Assert.IsType<string>(rawName));
+            Assert.Equal(1, (int)jsonName["total_modules"]);
         }
 
         [Fact]
