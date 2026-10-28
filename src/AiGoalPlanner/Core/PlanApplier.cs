@@ -42,9 +42,18 @@ namespace jubeater.aigoalplanner.Core
             var outcomes = new List<ApplyOutcome>();
             var undo     = new List<UndoStep>();
 
+            IReadOnlyList<InstalledModuleInfo> initialModules = await _world.ListInstalledModulesAsync(cancellationToken).ConfigureAwait(false);
+            var installedModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (initialModules != null) {
+                foreach (var m in initialModules) {
+                    if (!string.IsNullOrWhiteSpace(m.Namespace)) installedModules.Add(m.Namespace);
+                    if (!string.IsNullOrWhiteSpace(m.Name)) installedModules.Add(m.Name);
+                }
+            }
+
             foreach (ReviewedAction action in Chosen(review, actionIndexes)) {
                 try {
-                    outcomes.Add(await ApplyOneAsync(action, undo, cancellationToken).ConfigureAwait(false));
+                    outcomes.Add(await ApplyOneAsync(action, undo, installedModules, cancellationToken).ConfigureAwait(false));
                 } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
                     // What is done is done, and the Player can still undo it.
                     return new AppliedPlan(outcomes, undo, cancelled: true);
@@ -139,7 +148,7 @@ namespace jubeater.aigoalplanner.Core
             return result;
         }
 
-        private async Task<ApplyOutcome> ApplyOneAsync(ReviewedAction action, List<UndoStep> undo,
+        private async Task<ApplyOutcome> ApplyOneAsync(ReviewedAction action, List<UndoStep> undo, HashSet<string> installedModules,
                                                        CancellationToken cancellationToken) {
             try {
                 switch (action.Action.Kind) {
@@ -151,7 +160,7 @@ namespace jubeater.aigoalplanner.Core
                         return await SetSettingAsync(action, undo, cancellationToken).ConfigureAwait(false);
 
                     case PlanActionKind.Install:
-                        return await InstallModuleAsync(action, undo, cancellationToken).ConfigureAwait(false);
+                        return await InstallModuleAsync(action, undo, installedModules, cancellationToken).ConfigureAwait(false);
 
                     case PlanActionKind.DownloadPack:
                         return await DownloadPackAsync(action, undo, cancellationToken).ConfigureAwait(false);
@@ -228,12 +237,23 @@ namespace jubeater.aigoalplanner.Core
             return new ApplyOutcome(action, true);
         }
 
-        private async Task<ApplyOutcome> InstallModuleAsync(ReviewedAction action, List<UndoStep> undo,
+        private async Task<ApplyOutcome> InstallModuleAsync(ReviewedAction action, List<UndoStep> undo, HashSet<string> installedModules,
                                                             CancellationToken cancellationToken) {
-            IReadOnlyList<InstalledModuleInfo> installed = await _world.ListInstalledModulesAsync(cancellationToken).ConfigureAwait(false);
-            if (installed != null && installed.Any(m => string.Equals(m.Namespace, action.ModuleNamespace, StringComparison.OrdinalIgnoreCase) ||
-                                                        string.Equals(m.Name, action.ModuleName, StringComparison.OrdinalIgnoreCase))) {
+            if (installedModules != null && (installedModules.Contains(action.ModuleNamespace) || installedModules.Contains(action.ModuleName))) {
                 return new ApplyOutcome(action, false, action.ModuleName + " is already installed.", changed: false);
+            }
+
+            if (action.Dependencies != null) {
+                foreach (string dep in action.Dependencies) {
+                    string depTrimmed = (dep ?? string.Empty).Trim();
+                    if (depTrimmed.Length == 0 || string.Equals(depTrimmed, "bh.blishhud", StringComparison.OrdinalIgnoreCase)) {
+                        continue;
+                    }
+
+                    if (installedModules == null || !installedModules.Contains(depTrimmed)) {
+                        return new ApplyOutcome(action, false, action.ModuleName + " requires dependency \"" + depTrimmed + "\", which is not installed.", changed: false);
+                    }
+                }
             }
 
             ModuleInstallChange change = await _world.InstallModuleAsync(action.ModuleNamespace, cancellationToken)
@@ -245,7 +265,16 @@ namespace jubeater.aigoalplanner.Core
 
             if (!change.Changed) return new ApplyOutcome(action, true, changed: false);
 
+            if (installedModules != null) {
+                if (!string.IsNullOrWhiteSpace(change.Namespace)) installedModules.Add(change.Namespace);
+                if (!string.IsNullOrWhiteSpace(change.ModuleName)) installedModules.Add(change.ModuleName);
+            }
+
             undo.Add(new UndoStep(PlanActionKind.Install, action.ModuleNamespace, action.ModuleName, null, null, null));
+
+            if (!string.IsNullOrEmpty(change.Problem)) {
+                return new ApplyOutcome(action, false, change.Problem, changed: true);
+            }
 
             return new ApplyOutcome(action, true);
         }

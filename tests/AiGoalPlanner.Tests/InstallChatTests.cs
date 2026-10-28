@@ -353,5 +353,74 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("install bh.community.pathing", world.Writes[0]);
             Assert.Equal("install bh.addon", world.Writes[1]);
         }
+
+        [Fact]
+        public async Task Unchecking_dependency_must_not_install_dependent() {
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers", new[] { "bh.blishhud" }),
+                    new CatalogModuleInfo("bh.addon", "Addon Module", "1.0.0", "Addon", new[] { "bh.blishhud", "bh.community.pathing" })
+                }
+            };
+
+            var plan = new Plan("Install Pathing and Addon", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "bh.community.pathing", null, null,
+                               "Need pathing", isSideEffect: false, gap: "Pathing gap"),
+                new PlanAction(PlanActionKind.Install, "install", "bh.addon", null, null,
+                               "Need addon", isSideEffect: false, gap: "Addon gap")
+            });
+
+            var applier = new PlanApplier(world);
+            var reviewedPathing = new ReviewedAction(plan.Actions[0], "bh.community.pathing", "Pathing", null, "Pathing",
+                                                     "not installed", "installed", null);
+            var reviewedAddon = new ReviewedAction(plan.Actions[1], "bh.addon", "Addon Module", null, "Addon Module",
+                                                   "not installed", "installed", null, dependencies: new[] { "bh.community.pathing" });
+            var review = new PlanReview(plan, new[] { reviewedPathing, reviewedAddon });
+
+            AppliedPlan applied = await applier.ApplyAsync(review, new[] { 1 }, CancellationToken.None);
+
+            Assert.Equal(0, world.InstallCalls);
+            ApplyOutcome outcome = Assert.Single(applied.Outcomes);
+            Assert.False(outcome.Succeeded);
+            Assert.Contains("requires dependency \"bh.community.pathing\"", outcome.Problem);
+        }
+
+        [Fact]
+        public async Task Failed_dependency_must_not_install_dependent() {
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers", new[] { "bh.blishhud" }),
+                    new CatalogModuleInfo("bh.addon", "Addon Module", "1.0.0", "Addon", new[] { "bh.blishhud", "bh.community.pathing" })
+                }
+            };
+            world.AnswerInstallModule = (ns, ct) => {
+                if (ns == "bh.community.pathing") {
+                    return Task.FromResult(new ModuleInstallChange(false, false, "Pathing", ns, "3.2.1", "Network error"));
+                }
+                return Task.FromResult(new ModuleInstallChange(true, true, ns, ns, "1.0.0"));
+            };
+
+            var plan = new Plan("Install Pathing and Addon", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "bh.community.pathing", null, null,
+                               "Need pathing", isSideEffect: false, gap: "Pathing gap"),
+                new PlanAction(PlanActionKind.Install, "install", "bh.addon", null, null,
+                               "Need addon", isSideEffect: false, gap: "Addon gap")
+            });
+
+            var applier = new PlanApplier(world);
+            var reviewedPathing = new ReviewedAction(plan.Actions[0], "bh.community.pathing", "Pathing", null, "Pathing",
+                                                     "not installed", "installed", null);
+            var reviewedAddon = new ReviewedAction(plan.Actions[1], "bh.addon", "Addon Module", null, "Addon Module",
+                                                   "not installed", "installed", null, dependencies: new[] { "bh.community.pathing" });
+            var review = new PlanReview(plan, new[] { reviewedPathing, reviewedAddon });
+
+            AppliedPlan applied = await applier.ApplyAsync(review, new[] { 0, 1 }, CancellationToken.None);
+
+            Assert.Equal(1, world.InstallCalls);
+            Assert.Equal(2, applied.Outcomes.Count);
+            Assert.False(applied.Outcomes[0].Succeeded);
+            Assert.False(applied.Outcomes[1].Succeeded);
+            Assert.Contains("requires dependency \"bh.community.pathing\"", applied.Outcomes[1].Problem);
+        }
     }
 }
