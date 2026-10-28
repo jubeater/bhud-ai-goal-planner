@@ -174,7 +174,12 @@ namespace jubeater.aigoalplanner.Core
                 }
 
                 if (_catalogModules != null) {
+                    var candidates = new List<(PlanAction Action, CatalogModuleInfo CatalogModule)>();
+                    var seenNamespaces = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                     foreach (PlanAction action in actions.Where(a => a.Kind == PlanActionKind.Install)) {
+                        if (string.IsNullOrWhiteSpace(action.Gap)) continue;
+
                         string wanted = (action.Module ?? string.Empty).Trim();
                         if (wanted.Length == 0) continue;
 
@@ -182,13 +187,51 @@ namespace jubeater.aigoalplanner.Core
                             string.Equals(c.Namespace, wanted, StringComparison.OrdinalIgnoreCase) ||
                             string.Equals(c.Name, wanted, StringComparison.OrdinalIgnoreCase));
 
-                        if (cat != null) {
-                            _installedInPlan.Add(cat.Namespace);
-                            _installedInPlan.Add(cat.Name);
-                        } else {
-                            _installedInPlan.Add(wanted);
-                        }
+                        if (cat == null) continue;
+
+                        InstalledModuleInfo installed = Resolve(cat.Namespace) ?? Resolve(cat.Name) ?? Resolve(wanted);
+                        if (installed != null) continue;
+
+                        if (!seenNamespaces.Add(cat.Namespace)) continue;
+
+                        candidates.Add((action, cat));
                     }
+
+                    bool addedAny;
+                    do {
+                        addedAny = false;
+                        for (int i = candidates.Count - 1; i >= 0; i--) {
+                            var candidate = candidates[i];
+                            bool allSatisfied = true;
+
+                            if (candidate.CatalogModule.Dependencies != null) {
+                                foreach (string dep in candidate.CatalogModule.Dependencies) {
+                                    string depTrimmed = (dep ?? string.Empty).Trim();
+                                    if (depTrimmed.Length == 0 || string.Equals(depTrimmed, "bh.blishhud", StringComparison.OrdinalIgnoreCase)) {
+                                        continue;
+                                    }
+
+                                    bool isInstalled = _modules.Any(m =>
+                                        string.Equals(m.Namespace, depTrimmed, StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(m.Name, depTrimmed, StringComparison.OrdinalIgnoreCase));
+
+                                    bool isInPlan = _installedInPlan.Contains(depTrimmed);
+
+                                    if (!isInstalled && !isInPlan) {
+                                        allSatisfied = false;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (allSatisfied) {
+                                _installedInPlan.Add(candidate.CatalogModule.Namespace);
+                                _installedInPlan.Add(candidate.CatalogModule.Name);
+                                candidates.RemoveAt(i);
+                                addedAny = true;
+                            }
+                        }
+                    } while (addedAny);
                 }
             }
 

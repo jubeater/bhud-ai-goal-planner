@@ -252,5 +252,42 @@ namespace jubeater.aigoalplanner.Tests
             Assert.True(review.Actions[0].IsAccepted);
             Assert.True(review.Actions[1].IsAccepted);
         }
+
+        [Fact]
+        public async Task Dependent_is_rejected_when_dependency_action_cannot_be_applied() {
+            _world.CatalogModules.Add(new CatalogModuleInfo(
+                "bh.dependency",
+                "Dependency",
+                "1.0.0",
+                "A dependency requiring missing module.",
+                new[] { "bh.missing" }));
+            _world.CatalogModules.Add(new CatalogModuleInfo(
+                "bh.addon.dependent",
+                "Addon Dependent",
+                "1.0.0",
+                "An addon requiring dependency.",
+                new[] { "bh.dependency" }));
+
+            var plan = new Plan("Install Dependency and Addon", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "bh.dependency", null, null,
+                               "Need dependency", isSideEffect: false, gap: "Dependency gap"),
+                new PlanAction(PlanActionKind.Install, "install", "bh.addon.dependent", null, null,
+                               "Need addon", isSideEffect: false, gap: "Addon gap")
+            });
+
+            PlanReview review = await PlanValidator.ReviewAsync(plan, _world, CancellationToken.None);
+
+            Assert.Equal(2, review.Actions.Count);
+            ReviewedAction dependencyAction = review.Actions[0];
+            ReviewedAction addonAction = review.Actions[1];
+
+            Assert.False(dependencyAction.IsAccepted);
+            Assert.False(dependencyAction.CanApply);
+            Assert.Contains("requires dependency \"bh.missing\"", dependencyAction.Problem);
+
+            Assert.False(addonAction.IsAccepted);
+            Assert.False(addonAction.CanApply);
+            Assert.Contains("requires dependency \"bh.dependency\"", addonAction.Problem);
+        }
     }
 }
