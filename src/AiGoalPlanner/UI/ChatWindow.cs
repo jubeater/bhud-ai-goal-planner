@@ -100,6 +100,7 @@ namespace jubeater.aigoalplanner.UI
         private readonly Scrollbar      _scrollbar;
         private readonly Label          _emptyHint;
         private readonly Label          _providerLabel;
+        private readonly Label          _tokenLabel;
         private readonly TextBox        _requestBox;
         private readonly StandardButton _sendButton;
         private readonly StandardButton _cancelButton;
@@ -277,6 +278,19 @@ namespace jubeater.aigoalplanner.UI
                 Text      = string.Empty
             };
 
+            // What this Chat has used in total, on its own line below the Provider row: the
+            // title-bar subtitle the totals sat in first turned out too narrow in game, running
+            // under the close button and out of the window, so they moved here where the full
+            // content width fits the counts, the cached split and the cost.
+            _tokenLabel = new Label {
+                Parent    = content,
+                Location  = new Point(0, ProviderRowTop + StandardButton.STANDARD_CONTROL_HEIGHT + 6),
+                Size      = new Point(_window.ContentRegion.Width - TextRightMargin, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
+                Text      = string.Empty
+            };
+
             // The Review: what the AI proposed, one row per Action, and the two buttons that decide
             // what happens to it. It is its own area so a long Plan cannot push the conversation out
             // of the window.
@@ -360,14 +374,14 @@ namespace jubeater.aigoalplanner.UI
         }
 
         /// <summary>
-        /// Rewrites the subtitle with the Chat's token totals, for a settings change that brought
-        /// no new message to render: prices changed, so the per-Chat cost reads differently now.
-        /// What a new message uses is rewritten in the render pass instead.
+        /// Rewrites the per-Chat token line, for a settings change that brought no new message to
+        /// render: prices changed, so the per-Chat cost reads differently now. What a new message
+        /// uses is rewritten in the render pass instead.
         /// </summary>
         public void RefreshTokens() {
             if (_disposed) return;
 
-            _window.Subtitle = TokenSubtitle();
+            _tokenLabel.Text = TokenLine();
         }
 
         public void Dispose() {
@@ -569,9 +583,10 @@ namespace jubeater.aigoalplanner.UI
 
             int top = 0;
 
-            // The per-Chat token display lives in the subtitle, where the carried-over hint said
-            // there is room for it; what one reply used sits under that reply instead.
-            _window.Subtitle = TokenSubtitle();
+            // The per-Chat totals sit on their own line under the Provider row, where the full
+            // content width fits the counts, the cached split and the cost; what one reply used
+            // sits under that reply instead.
+            _tokenLabel.Text = TokenLine();
 
             foreach (ChatMessage message in messages) {
                 top = AddLabel(Format(message), ColorFor(message.Author), top);
@@ -616,15 +631,15 @@ namespace jubeater.aigoalplanner.UI
         }
 
         /// <summary>
-        /// The subtitle with the per-Chat token display: the tokens this Chat has used, with the
-        /// estimated cost when the Player entered prices. An empty Chat keeps its plain subtitle.
+        /// The per-Chat token line under the Provider row: the tokens this Chat has used, with the
+        /// estimated cost when the Player entered prices. An empty Chat keeps the line empty.
         /// </summary>
-        private string TokenSubtitle() {
+        private string TokenLine() {
             TokenUsage total = _chat.TotalUsage;
 
-            if (total.IsEmpty) return "Describe a goal";
+            if (total.IsEmpty) return string.Empty;
 
-            return "Describe a goal · " + total.DescribeWithCost(_chat.TotalEstimatedCostUsd);
+            return total.DescribeWithCost(_chat.TotalEstimatedCostUsd);
         }
 
         private static string Format(ChatMessage message) {

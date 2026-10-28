@@ -50,9 +50,14 @@ namespace jubeater.aigoalplanner.UI
         private readonly Func<IEnumerable<string>> _getSavedEndpoints;
         private readonly Action<string>            _removeProvider;
         private readonly Func<string>              _readTokenBudget;
-        private readonly Func<string, string>      _readInputPrice;
-        private readonly Func<string, string>      _readOutputPrice;
+        private readonly Func<string, TokenPrice>  _readPrices;
         private readonly Action<string, string, string, string> _saveTokens;
+
+        /// <summary>
+        /// What the two price fields show: they always describe the endpoint in the window, so
+        /// typing or picking another endpoint reloads them from what is saved for it.
+        /// </summary>
+        private readonly TokenPriceFields _priceFields = new TokenPriceFields();
 
         private readonly Dictionary<string, string> _customEndpointsByLabel =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -86,8 +91,7 @@ namespace jubeater.aigoalplanner.UI
                                       Func<IEnumerable<string>> getSavedEndpoints = null,
                                       Action<string>            removeProvider    = null,
                                       Func<string>              readTokenBudget   = null,
-                                      Func<string, string>      readInputPrice    = null,
-                                      Func<string, string>      readOutputPrice   = null,
+                                      Func<string, TokenPrice>  readPrices        = null,
                                       Action<string, string, string, string> saveTokens = null) {
             _readEndpoint      = readEndpoint      ?? throw new ArgumentNullException(nameof(readEndpoint));
             _readModel         = readModel         ?? throw new ArgumentNullException(nameof(readModel));
@@ -99,8 +103,7 @@ namespace jubeater.aigoalplanner.UI
             _getSavedEndpoints = getSavedEndpoints;
             _removeProvider    = removeProvider;
             _readTokenBudget   = readTokenBudget;
-            _readInputPrice    = readInputPrice;
-            _readOutputPrice   = readOutputPrice;
+            _readPrices        = readPrices;
             _saveTokens        = saveTokens;
 
             _window = new StandardWindow(
@@ -308,8 +311,8 @@ namespace jubeater.aigoalplanner.UI
                 _statusLabel.Text = string.Empty;
 
                 _budgetBox.Text     = _readTokenBudget?.Invoke() ?? string.Empty;
-                _inputPriceBox.Text  = _readInputPrice?.Invoke(endpoint) ?? string.Empty;
-                _outputPriceBox.Text = _readOutputPrice?.Invoke(endpoint) ?? string.Empty;
+
+                SyncPriceBoxes(endpoint);
 
                 RefreshKeyStatus(endpoint);
                 UpdateRemoveButtonState();
@@ -412,8 +415,7 @@ namespace jubeater.aigoalplanner.UI
                 string savedModel = _getSavedModel?.Invoke(endpoint);
                 _modelBox.Text = savedModel ?? string.Empty;
 
-                _inputPriceBox.Text  = _readInputPrice?.Invoke(endpoint) ?? string.Empty;
-                _outputPriceBox.Text = _readOutputPrice?.Invoke(endpoint) ?? string.Empty;
+                SyncPriceBoxes(endpoint);
 
                 RefreshKeyStatus(endpoint);
                 UpdateRemoveButtonState();
@@ -439,11 +441,9 @@ namespace jubeater.aigoalplanner.UI
                     }
                 }
 
-                if (string.IsNullOrWhiteSpace(_inputPriceBox.Text) && string.IsNullOrWhiteSpace(_outputPriceBox.Text)
-                 && !string.IsNullOrWhiteSpace(endpoint)) {
-                    _inputPriceBox.Text  = _readInputPrice?.Invoke(endpoint) ?? string.Empty;
-                    _outputPriceBox.Text = _readOutputPrice?.Invoke(endpoint) ?? string.Empty;
-                }
+                // Typed or picked, the fields always describe the endpoint in the window: leaving
+                // the previous Provider's prices in them would save them to the new endpoint.
+                SyncPriceBoxes(endpoint);
 
                 RefreshKeyStatus(endpoint);
             } finally {
@@ -478,8 +478,7 @@ namespace jubeater.aigoalplanner.UI
                 _providerDropdown.SelectedItem = "Custom";
                 _endpointBox.Text              = string.Empty;
                 _modelBox.Text                 = string.Empty;
-                _inputPriceBox.Text            = string.Empty;
-                _outputPriceBox.Text           = string.Empty;
+                SyncPriceBoxes(string.Empty);
                 RefreshKeyStatus(string.Empty);
                 UpdateRemoveButtonState();
                 ShowStatus(string.Empty, HintColor);
@@ -641,6 +640,18 @@ namespace jubeater.aigoalplanner.UI
 
         private string ReadEndpoint() {
             return (_endpointBox.Text ?? string.Empty).Trim();
+        }
+
+        /// <summary>
+        /// Rewrites both price fields from what is saved for <paramref name="endpoint"/>, so the
+        /// fields always describe the endpoint they belong to. Called whenever that endpoint
+        /// changes — picked from the list, typed, shown or removed.
+        /// </summary>
+        private void SyncPriceBoxes(string endpoint) {
+            _priceFields.EndpointChanged(endpoint, _readPrices);
+
+            _inputPriceBox.Text  = _priceFields.InputText;
+            _outputPriceBox.Text = _priceFields.OutputText;
         }
 
         private void ShowStatus(string text, Color color) {

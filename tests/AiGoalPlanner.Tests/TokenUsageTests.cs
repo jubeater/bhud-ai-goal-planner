@@ -109,6 +109,12 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public void The_per_Chat_line_names_totals_and_cost_exactly() {
+            Assert.Equal("8,190 in · 5,632 cached · 368 out · ~$0.0012",
+                         new TokenUsage(8190, 5632, 368).DescribeWithCost(0.0012m));
+        }
+
+        [Fact]
         public void The_budget_parses_as_a_whole_number_of_tokens() {
             Assert.True(TokenBudget.TryParse("300000", out long budget));
             Assert.Equal(300000, budget);

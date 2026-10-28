@@ -427,8 +427,7 @@ namespace jubeater.aigoalplanner
                     () => _savedProviders.Endpoints,
                     RemoveSavedProvider,
                     () => _tokenBudgetSetting.Value.ToString(CultureInfo.InvariantCulture),
-                    endpoint => FormatPrice(_tokenPrices.GetPrice(endpoint)?.InputPerMillion),
-                    endpoint => FormatPrice(_tokenPrices.GetPrice(endpoint)?.OutputPerMillion),
+                    endpoint => _tokenPrices.GetPrice(endpoint),
                     SaveTokenSettings);
             }
 
@@ -487,10 +486,6 @@ namespace jubeater.aigoalplanner
 
             _tokenPrices.SetPrice(endpoint, price);
             _tokenPricesSetting.Value = _tokenPrices.ToJson();
-        }
-
-        private static string FormatPrice(decimal? price) {
-            return price?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         }
 
         /// <summary>
