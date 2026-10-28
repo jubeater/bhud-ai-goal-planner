@@ -217,5 +217,5 @@ namespace jubeater.aigoalplanner.Core
             }
         }
     }
-}
 #endif
+}

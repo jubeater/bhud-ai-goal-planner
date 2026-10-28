@@ -81,6 +81,10 @@ namespace jubeater.aigoalplanner
         private SettingEntry<string> _modelSetting;
         private SettingEntry<string> _savedProvidersSetting;
         private SettingEntry<bool>   _autoApplySetting;
+#if DEBUG
+        private SettingEntry<bool> _devChannelSetting;
+        private DevChannelHost     _devChannelHost;
+#endif
         private SavedProviders       _savedProviders;
         private ProviderKeyStore     _keyStore;
         private ToolCallingCapabilityStore _capabilityStore;
@@ -98,6 +102,9 @@ namespace jubeater.aigoalplanner
 
         protected override void Initialize() {
             DefineProviderSettings();
+#if DEBUG
+            DefineDevChannelSetting();
+#endif
 
             _keyStore        = new ProviderKeyStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
             _capabilityStore = new ToolCallingCapabilityStore(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
@@ -190,6 +197,36 @@ namespace jubeater.aigoalplanner
                     + "ask for, and anything that is not a Setting, still wait for Review.");
         }
 
+#if DEBUG
+        /// <summary>
+        /// The developer channel's setting (off by default): while it is on and Blish HUD was started
+        /// with <c>--debug</c>, request files in <c>dev\inbox</c> run against this Chat. The setting
+        /// explains all three gates, so the Player knows what is needed when the channel is closed.
+        /// </summary>
+        private void DefineDevChannelSetting() {
+            _devChannelSetting = this.SettingsManager.ModuleSettings.DefineSetting(
+                "dev.channel",
+                false,
+                () => "Developer channel (for testing only)",
+                () => DevGate.Describe(ReadBlishDebugFlag(), _devChannelSetting != null && _devChannelSetting.Value));
+        }
+
+        /// <summary>
+        /// Whether Blish HUD was started with <c>--debug</c>, read from this process's own command
+        /// line — the module runs inside Blish HUD, so it sees the same flags
+        /// (<c>scripts\dev-run.ps1</c> starts it with <c>--debug --module</c>). Blish HUD only exposes
+        /// the parsed flag to its own modules list, not to modules, so the raw arguments are what a
+        /// module can check.
+        /// </summary>
+        private static bool ReadBlishDebugFlag() {
+            foreach (string argument in Environment.GetCommandLineArgs()) {
+                if (string.Equals(argument, "--debug", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+
+            return false;
+        }
+#endif
+
         /// <summary>
         /// Builds the Provider client for the current Settings. A change in Settings takes effect on
         /// the next Request; the Chat is not rebuilt, so its history stays.
@@ -241,10 +278,27 @@ namespace jubeater.aigoalplanner
                     _chat.ShowNotice(LoadFailureNotice);
                 }
             }
+
+#if DEBUG
+            // The channel watches the inbox from here, not from Initialize: Initialize must stay
+            // quick and must not touch the disk, while watching starts a task that lives until Unload.
+            if (_chat != null && _devChannelSetting != null) {
+                _devChannelHost = new DevChannelHost();
+                _devChannelHost.Start(_chat, () => _devChannelSetting.Value, LogDebug,
+                                      DirectoriesManager.GetFullDirectoryPath("aigoalplanner"));
+            }
+#endif
         }
 
         /// <inheritdoc />
         protected override void Unload() {
+#if DEBUG
+            if (_devChannelHost != null) {
+                _devChannelHost.Stop();
+                _devChannelHost = null;
+            }
+#endif
+
             if (_cornerIcon != null) {
                 _cornerIcon.Click -= OnCornerIconClicked;
                 _cornerIcon.Dispose();

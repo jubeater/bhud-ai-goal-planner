@@ -232,5 +232,5 @@ namespace jubeater.aigoalplanner.Core
             return true;
         }
     }
-}
 #endif
+}

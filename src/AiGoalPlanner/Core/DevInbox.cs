@@ -77,5 +77,5 @@ namespace jubeater.aigoalplanner.Core
             get { return Path.Combine(_root, "dev", "outbox"); }
         }
     }
-}
 #endif
+}

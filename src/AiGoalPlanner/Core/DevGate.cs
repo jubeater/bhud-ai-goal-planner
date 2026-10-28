@@ -12,8 +12,7 @@ namespace jubeater.aigoalplanner.Core
     {
         /// <summary>
         /// Whether the channel may run: Blish HUD started with <c>--debug</c> and the Player turned
-        /// the setting on. The module reads the flag from Blish HUD's own settings and hands it in;
-        /// anything Blish HUD throws while asking counts as the flag missing.
+        /// the setting on. The module reads the flag from its own command line and hands it in.
         /// </summary>
         public static bool IsOpen(bool blishDebug, bool settingOn) {
             return blishDebug && settingOn;
@@ -40,5 +39,5 @@ namespace jubeater.aigoalplanner.Core
                  + "Release builds have no developer channel.";
         }
     }
-}
 #endif
+}
