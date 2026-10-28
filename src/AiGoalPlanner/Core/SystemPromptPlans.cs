@@ -19,6 +19,6 @@ namespace jubeater.aigoalplanner.Core
           + "when the Player asked for that change: send it every time. Leave out the fields a kind "
           + "does not use: a module action has no setting key, and an advice has no module. A disabled "
           + "module's settings cannot be read, so propose enabling it on its own, and configure it once "
-          + "the Player has applied that. After downloading a marker pack, use find_marker_categories in the continuation to find relevant marker categories and advise the Player which category display path to turn on in Pathing.";
+          + "the Player has applied that. After downloading a marker pack, use find_marker_categories in the continuation to find relevant marker categories and advise the Player which category display path to turn on in Pathing. If a downloaded pack appears in skipped_packs, tell the Player plainly that the pack's category list couldn't be read, and that the Player can find it in Pathing's menu under the pack's name; do not suggest waiting for indexing or restarting Pathing.";
     }
 }

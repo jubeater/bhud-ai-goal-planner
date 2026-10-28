@@ -1214,7 +1214,7 @@ namespace jubeater.aigoalplanner.Core
                             : applied.Describe() + " ";
 
                 _modelHistory.Add(new AiChatMessage(ChatRole.User,
-                                                    text + "Look up anything you now need to, and tell the Player what you suggest next."));
+                                                    text + GetContinuationInstruction(earlier, applied)));
             }
 
             return true;
@@ -1224,6 +1224,16 @@ namespace jubeater.aigoalplanner.Core
         /// The message to replay for what the model said this round: its tool calls, and any words
         /// it said along with them.
         /// </summary>
+        private static string GetContinuationInstruction(AppliedPlan earlier, AppliedPlan applied) {
+            string instruction = "Look up anything you now need to, and tell the Player what you suggest next.";
+            bool hadDownload = (earlier != null && earlier.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.DownloadPack))
+                            || (applied != null && applied.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.DownloadPack));
+            if (hadDownload) {
+                instruction += " Use find_marker_categories to look up marker categories for the downloaded pack. If the pack appears in skipped_packs, tell the Player plainly that the pack's category list couldn't be read, and that the Player can find it in Pathing's menu under the pack's name; do not suggest waiting for indexing or restarting Pathing.";
+            }
+            return instruction;
+        }
+
         private static AiChatMessage AssistantMessageOf(ChatResponse response) {
             if (response.Messages.Count == 1) return response.Messages[0];
 

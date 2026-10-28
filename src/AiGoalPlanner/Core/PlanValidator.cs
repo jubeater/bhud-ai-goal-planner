@@ -45,6 +45,15 @@ namespace jubeater.aigoalplanner.Core
             return new PlanReview(plan, actions);
         }
 
+        public static string FormatPackSize(double sizeMb) {
+            if (sizeMb <= 0) return string.Empty;
+            if (sizeMb < 1.0) {
+                int kb = Math.Max(1, (int)Math.Round(sizeMb * 1000.0));
+                return kb.ToString(CultureInfo.InvariantCulture) + " KB";
+            }
+            return sizeMb.ToString("0.#", CultureInfo.InvariantCulture) + " MB";
+        }
+
         /// <summary>
         /// What is wrong with a value for one Setting, or null when that Setting would accept it.
         /// The answer is a phrase that completes "the value cannot be used: …".
@@ -290,9 +299,9 @@ namespace jubeater.aigoalplanner.Core
                     return Reject(action, null, pack.Name + " is already installed.");
                 }
 
-                string sizeText = pack.SizeMb > 0
-                    ? pack.SizeMb.ToString("0.#", CultureInfo.InvariantCulture) + " MB"
-                    : string.Empty;
+                string sizeText = FormatPackSize(pack.SizeMb);
+
+
 
                 return Accept(action, null, null, pack.Name, "not installed", sizeText);
             }
