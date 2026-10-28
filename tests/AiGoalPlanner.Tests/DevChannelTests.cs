@@ -597,6 +597,38 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task An_operation_is_dropped_when_the_gate_closes_and_reopens_while_it_waits() {
+            var model = new ScriptedChatClient();
+            model.WillHold();
+            model.WillReply("An answer.");
+            model.WillReply("Never reached.");
+
+            var chat = NewChannelChat(model, PlayerWorld());
+
+            Task player = chat.SendAsync("A Player request");
+
+            await WaitUntil(() => model.Requests.Count == 1);
+
+            bool open = true;
+
+            var channel = new DevChannel(chat, isOpen: () => open, logDebug: null, inbox: new FakeDevInbox());
+
+            Task<DevResponse> queued = channel.HandleAsync(new DevRequest("q1", DevRequestOp.Send, "Queued developer request"));
+
+            open = false;
+            await Task.Delay(50);
+            open = true;
+            model.Release();
+            await player;
+
+            DevResponse response = await queued;
+
+            Assert.False(response.Ok);
+            Assert.Equal(DevErrors.ChannelOff, response.Error);
+            Assert.Single(model.Requests);
+        }
+
+        [Fact]
         public async Task A_request_that_outlasts_its_budget_times_out() {
             var model = new ScriptedChatClient();
             model.WillCallTool("get_module_settings", "call_1",

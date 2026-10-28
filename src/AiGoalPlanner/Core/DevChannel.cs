@@ -38,6 +38,17 @@ namespace jubeater.aigoalplanner.Core
         /// <summary>How long one request may run before the channel answers <see cref="DevErrors.Timeout"/>.</summary>
         private static readonly TimeSpan DefaultOperationTimeout = TimeSpan.FromSeconds(120);
 
+        /// <summary>How closely admission watches the gate and the Chat while a request waits.</summary>
+        private static readonly TimeSpan AdmissionSlice = TimeSpan.FromMilliseconds(10);
+
+        /// <summary>Why a wait ended: its turn came, the gate closed, or the budget ran out.</summary>
+        private enum WaitOutcome
+        {
+            Ready,
+            GateClosed,
+            BudgetOut
+        }
+
         private readonly Chat             _chat;
         private readonly Func<bool>       _isOpen;
         private readonly Action<string>   _logDebug;
@@ -48,13 +59,25 @@ namespace jubeater.aigoalplanner.Core
         private readonly SemaphoreSlim    _gate = new SemaphoreSlim(1, 1);
 
         /// <summary>
-        /// Files older than this never run: they were already waiting the last time a gate was
-        /// closed, or they predate this channel. Re-saving a file counts as new and runs.
+        /// Files older than this never run: they were already waiting the last time the gate
+        /// reopened, or they predate this channel. Re-saving a file counts as new and runs.
         /// </summary>
         private DateTime _notBeforeUtc;
 
-        /// <summary>Whether the last poll saw the gate open, so reopening can retire the backlog.</summary>
-        private bool _wasOpen = true;
+        /// <summary>Guards the gate observations below: the gate can be read from any thread.</summary>
+        private readonly object _gateState = new object();
+
+        /// <summary>What the last gate reading saw, so reopening can retire the backlog.</summary>
+        private bool _gateWasOpen = true;
+
+        /// <summary>
+        /// How many gate closures have been seen. An operation captures this when admitted and is
+        /// dropped when it changed before dispatch, even if the gate is open again.
+        /// </summary>
+        private long _gateClosures;
+
+        /// <summary>The closures the last open poll had seen, so reopening retires the backlog.</summary>
+        private long _lastPollClosures;
 
         /// <summary>
         /// Builds the channel. <paramref name="isOpen"/> says whether the Player turned the module
@@ -87,26 +110,39 @@ namespace jubeater.aigoalplanner.Core
             Stopwatch watch = Stopwatch.StartNew();
             DevResponse response;
 
-            if (!_isOpen()) {
+            long admitted = GateClosures;
+
+            if (!NoteGate()) {
                 response = DevResponse.Failed(DevErrors.ChannelOff);
-            } else if (await _gate.WaitAsync(_busyTimeout, cancellationToken).ConfigureAwait(false)) {
-                try {
-                    if (!await WaitForChatAsync(_busyTimeout, cancellationToken).ConfigureAwait(false)) {
-                        response = DevResponse.Failed(DevErrors.Busy);
-                    } else if (!_isOpen()) {
-                        // The gate closed while this request waited its turn: it never runs.
-                        response = DevResponse.Failed(DevErrors.ChannelOff);
-                    } else {
-                        response = await ExecuteWithTimeoutAsync(request, cancellationToken).ConfigureAwait(false);
-                    }
-                } catch (Exception exception) {
-                    // The type, not the message: a message can carry a Setting's value back out.
-                    response = DevResponse.Failed("failed: " + exception.GetType().Name);
-                } finally {
-                    _gate.Release();
-                }
             } else {
-                response = DevResponse.Failed(DevErrors.Busy);
+                WaitOutcome turn = await WaitForTurnAsync(_busyTimeout, cancellationToken).ConfigureAwait(false);
+
+                if (turn != WaitOutcome.Ready) {
+                    response = turn == WaitOutcome.GateClosed
+                                   ? DevResponse.Failed(DevErrors.ChannelOff)
+                                   : DevResponse.Failed(DevErrors.Busy);
+                } else {
+                    try {
+                        WaitOutcome chat = await WaitForChatAsync(_busyTimeout, cancellationToken).ConfigureAwait(false);
+
+                        if (chat != WaitOutcome.Ready) {
+                            response = chat == WaitOutcome.GateClosed
+                                           ? DevResponse.Failed(DevErrors.ChannelOff)
+                                           : DevResponse.Failed(DevErrors.Busy);
+                        } else if (GateClosures != admitted || !NoteGate()) {
+                            // The gate closed while this request waited its turn: it never runs,
+                            // even if the gate is open again.
+                            response = DevResponse.Failed(DevErrors.ChannelOff);
+                        } else {
+                            response = await ExecuteWithTimeoutAsync(request, cancellationToken).ConfigureAwait(false);
+                        }
+                    } catch (Exception exception) {
+                        // The type, not the message: a message can carry a Setting's value back out.
+                        response = DevResponse.Failed("failed: " + exception.GetType().Name);
+                    } finally {
+                        _gate.Release();
+                    }
+                }
             }
 
             _logDebug?.Invoke("dev request " + request.Id + ": " + DescribeOp(request) + ", "
@@ -116,20 +152,63 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
-        /// Waits until the Chat is free — no Request, Apply or Undo still running, whoever started
-        /// it — up to <paramref name="budget"/>, so a request that arrives while the Player is busy
-        /// waits its turn. Answers false when the budget runs out first.
+        /// Reads the gate and notes the reading: every observed open-to-closed transition moves the
+        /// closure generation, so an operation that waited through a closure is dropped even after
+        /// the gate reopens. Answers whether the gate is open now.
         /// </summary>
-        private async Task<bool> WaitForChatAsync(TimeSpan budget, CancellationToken cancellationToken) {
+        private bool NoteGate() {
+            lock (_gateState) {
+                bool open = _isOpen();
+
+                if (_gateWasOpen && !open) _gateClosures++;
+
+                _gateWasOpen = open;
+
+                return open;
+            }
+        }
+
+        private long GateClosures {
+            get {
+                lock (_gateState) {
+                    return _gateClosures;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Waits for this request's turn — no other channel request running — up to
+        /// <paramref name="budget"/>, watching the gate meanwhile. Answers why the wait ended.
+        /// </summary>
+        private async Task<WaitOutcome> WaitForTurnAsync(TimeSpan budget, CancellationToken cancellationToken) {
             Stopwatch watch = Stopwatch.StartNew();
 
-            while (_chat.IsBusy) {
-                if (watch.Elapsed >= budget) return false;
+            while (watch.Elapsed < budget) {
+                if (await _gate.WaitAsync(AdmissionSlice, cancellationToken).ConfigureAwait(false)) {
+                    return WaitOutcome.Ready;
+                }
 
-                await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+                if (!NoteGate()) return WaitOutcome.GateClosed;
             }
 
-            return true;
+            return NoteGate() ? WaitOutcome.BudgetOut : WaitOutcome.GateClosed;
+        }
+
+        /// <summary>
+        /// Waits until the Chat is free — no Request, Apply or Undo still running, whoever started
+        /// it — up to <paramref name="budget"/>, watching the gate meanwhile, so a request that
+        /// arrives while the Player is busy waits its turn. Answers why the wait ended.
+        /// </summary>
+        private async Task<WaitOutcome> WaitForChatAsync(TimeSpan budget, CancellationToken cancellationToken) {
+            Stopwatch watch = Stopwatch.StartNew();
+
+            while (true) {
+                if (!NoteGate()) return WaitOutcome.GateClosed;
+                if (!_chat.IsBusy) return WaitOutcome.Ready;
+                if (watch.Elapsed >= budget) return WaitOutcome.BudgetOut;
+
+                await Task.Delay(AdmissionSlice, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -140,18 +219,17 @@ namespace jubeater.aigoalplanner.Core
         /// last time a gate was closed, are left alone and never run.
         /// </summary>
         public async Task<string> PollAsync(CancellationToken cancellationToken = default(CancellationToken)) {
-            if (!_isOpen()) {
-                _wasOpen      = false;
+            if (!NoteGate()) {
                 _notBeforeUtc = _utcNow();
 
                 return null;
             }
 
-            if (!_wasOpen) {
-                // The gate just reopened: whatever is already waiting arrived while it was closed,
-                // so none of it runs. Only files written from now on do.
-                _wasOpen      = true;
-                _notBeforeUtc = _utcNow();
+            if (GateClosures != _lastPollClosures) {
+                // The gate closed and reopened since the last open poll: whatever is already waiting
+                // arrived while it was closed, so none of it runs. Only files written from now on do.
+                _notBeforeUtc     = _utcNow();
+                _lastPollClosures = GateClosures;
             }
 
             foreach (string fileName in _inbox.Waiting) {
