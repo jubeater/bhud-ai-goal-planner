@@ -25,7 +25,7 @@ function Write-DevRequest {
     )
 
     if (-not (Test-Path $script:DevInbox)) {
-        throw "Inbox folder '$script:DevInbox' not found. Is Blish HUD running with the module loaded?"
+        New-Item -ItemType Directory -Path $script:DevInbox -Force | Out-Null
     }
 
     $id = New-DevId
