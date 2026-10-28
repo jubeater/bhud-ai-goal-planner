@@ -625,6 +625,11 @@ namespace jubeater.aigoalplanner.Core
             while (true) {
                 round++;
 
+                // The budget is checked before every Provider call, not just after the Request:
+                // past it the loop ends here, with the tool results already in the history, and
+                // the Player's next message continues from them.
+                if (StopAtBudget(generation)) return;
+
                 ChatResponse response;
                 Stopwatch    clock = Stopwatch.StartNew();
 
@@ -850,6 +855,14 @@ namespace jubeater.aigoalplanner.Core
 
                 _messages.Add(new ChatMessage(ChatMessageAuthor.Player, request));
                 _modelHistory.Add(new AiChatMessage(ChatRole.User, request));
+
+                // A new Request starts its own per-reply accounting: whatever an earlier Request
+                // spent without leaving a reply behind stays in the Chat's totals, not in the
+                // next reply. A Continuation after an Apply is the same Request, so only a new
+                // Request resets.
+                _requestUsage   = TokenUsage.Empty;
+                _requestCost    = null;
+                _requestHasCost = false;
             }
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
@@ -1393,6 +1406,32 @@ namespace jubeater.aigoalplanner.Core
             }
 
             MessagesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Whether this Request ends before its next Provider call: the Chat's tokens have reached
+        /// its Token Budget and the Player has not been asked yet. The question is a Notice in the
+        /// Chat, asked once per Chat — the model is not asked to ask it, which would spend the
+        /// Player's tokens past the budget to talk about the budget. A Request the Player has left
+        /// ends silently instead. When the Player has been asked, a further message is the answer
+        /// and the Request goes on.
+        /// </summary>
+        private bool StopAtBudget(int generation) {
+            long budget = _tokenBudget?.Invoke() ?? TokenBudget.Default;
+
+            lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return true;
+                if (_budgetPromptShown) return false;
+                if (!TokenBudget.IsReached(_totalUsage.Total, budget)) return false;
+
+                _budgetPromptShown = true;
+
+                _messages.Add(new ChatMessage(ChatMessageAuthor.Notice, TokenBudget.PromptFor(_totalUsage.Total, budget)));
+            }
+
+            MessagesChanged?.Invoke(this, EventArgs.Empty);
+
+            return true;
         }
     }
 }
