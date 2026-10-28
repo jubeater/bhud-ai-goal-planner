@@ -32,6 +32,9 @@ namespace jubeater.aigoalplanner.Core
         /// <summary>How often the watcher looks for a new request file.</summary>
         private const int PollMilliseconds = 250;
 
+        /// <summary>How often the watcher notes the gate, independently of operation execution.</summary>
+        private const int GatePollMilliseconds = 100;
+
         /// <summary>How long a request that arrives while another one runs waits for its turn.</summary>
         private static readonly TimeSpan DefaultBusyTimeout = TimeSpan.FromSeconds(120);
 
@@ -273,10 +276,35 @@ namespace jubeater.aigoalplanner.Core
         /// channel when the setting is turned off or the module unloads: files left in the inbox stay
         /// there, never run later.
         /// </summary>
+        /// <remarks>
+        /// The gate is observed on its own cadence, independently of operation execution, so a closure
+        /// counts even while a long operation runs and reopening still retires its backlog.
+        /// </remarks>
         public async Task WatchAsync(CancellationToken cancellationToken = default(CancellationToken)) {
+            using (CancellationTokenSource scope = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)) {
+                Task inbox = PollLoopAsync(scope.Token);
+                Task gate  = ObserveGateAsync(scope.Token);
+
+                await Task.WhenAny(inbox, gate).ConfigureAwait(false);
+                scope.Cancel();
+
+                // Surface a real fault, if either loop died for another reason; stopping on
+                // cancellation is the normal end.
+                await Task.WhenAll(inbox, gate).ConfigureAwait(false);
+            }
+        }
+
+        private async Task PollLoopAsync(CancellationToken cancellationToken) {
             while (!cancellationToken.IsCancellationRequested) {
                 await PollAsync(cancellationToken).ConfigureAwait(false);
                 await Task.Delay(PollMilliseconds, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        private async Task ObserveGateAsync(CancellationToken cancellationToken) {
+            while (!cancellationToken.IsCancellationRequested) {
+                NoteGate();
+                await Task.Delay(GatePollMilliseconds, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -295,9 +323,17 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>
         /// Runs one operation against the Chat, or answers why it could not. A request the channel
-        /// does not accept never reaches the Chat.
+        /// does not accept never reaches the Chat. A request that outlasts its budget answers
+        /// <see cref="DevErrors.Timeout"/> together with what it produced so far.
         /// </summary>
         private async Task<DevResponse> ExecuteWithTimeoutAsync(DevRequest request, CancellationToken cancellationToken) {
+            // What the Chat held before this operation: a request that outlasts its budget still
+            // reports what it produced so far — its messages and Notices, Lookups and round trips,
+            // and the current Review and Undo state.
+            int messagesBefore   = _chat.Messages.Count;
+            int roundTripsBefore = _chat.RoundTrips.Count;
+            int lookupsBefore    = _chat.Lookups.Count;
+
             using (CancellationTokenSource timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)) {
                 Task<DevResponse> execution = ExecuteAsync(request, timeoutSource.Token);
                 Task timeout                = Task.Delay(_operationTimeout, timeoutSource.Token);
@@ -311,7 +347,12 @@ namespace jubeater.aigoalplanner.Core
                 try {
                     return await execution.ConfigureAwait(false);
                 } catch (OperationCanceledException) {
-                    return DevResponse.Failed(DevErrors.Timeout);
+                    return new DevResponse(false, DevErrors.Timeout,
+                                           _chat.Messages.Skip(messagesBefore).ToList(),
+                                           _chat.Review, _chat.CanUndo,
+                                           _chat.RoundTrips.Skip(roundTripsBefore).ToList(),
+                                           _chat.Lookups.Skip(lookupsBefore).ToList(),
+                                           applied: null);
                 }
             }
         }

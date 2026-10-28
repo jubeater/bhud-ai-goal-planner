@@ -343,6 +343,61 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_file_added_while_disabled_during_an_operation_never_runs() {
+            var model = new ScriptedChatClient();
+            model.WillHold();
+            model.WillReply("First answer.");
+            model.WillReply("Stale answer.");
+
+            var chat  = NewChannelChat(model, PlayerWorld());
+            var inbox = new FakeDevInbox();
+
+            DateTime now = new DateTime(2026, 10, 28, 12, 0, 0, DateTimeKind.Utc);
+            bool open    = true;
+
+            var channel = new DevChannel(chat, isOpen: () => open, logDebug: null, inbox: inbox,
+                                         utcNow: () => now);
+
+            inbox.AddFile("first.json", "{ \"id\": \"first\", \"op\": \"send\", \"text\": \"First request\" }",
+                          changedUtc: now);
+
+            using (var watching = new CancellationTokenSource()) {
+                Task watcher = channel.WatchAsync(watching.Token);
+
+                await WaitUntil(() => model.Requests.Count == 1);
+
+                now = now.AddSeconds(1);
+                open = false;
+                inbox.AddFile("stale.json", "{ \"id\": \"stale\", \"op\": \"send\", \"text\": \"Queued while disabled\" }",
+                              changedUtc: now);
+
+                // The gate stays closed long enough for the independent observer to see it several
+                // times, while the first operation is still running.
+                await Task.Delay(500);
+
+                now = now.AddSeconds(1);
+                open = true;
+                model.Release();
+
+                for (int attempt = 0; attempt < 200 && !inbox.Responses.ContainsKey("first"); attempt++) {
+                    await Task.Delay(50);
+                }
+
+                // Let several polls run after reopening: the stale file gets its chance, and must
+                // still never run.
+                await Task.Delay(750);
+
+                watching.Cancel();
+
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => watcher);
+
+                Assert.Single(model.Requests);
+                Assert.False(inbox.Responses.ContainsKey("stale"));
+                Assert.Equal(new[] { "stale.json" }, inbox.Waiting);
+            }
+        }
+
+        [Fact]
         public async Task Each_send_reports_only_what_it_added() {
             var model = new ScriptedChatClient();
             model.WillReply("First answer.");
@@ -391,6 +446,36 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_failed_Provider_attempt_is_recorded_with_its_duration_and_detail() {
+            var model = new ScriptedChatClient();
+            model.WillFail(ProviderFailure.Unexpected);
+
+            var log  = new List<string>();
+            var chat = NewChannelChat(model, PlayerWorld(), log);
+
+            var inbox = new FakeDevInbox();
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"Hello\" }");
+
+            Assert.Equal("a1", await PollAsync(chat, inbox, log));
+
+            JObject json = Response(inbox, "a1");
+
+            Assert.True((bool)json["ok"]);
+            Assert.Equal("notice", (string)json["messages"][1]["author"]);
+
+            JToken roundTrip = Assert.Single(json["roundTrips"]);
+
+            Assert.Equal("Unexpected", (string)roundTrip["finishReason"]);
+            Assert.True((int)roundTrip["durationMs"] >= 0);
+            Assert.Equal(0, (int)roundTrip["toolCalls"]);
+
+            string everything = string.Join("\n", log);
+
+            Assert.Contains("failed after", everything);
+            Assert.Contains("Unexpected", everything);
+        }
+
+        [Fact]
         public async Task New_chat_on_an_unavailable_Chat_reports_its_Notice() {
             var chat = Chat.Unavailable("Provider could not load.");
 
@@ -412,6 +497,39 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Empty(json["roundTrips"]);
             Assert.Equal(JTokenType.Null, json["review"].Type);
             Assert.False((bool)json["undoAvailable"]);
+        }
+
+        [Fact]
+        public async Task A_timed_out_request_reports_what_it_produced_so_far() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool("get_module_settings", "call_1",
+                                new Dictionary<string, object> { ["namespace"] = "bh.mounts" });
+            model.WillReply("Never reached.");
+
+            var world = PlayerWorld();
+            var held  = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            world.AnswerGetModuleSettings = (@namespace, cancellationToken) =>
+                HoldUntil(held.Task, world, @namespace, cancellationToken);
+
+            var chat = NewChannelChat(model, world);
+
+            var inbox = new FakeDevInbox();
+            inbox.AddFile("a9.json", "{ \"id\": \"a9\", \"op\": \"send\", \"text\": \"Settings please\" }");
+
+            var slow = new DevChannel(chat, isOpen: () => true, logDebug: null, inbox: inbox,
+                                      operationTimeout: TimeSpan.FromMilliseconds(100));
+
+            Assert.Equal("a9", await slow.PollAsync());
+
+            JObject json = Response(inbox, "a9");
+
+            Assert.False((bool)json["ok"]);
+            Assert.Equal(DevErrors.Timeout, (string)json["error"]);
+            Assert.Single(json["messages"]);
+            Assert.Equal("Settings please", (string)json["messages"][0]["text"]);
+            Assert.Single(json["lookups"]);
+            Assert.NotEmpty(json["roundTrips"]);
         }
 
         [Fact]

@@ -1125,6 +1125,12 @@ namespace jubeater.aigoalplanner.Core
         /// echo the request, and with it the key.
         /// </summary>
         private void LogRoundFailed(int round, Stopwatch clock, string failure) {
+#if DEBUG
+            lock (_messagesLock) {
+                _roundTrips.Add(new DevRoundTrip(clock.ElapsedMilliseconds, failure, 0));
+            }
+#endif
+
             if (_logDebug == null) return;
 
             _logDebug("Provider round trip " + round + " failed after " + clock.ElapsedMilliseconds + " ms: " + failure);
