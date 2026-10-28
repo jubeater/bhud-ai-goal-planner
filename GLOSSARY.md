@@ -45,7 +45,7 @@ product. The Player never sees it, and it is not a Notice.
 _Avoid_: System prompt (that is the whole fixed message, of which this is the first paragraph), preamble, personality
 
 **Preset**:
-A ready-made Request for a common goal, such as hero points, mastery points or XP, that the Player can edit before sending.
+A ready-made Request for a common goal, such as hero points, mastery points or XP, that the Player can edit before sending. Each Preset also carries hints the AI follows when the Chat is about that goal.
 _Avoid_: Mode, template, profile
 
 ### Plans

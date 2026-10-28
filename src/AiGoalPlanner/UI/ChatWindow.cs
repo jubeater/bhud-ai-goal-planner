@@ -27,10 +27,10 @@ namespace jubeater.aigoalplanner.UI
         private const string WindowId = "jubeater.aigoalplanner.chat";
 
         private const int WindowWidth       = 560;
-        private const int WindowHeight      = 780;
+        private const int WindowHeight      = 796;
 
         /// <summary>
-        /// What is left of the window inside its frame: 690 px of the 780, as the frame takes 50 above
+        /// What is left of the window inside its frame: 706 px of the 796, as the frame takes 50 above
         /// the content and 40 below it.
         /// </summary>
         private const int ContentHeight     = WindowHeight - 90;
@@ -51,6 +51,14 @@ namespace jubeater.aigoalplanner.UI
 
         private const int InputRowTop       = 574;
         private const int ProviderRowTop    = 608;
+
+        /// <summary>
+        /// The Preset buttons sit on their own row under the per-Chat token line, so a new preset
+        /// never moves the conversation, the Review or the input row.
+        /// </summary>
+        private const int PresetRowTop      = 672;
+        private const int PresetButtonGap   = 6;
+        private const int PresetButtonPad   = 24;
         private const int RequestBoxWidth   = 300;
         private const int UndoButtonWidth   = 90;
 
@@ -107,6 +115,11 @@ namespace jubeater.aigoalplanner.UI
         private readonly StandardButton _newChatButton;
         private readonly StandardButton _providerButton;
         private readonly StandardButton _undoButton;
+
+        /// <summary>
+        /// Which starter Request each Preset button fills, so one shared handler serves them all.
+        /// </summary>
+        private readonly Dictionary<StandardButton, string> _presetRequests = new Dictionary<StandardButton, string>();
         private readonly List<Control>  _messageControls = new List<Control>();
 
         private readonly Label          _reviewTitle;
@@ -152,7 +165,8 @@ namespace jubeater.aigoalplanner.UI
                           AsyncTexture2D windowBackground,
                           Texture2D     emblem,
                           Action        openProviderSettings,
-                          Func<string>  describeProvider) {
+                          Func<string>  describeProvider,
+                          IReadOnlyList<Preset> presets) {
             _chat                 = chat ?? throw new ArgumentNullException(nameof(chat));
             _openProviderSettings = openProviderSettings ?? throw new ArgumentNullException(nameof(openProviderSettings));
             _describeProvider     = describeProvider ?? throw new ArgumentNullException(nameof(describeProvider));
@@ -291,6 +305,8 @@ namespace jubeater.aigoalplanner.UI
                 Text      = string.Empty
             };
 
+            BuildPresetRow(content, presets ?? new Preset[0]);
+
             // The Review: what the AI proposed, one row per Action, and the two buttons that decide
             // what happens to it. It is its own area so a long Plan cannot push the conversation out
             // of the window.
@@ -349,10 +365,48 @@ namespace jubeater.aigoalplanner.UI
         }
 
         /// <summary>
+        /// One button per Preset on its own row under the token line, each wide enough for its
+        /// name. A Preset that would not fit is left out rather than run out of the window, so a
+        /// longer list added later cannot break the row.
+        /// </summary>
+        private void BuildPresetRow(Panel content, IReadOnlyList<Preset> presets) {
+            var presetLabel = new Label {
+                Parent    = content,
+                Location  = new Point(0, PresetRowTop + 6),
+                Size      = new Point(64, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
+                Text      = presets.Count == 0 ? string.Empty : "Presets:"
+            };
+
+            int left  = 70;
+            int right = _window.ContentRegion.Width - TextRightMargin;
+
+            foreach (Preset preset in presets) {
+                float textWidth = GameService.Content.DefaultFont16.MeasureString(preset.Name).Width;
+                int   width     = Math.Min((int)Math.Ceiling(textWidth) + PresetButtonPad, right - left);
+
+                if (width < 60) break;
+
+                var button = new StandardButton {
+                    Parent           = content,
+                    Location         = new Point(left, PresetRowTop),
+                    Size             = new Point(width, StandardButton.STANDARD_CONTROL_HEIGHT),
+                    Text             = preset.Name,
+                    BasicTooltipText = preset.Request
+                };
+
+                button.Click += OnPresetClicked;
+                _presetRequests[button] = preset.Request;
+
+                left += width + PresetButtonGap;
+            }
+        }
+
+        /// <summary>
         /// Shows the Chat window if it is hidden, and hides it if it is showing.
         /// </summary>
-        public void Toggle() {
-            if (_window.Visible) {
+        public void Toggle() {            if (_window.Visible) {
                 _window.Hide();
                 return;
             }
@@ -402,6 +456,12 @@ namespace jubeater.aigoalplanner.UI
             _cancelReviewButton.Click -= OnCancelReviewClicked;
             _undoButton.Click        -= OnUndoClicked;
 
+            foreach (StandardButton button in new List<StandardButton>(_presetRequests.Keys)) {
+                button.Click -= OnPresetClicked;
+            }
+
+            _presetRequests.Clear();
+
             _window.Dispose();
         }
 
@@ -411,6 +471,20 @@ namespace jubeater.aigoalplanner.UI
 
         private void OnSendClicked(object sender, MouseEventArgs e) {
             SendRequest();
+        }
+
+        /// <summary>
+        /// Fills the text box with the preset's starter Request and hands it focus, so the Player
+        /// can edit it before sending. Filling is all it does: nothing is sent until the Player
+        /// presses Send.
+        /// </summary>
+        private void OnPresetClicked(object sender, MouseEventArgs e) {
+            if (_disposed) return;
+
+            if (sender is StandardButton button && _presetRequests.TryGetValue(button, out string request)) {
+                _requestBox.Text    = request;
+                _requestBox.Focused = true;
+            }
         }
 
         private void OnNewChatClicked(object sender, MouseEventArgs e) {
