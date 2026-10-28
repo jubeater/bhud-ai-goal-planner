@@ -31,8 +31,11 @@ function Write-DevRequest {
     $id = New-DevId
     $request = [ordered]@{ id = $id; op = $Op }
 
-    if ($Text -ne $null) { $request['text'] = $Text }
-    if ($Actions -ne $null) { $request['actions'] = $Actions }
+    # A [string] parameter the caller omits arrives as "", not $null, so the check is whether it
+    # was supplied at all: operations other than send must not carry a text field, or the parser
+    # rejects the file with bad_request.
+    if ($PSBoundParameters.ContainsKey('Text')) { $request['text'] = $Text }
+    if ($PSBoundParameters.ContainsKey('Actions')) { $request['actions'] = $Actions }
 
     $path = Join-Path $script:DevInbox ($id + '.json')
     ConvertTo-Json $request -Compress | Set-Content -Path $path -Encoding UTF8
