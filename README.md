@@ -141,6 +141,31 @@ Lookup get_module_settings: 14 ms, module=bh.pathing, status=ok, settings=200 of
 The lines carry timing, finish reasons and counts — what a Lookup read and how big its answer was —
 and never a Setting's value, the Player's words or anything a Provider sent back.
 
+## Scripted in-game checks
+
+The maintainer's by-hand in-game checks can run as scripts through the developer channel: request
+files in `Documents\Guild Wars 2\addons\blishhud\aigoalplanner\dev\inbox` run against the real Chat
+in a running Blish HUD — the same methods the window's buttons call — and answers land as
+`dev\outbox\<id>.json`. Responses hold the Chat messages and Notices added, the open Review with
+each Action's current → proposed value, reason, Side Effect badge and acceptance, every Lookup and
+Provider round trip with the same details the debug log keeps, whether Undo is available, and
+`ok` or a fixed error reason. The module stays advisory: nothing sends input to the game.
+
+Three gates, all required: a Debug build (a release `.bhm` holds no channel at all), Blish HUD
+started with `--debug` (`scripts\dev-run.ps1` does this), and the module setting *Developer channel
+(for testing only)*, off by default. The setting explains what is still missing while the channel
+is closed.
+
+```
+scripts\dev-ask.ps1 "Where am I?"                # send a Request, print the answer
+scripts\dev-ask.ps1 "..." -NewChat               # start over, then ask
+scripts\dev-op.ps1 apply 0,2                     # apply, cancel_review, undo, new_chat, state
+scripts\dev-shot.ps1 [-Out path]                 # PNG of the GW2 window (screen if unfound)
+```
+
+`dev-ask` waits up to 120 s for the response and prints it readably. Requests go through the
+Provider the Player set up and cost tokens like any Request.
+
 ## Known limitations
 
 - **The AI's answers vary.** The same Request can get a different answer, or a different Plan, each
