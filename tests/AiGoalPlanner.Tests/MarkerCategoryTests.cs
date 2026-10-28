@@ -362,5 +362,104 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Single(result2.Categories);
             Assert.Equal(result1.Categories[0].DisplayPath, result2.Categories[0].DisplayPath);
         }
+
+        [Fact]
+        public void Review_failed_pack_does_not_log_local_filename() {
+            var logged = new System.Collections.Generic.List<string>();
+            string corruptPack = Path.Combine(_markersDir, "PRIVATE-route.zip");
+            File.WriteAllBytes(corruptPack, new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x99, 0x88, 0x77 });
+
+            var service = new MarkerCategoryService(_markersDir, _cacheDir, msg => logged.Add(msg));
+            MarkerCategoriesResult result = service.FindCategories("route", 1210);
+
+            Assert.Contains("PRIVATE-route.zip", result.SkippedPacks);
+            Assert.NotEmpty(logged);
+            foreach (string line in logged) {
+                Assert.DoesNotContain("PRIVATE-route.zip", line);
+            }
+        }
+
+        [Fact]
+        public void Review_module_declares_the_markers_directory_it_requests() {
+            // Find manifest.json in src/AiGoalPlanner/manifest.json
+            DirectoryInfo dir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "src", "AiGoalPlanner", "manifest.json"))) {
+                dir = dir.Parent;
+            }
+            Assert.NotNull(dir);
+            string manifestPath = Path.Combine(dir.FullName, "src", "AiGoalPlanner", "manifest.json");
+            string json = File.ReadAllText(manifestPath);
+            var manifest = Newtonsoft.Json.Linq.JObject.Parse(json);
+            var directories = manifest["directories"]?.Select(d => (string)d).ToList();
+            Assert.NotNull(directories);
+            Assert.Contains("markers", directories);
+        }
+
+        [Fact]
+        public void Review_nonempty_separator_preserves_following_category() {
+            string packZip = Path.Combine(_markersDir, "paired_sep.zip");
+            using (var zip = ZipFile.Open(packZip, ZipArchiveMode.Create)) {
+                var catEntry = zip.CreateEntry("_markerCategories.xml");
+                using (var writer = new StreamWriter(catEntry.Open(), Encoding.UTF8)) {
+                    writer.Write(@"<?xml version=""1.0"" encoding=""utf-8""?>
+<overlaydata>
+  <markercategory name=""root"" displayname=""Root"">
+    <markercategory name=""sep"" isseparator=""1""></markercategory>
+    <markercategory name=""hp"" displayname=""Hero Points"" />
+  </markercategory>
+</overlaydata>");
+                }
+            }
+
+            var service = new MarkerCategoryService(_markersDir, _cacheDir);
+            MarkerCategoriesResult result = service.FindCategories("Hero Points", 1210);
+
+            Assert.Single(result.Categories);
+            Assert.Equal("root.hp", result.Categories[0].Namespace);
+        }
+
+        [Fact]
+        public void Review_distinct_pack_names_keep_distinct_cached_categories() {
+            string xmlAlpha = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<overlaydata>
+  <markercategory name=""root"" displayname=""Root"">
+    <markercategory name=""alpha"" displayname=""Alpha Route"" />
+  </markercategory>
+</overlaydata>";
+
+            string xmlBravo = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<overlaydata>
+  <markercategory name=""root"" displayname=""Root"">
+    <markercategory name=""bravo"" displayname=""Bravo Route"" />
+  </markercategory>
+</overlaydata>";
+
+            // Ensure identical byte length by padding spaces
+            int maxLen = Math.Max(xmlAlpha.Length, xmlBravo.Length);
+            xmlAlpha = xmlAlpha.PadRight(maxLen);
+            xmlBravo = xmlBravo.PadRight(maxLen);
+
+            string pack1 = Path.Combine(_markersDir, "route pack.taco");
+            string pack2 = Path.Combine(_markersDir, "route_pack.taco");
+
+            using (var zip = ZipFile.Open(pack1, ZipArchiveMode.Create)) {
+                var entry = zip.CreateEntry("_markerCategories.xml");
+                using (var w = new StreamWriter(entry.Open(), Encoding.UTF8)) w.Write(xmlAlpha);
+            }
+            using (var zip = ZipFile.Open(pack2, ZipArchiveMode.Create)) {
+                var entry = zip.CreateEntry("_markerCategories.xml");
+                using (var w = new StreamWriter(entry.Open(), Encoding.UTF8)) w.Write(xmlBravo);
+            }
+
+            DateTime fixedTime = new DateTime(2026, 10, 27, 12, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(pack1, fixedTime);
+            File.SetLastWriteTimeUtc(pack2, fixedTime);
+
+            var service = new MarkerCategoryService(_markersDir, _cacheDir);
+            MarkerCategoriesResult result = service.FindCategories("Route", 1210);
+
+            var foundNamespaces = result.Categories.Select(c => c.Namespace).OrderBy(x => x).ToList();
+            Assert.Equal(new[] { "root.alpha", "root.bravo" }, foundNamespaces);
+        }
     }
 }

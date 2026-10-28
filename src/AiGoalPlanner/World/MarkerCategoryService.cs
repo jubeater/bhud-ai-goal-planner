@@ -71,7 +71,7 @@ namespace jubeater.aigoalplanner.World
                         parsedPacks.Add(pack);
                     }
                 } catch (Exception ex) {
-                    _logWarn?.Invoke("Marker pack " + source.Identifier + " failed to parse: " + ex.GetType().Name);
+                    _logWarn?.Invoke("Marker pack failed to parse: " + ex.GetType().Name);
                     skippedPacks.Add(source.Identifier);
                 }
             }
@@ -267,6 +267,7 @@ namespace jubeater.aigoalplanner.World
                     string json = File.ReadAllText(cacheFilePath);
                     CachedPackData cachedData = JsonConvert.DeserializeObject<CachedPackData>(json);
                     if (cachedData != null &&
+                        string.Equals(cachedData.Identifier, source.Identifier, StringComparison.OrdinalIgnoreCase) &&
                         cachedData.FileSize == source.Length &&
                         cachedData.LastModifiedUtcTicks == source.LastModifiedTicks) {
                         ParsedPack packFromCache = BuildParsedPackFromCache(source, cachedData);
@@ -304,7 +305,15 @@ namespace jubeater.aigoalplanner.World
             if (_cacheDirectory == null) return null;
 
             string safeName = Regex.Replace(source.Identifier, @"[^\w\.\-]", "_");
-            return Path.Combine(_cacheDirectory, safeName + ".json");
+            string hash = ComputeHash(source.Identifier);
+            return Path.Combine(_cacheDirectory, safeName + "_" + hash + ".json");
+        }
+
+        private static string ComputeHash(string input) {
+            using (var sha = System.Security.Cryptography.SHA256.Create()) {
+                byte[] bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(input ?? string.Empty));
+                return BitConverter.ToString(bytes).Replace("-", string.Empty).Substring(0, 16).ToLowerInvariant();
+            }
         }
 
         private static void SaveCache(string cacheFilePath, PackSource source, ParsedPack pack) {
@@ -438,8 +447,10 @@ namespace jubeater.aigoalplanner.World
 
             using (XmlReader reader = XmlReader.Create(stream, settings)) {
                 var stack = new Stack<ParsedCategory>();
+                bool advance = true;
 
-                while (reader.Read()) {
+                while (advance ? reader.Read() : !reader.EOF) {
+                    advance = true;
                     if (reader.NodeType == XmlNodeType.Element &&
                         string.Equals(reader.LocalName, "markercategory", StringComparison.OrdinalIgnoreCase)) {
 
@@ -448,6 +459,7 @@ namespace jubeater.aigoalplanner.World
                             // Menu separator: skip if empty element, or skip subtree if container
                             if (!reader.IsEmptyElement) {
                                 reader.Skip();
+                                advance = false;
                             }
                             continue;
                         }
