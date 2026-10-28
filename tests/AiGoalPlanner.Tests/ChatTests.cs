@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1552,6 +1554,46 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal((long?)20,  answer.Usage.OutputTokens);
             Assert.Equal((long?)300, chat.TotalUsage.InputTokens);
             Assert.Equal((long?)30,  chat.TotalUsage.OutputTokens);
+        }
+
+        [Fact]
+        public async Task The_reply_is_costed_at_the_prices_of_the_Provider_that_answered() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            TokenPrice prices = new TokenPrice(3m, 15m);
+
+            // The Player switches Provider while the first one is still answering: the reply is
+            // costed at the prices in force when it was asked for, not the ones it lands in.
+            model.WillRunWhenTheReplyIsReady(() => prices = new TokenPrice(30m, 150m));
+            model.WillReply("An answer.", new UsageDetails { InputTokenCount = 1200, OutputTokenCount = 80 });
+
+            var chat = new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"), Lookups.For(world),
+                                logDebug: null, logWarn: null, plans: null, tokenBudget: null, tokenPrices: () => prices);
+
+            await chat.SendAsync("Hello");
+
+            Assert.Equal(0.0048m, chat.Messages[1].EstimatedCostUsd);
+            Assert.Equal(0.0048m, chat.TotalEstimatedCostUsd);
+        }
+
+        [Fact]
+        public async Task A_reply_whose_cache_metadata_is_null_still_reaches_the_Chat_with_its_counts() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}],"
+              + "\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":80,\"total_tokens\":1280,\"prompt_tokens_details\":null}}";
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, body);
+            var client = new OpenAiCompatibleChatClient(
+                ProviderSettings.Parse("https://provider.test/v1", "test-model", string.Empty), new HttpClient(endpoint));
+
+            var chat = new Chat(() => client, () => SystemPrompt.For("test-model", "https://provider.test/v1"));
+
+            await chat.SendAsync("Hello");
+
+            ChatMessage answer = Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Ai);
+
+            Assert.Equal("Try the Pathing module.", answer.Text);
+            Assert.Equal((long?)1200, answer.Usage.InputTokens);
+            Assert.Null(answer.Usage.CachedInputTokens);
         }
 
         /// <summary>

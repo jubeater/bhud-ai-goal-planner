@@ -631,10 +631,16 @@ namespace jubeater.aigoalplanner.Core
                 if (StopAtBudget(generation)) return;
 
                 ChatResponse response;
+                TokenPrice   roundPrices = null;
                 Stopwatch    clock = Stopwatch.StartNew();
 
                 try {
                     IChatClient chatClient = _chatClient();
+
+                    // The prices are captured with the client, before its response is awaited: a
+                    // round trip is costed at the Provider that served it, not at whatever the
+                    // Player switched to while it was answering.
+                    roundPrices = _tokenPrices?.Invoke();
 
                     response = await chatClient
                                       .GetResponseAsync(BuildHistory(), BuildOptions(), cancellationToken)
@@ -667,7 +673,7 @@ namespace jubeater.aigoalplanner.Core
                                                                    .ToList();
 
                 LogRound(round, clock, response, calls.Count);
-                RecordUsage(generation, response);
+                RecordUsage(generation, response, roundPrices);
 
                 if (calls.Count == 0) {
                     ShowResponse(generation, response);
@@ -1359,16 +1365,16 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>
         /// Adds one round trip's usage to the Chat's total and to the Request that is running, with
-        /// what it cost at the prices in force when it was spent. A round trip whose Provider
-        /// reported no usage adds nothing. A reply that lands in a Chat the Player has left counts
-        /// for neither that Chat nor its totals.
+        /// what it cost at the prices captured with the client before its response was awaited. A
+        /// round trip whose Provider reported no usage adds nothing. A reply that lands in a Chat
+        /// the Player has left counts for neither that Chat nor its totals.
         /// </summary>
-        private void RecordUsage(int generation, ChatResponse response) {
+        private void RecordUsage(int generation, ChatResponse response, TokenPrice roundPrices) {
             TokenUsage usage = TokenUsage.FromResponse(response?.Usage);
 
             if (usage == null) return;
 
-            decimal? cost = usage.EstimateCost(_tokenPrices?.Invoke());
+            decimal? cost = usage.EstimateCost(roundPrices);
 
             lock (_messagesLock) {
                 if (generation != Volatile.Read(ref _generation)) return;
@@ -1387,25 +1393,11 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>
         /// Asks the Player whether to go on, once per Chat, when its tokens have reached its Token
-        /// Budget. The question is a Notice in the Chat: the model is not asked to ask it, which
-        /// would spend the Player's tokens past the budget to talk about the budget. Whatever the
-        /// Player sends next is the answer — another message to keep going, or a New chat to start
-        /// over — so nothing here blocks a Request.
+        /// Budget. The rule lives in <see cref="StopAtBudget"/>; this is its end-of-Request call,
+        /// for the Request that crossed the budget on its last round and makes no further calls.
         /// </summary>
         private void MaybePromptForBudget(int generation) {
-            long budget = _tokenBudget?.Invoke() ?? TokenBudget.Default;
-
-            lock (_messagesLock) {
-                if (generation != Volatile.Read(ref _generation)) return;
-                if (_budgetPromptShown) return;
-                if (!TokenBudget.IsReached(_totalUsage.Total, budget)) return;
-
-                _budgetPromptShown = true;
-
-                _messages.Add(new ChatMessage(ChatMessageAuthor.Notice, TokenBudget.PromptFor(_totalUsage.Total, budget)));
-            }
-
-            MessagesChanged?.Invoke(this, EventArgs.Empty);
+            StopAtBudget(generation);
         }
 
         /// <summary>
