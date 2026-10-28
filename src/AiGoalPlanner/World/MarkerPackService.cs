@@ -254,7 +254,7 @@ namespace jubeater.aigoalplanner.World
         }
 
         public Task<MarkerPackChange> DeletePackAsync(string fileName, CancellationToken cancellationToken = default) {
-            string file = (fileName ?? string.Empty).Trim();
+            string file = fileName ?? string.Empty;
             if (file.Length == 0) {
                 return Task.FromResult(new MarkerPackChange(false, false, null, null, 0, "No file specified to delete."));
             }
@@ -409,6 +409,7 @@ namespace jubeater.aigoalplanner.World
 
         public static bool IsValidFileName(string name) {
             if (string.IsNullOrWhiteSpace(name)) return false;
+            if (char.IsWhiteSpace(name[0]) || char.IsWhiteSpace(name[name.Length - 1])) return false;
             if (name == "." || name == "..") return false;
             if (name.IndexOf('/') >= 0 || name.IndexOf('\\') >= 0) return false;
             if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;

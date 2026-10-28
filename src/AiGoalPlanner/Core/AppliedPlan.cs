@@ -125,14 +125,18 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         public string Describe() {
             List<string> changed = Outcomes.Where(outcome => outcome.Changed)
-                                           .Select(outcome => outcome.Action.Summary)
+                                           .Select(outcome => string.IsNullOrEmpty(outcome.Problem)
+                                                       ? outcome.Action.Summary
+                                                       : outcome.Action.Summary + " (" + outcome.Problem + ")")
                                            .ToList();
 
             List<string> unchanged = Outcomes.Where(outcome => outcome.Succeeded && !outcome.Changed)
-                                             .Select(outcome => outcome.Action.Summary)
+                                             .Select(outcome => string.IsNullOrEmpty(outcome.Problem)
+                                                       ? outcome.Action.Summary
+                                                       : outcome.Action.Summary + " (" + outcome.Problem + ")")
                                              .ToList();
 
-            List<ApplyOutcome> failed = Outcomes.Where(outcome => !outcome.Succeeded).ToList();
+            List<ApplyOutcome> failed = Outcomes.Where(outcome => !outcome.Succeeded && !outcome.Changed).ToList();
 
             var text = new StringBuilder();
 
