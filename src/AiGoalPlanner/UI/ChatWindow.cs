@@ -53,12 +53,24 @@ namespace jubeater.aigoalplanner.UI
         private const int ProviderRowTop    = 608;
 
         /// <summary>
-        /// The Preset buttons sit on their own row under the per-Chat token line, so a new preset
+        /// The Preset buttons sit on their own rows under the per-Chat token line, so a new preset
         /// never moves the conversation, the Review or the input row.
         /// </summary>
         private const int PresetRowTop      = 672;
+        private const int PresetRowGap      = 4;
         private const int PresetButtonGap   = 6;
         private const int PresetButtonPad   = 24;
+
+        /// <summary>
+        /// Room for the "Presets:" label at the start of the first row, before the buttons.
+        /// </summary>
+        private const int PresetLabelWidth  = 70;
+
+        /// <summary>
+        /// The content region's width. The window is created from it, and the Preset rows are
+        /// measured against it before the window exists.
+        /// </summary>
+        private const int ContentWidth      = 540;
 
         /// <summary>
         /// A button narrower than this stops being a button, so a preset that cannot even have
@@ -177,12 +189,21 @@ namespace jubeater.aigoalplanner.UI
             _openProviderSettings = openProviderSettings ?? throw new ArgumentNullException(nameof(openProviderSettings));
             _describeProvider     = describeProvider ?? throw new ArgumentNullException(nameof(describeProvider));
 
+            IReadOnlyList<Preset> presetList = presets ?? new Preset[0];
+            IReadOnlyList<IReadOnlyList<int>> presetRows = FitPresetRows(presetList);
+
+            // A full row wraps onto further rows, so the window grows with them: one row is the
+            // base size, each extra row adds a button height and its gap.
+            int windowHeight = WindowHeight
+                             + Math.Max(0, presetRows.Count - 1) * (StandardButton.STANDARD_CONTROL_HEIGHT + PresetRowGap);
+            int contentHeight = windowHeight - 90;
+
             _window = new StandardWindow(
                 windowBackground,
-                new Rectangle(25, 26, WindowWidth, WindowHeight),
+                new Rectangle(25, 26, WindowWidth, windowHeight),
                 // The content region is the part inside the frame: the conversation, the Review, the
                 // input row and the Provider row all have to fit in it, so it grows with the window.
-                new Rectangle(40, 50, 540, ContentHeight)) {
+                new Rectangle(40, 50, ContentWidth, contentHeight)) {
                 Parent        = GameService.Graphics.SpriteScreen,
                 Title         = "AI Goal Planner",
                 Subtitle      = "Describe a goal",
@@ -311,7 +332,7 @@ namespace jubeater.aigoalplanner.UI
                 Text      = string.Empty
             };
 
-            BuildPresetRow(content, presets ?? new Preset[0]);
+            BuildPresetRow(content, presetList, presetRows);
 
             // The Review: what the AI proposed, one row per Action, and the two buttons that decide
             // what happens to it. It is its own area so a long Plan cannot push the conversation out
@@ -371,11 +392,28 @@ namespace jubeater.aigoalplanner.UI
         }
 
         /// <summary>
-        /// One button per Preset on its own row under the token line, each wide enough for its
-        /// name. A Preset that would not fit is left out rather than run out of the window, so a
-        /// longer list added later cannot break the row.
+        /// How the Preset buttons divide into rows: each button's natural width, wrapped by the
+        /// row policy, against the room the first row leaves after the label.
         /// </summary>
-        private void BuildPresetRow(Panel content, IReadOnlyList<Preset> presets) {
+        private static IReadOnlyList<IReadOnlyList<int>> FitPresetRows(IReadOnlyList<Preset> presets) {
+            var naturalWidths = new List<int>(presets.Count);
+
+            foreach (Preset preset in presets) {
+                float textWidth = GameService.Content.DefaultFont16.MeasureString(preset.Name).Width;
+                naturalWidths.Add((int)Math.Ceiling(textWidth) + PresetButtonPad);
+            }
+
+            return PresetLayout.FitRows(naturalWidths, ContentWidth - TextRightMargin - PresetLabelWidth,
+                                        PresetButtonGap, MinPresetButtonWidth);
+        }
+
+        /// <summary>
+        /// One button per Preset on rows of their own under the token line. Every Preset gets a
+        /// button: a full row wraps onto the next one, which the window grew room for before it
+        /// was created.
+        /// </summary>
+        private void BuildPresetRow(Panel content, IReadOnlyList<Preset> presets,
+                                    IReadOnlyList<IReadOnlyList<int>> rows) {
             var presetLabel = new Label {
                 Parent    = content,
                 Location  = new Point(0, PresetRowTop + 6),
@@ -385,34 +423,28 @@ namespace jubeater.aigoalplanner.UI
                 Text      = presets.Count == 0 ? string.Empty : "Presets:"
             };
 
-            int left  = 70;
-            int right = _window.ContentRegion.Width - TextRightMargin;
+            int flat = 0;
 
-            var naturalWidths = new List<int>(presets.Count);
+            for (int row = 0; row < rows.Count; row++) {
+                int top  = PresetRowTop + row * (StandardButton.STANDARD_CONTROL_HEIGHT + PresetRowGap);
+                int left = PresetLabelWidth;
 
-            foreach (Preset preset in presets) {
-                float textWidth = GameService.Content.DefaultFont16.MeasureString(preset.Name).Width;
-                naturalWidths.Add((int)Math.Ceiling(textWidth) + PresetButtonPad);
-            }
+                foreach (int width in rows[row]) {
+                    Preset preset = presets[flat++];
 
-            IReadOnlyList<int> widths = PresetLayout.FitWidths(naturalWidths, right - left,
-                                                              PresetButtonGap, MinPresetButtonWidth);
+                    var button = new StandardButton {
+                        Parent           = content,
+                        Location         = new Point(left, top),
+                        Size             = new Point(width, StandardButton.STANDARD_CONTROL_HEIGHT),
+                        Text             = preset.Name,
+                        BasicTooltipText = preset.Request
+                    };
 
-            for (int index = 0; index < widths.Count; index++) {
-                Preset preset = presets[index];
+                    button.Click += OnPresetClicked;
+                    _presetRequests[button] = preset.Request;
 
-                var button = new StandardButton {
-                    Parent           = content,
-                    Location         = new Point(left, PresetRowTop),
-                    Size             = new Point(widths[index], StandardButton.STANDARD_CONTROL_HEIGHT),
-                    Text             = preset.Name,
-                    BasicTooltipText = preset.Request
-                };
-
-                button.Click += OnPresetClicked;
-                _presetRequests[button] = preset.Request;
-
-                left += widths[index] + PresetButtonGap;
+                    left += width + PresetButtonGap;
+                }
             }
         }
 
