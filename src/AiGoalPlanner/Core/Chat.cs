@@ -394,7 +394,27 @@ namespace jubeater.aigoalplanner.Core
 
                 SetReview(generation, null);
 
-                AppliedPlan applied = await _plans.ApplyAsync(review, actionIndexes, cancellationToken).ConfigureAwait(false);
+                ReviewedAction downloadAction = null;
+                if (actionIndexes != null) {
+                    foreach (int index in actionIndexes) {
+                        if (index >= 0 && index < review.Actions.Count && review.Actions[index].CanApply &&
+                            review.Actions[index].Action.Kind == PlanActionKind.DownloadPack) {
+                            downloadAction = review.Actions[index];
+                            break;
+                        }
+                    }
+                }
+
+                if (downloadAction != null) {
+                    AddProgress(generation, "Downloading " + downloadAction.Action.Pack + ".");
+                }
+
+                AppliedPlan applied;
+                try {
+                    applied = await _plans.ApplyAsync(review, actionIndexes, cancellationToken).ConfigureAwait(false);
+                } finally {
+                    ClearProgress(generation);
+                }
 
 #if DEBUG
                 _lastApply = applied;
@@ -405,13 +425,19 @@ namespace jubeater.aigoalplanner.Core
                 // Nothing was ticked and nothing was applied before the Review: there is nothing to
                 // tell the model and nothing to carry on from. A Review with an Auto-apply behind it
                 // is resolved all the same, so its outcome is still owed to the model.
+
+
+
+
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (applied.Outcomes.Count == 0 && !HasAppliedBeforeReview) return;
 
                 if (!TryAppendApplyOutcome(generation, applied)) return;
 
-                // The Player stopped this Apply part-way. What was applied is reported and in the
-                // journal, and the Request ends as any cancelled Request does.
-                cancellationToken.ThrowIfCancellationRequested();
+
+
+
 
                 try {
                     await RunRequest(generation, cancellationToken).ConfigureAwait(false);

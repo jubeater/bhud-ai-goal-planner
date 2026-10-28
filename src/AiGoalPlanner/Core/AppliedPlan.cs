@@ -69,6 +69,9 @@ namespace jubeater.aigoalplanner.Core
                 switch (Kind) {
                     case PlanActionKind.EnableModule:  return ModuleName + ": enable it";
                     case PlanActionKind.DisableModule: return ModuleName + ": disable it";
+                    case PlanActionKind.DownloadPack:
+                        string pack = TargetName.Length == 0 ? Value : TargetName;
+                        return "Pathing: delete marker pack " + pack;
                     default:
                         string setting = TargetName.Length == 0 ? SettingKey : TargetName;
 

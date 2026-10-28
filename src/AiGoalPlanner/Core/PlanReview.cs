@@ -75,6 +75,11 @@ namespace jubeater.aigoalplanner.Core
                     string setting = targetName.Length == 0 ? action.Key : targetName;
 
                     return subject + ": set \"" + setting + "\" to " + proposedValue;
+                case PlanActionKind.DownloadPack:
+                    string packTitle = targetName.Length == 0 ? action.Pack : targetName;
+                    string sizeInfo = proposedValue.Length == 0 ? string.Empty : proposedValue + ", ";
+
+                    return "Pathing: download " + packTitle + " (" + sizeInfo + "Pathing will restart)";
                 case PlanActionKind.Advice:        return action.Reason;
                 default:                           return subject + ": " + action.KindText;
             }

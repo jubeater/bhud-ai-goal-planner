@@ -38,11 +38,11 @@ namespace jubeater.aigoalplanner.Core
           + "\"reply\":{\"type\":\"string\",\"description\":\"What you say to the Player about this plan.\"},"
           + "\"actions\":{\"type\":\"array\",\"description\":\"The changes, in the order they should be applied.\","
           + "\"items\":{\"type\":\"object\",\"properties\":{"
-          + "\"kind\":{\"type\":\"string\",\"enum\":[\"enable_module\",\"disable_module\",\"set_setting\",\"advice\"],"
+          + "\"kind\":{\"type\":\"string\",\"enum\":[\"enable_module\",\"disable_module\",\"set_setting\",\"download_pack\",\"advice\"],"
           + "\"description\":\"What this action does.\"},"
           + "\"module\":{\"type\":\"string\",\"description\":\"The module's namespace, for the module and setting kinds.\"},"
           + "\"key\":{\"type\":\"string\",\"description\":\"The setting key, for set_setting.\"},"
-          + "\"value\":{\"type\":\"string\",\"description\":\"The setting's new value as text, for set_setting.\"},"
+          + "\"value\":{\"type\":\"string\",\"description\":\"The setting's new value as text, for set_setting.\"},\"pack\":{\"type\":\"string\",\"description\":\"The marker pack name or file name, for download_pack.\"},"
           + "\"reason\":{\"type\":\"string\",\"description\":\"Why you propose this, for the Player to read.\"},"
           + "\"is_side_effect\":{\"type\":\"boolean\",\"description\":\"True when the Player did not ask for this change. Always send it.\"}"
           + "},\"required\":[\"kind\",\"reason\",\"is_side_effect\"]}}"
@@ -110,6 +110,13 @@ namespace jubeater.aigoalplanner.Core
                                           TextOf(Value(action, "value")).Trim(),
                                           reason, isSideEffect);
 
+                case PlanActionKind.DownloadPack:
+                    string pack = TextOf(Value(action, "pack")).Trim();
+                    if (pack.Length == 0) pack = TextOf(Value(action, "name")).Trim();
+                    if (pack.Length == 0) pack = TextOf(Value(action, "file_name")).Trim();
+                    if (pack.Length == 0) pack = TextOf(Value(action, "module")).Trim();
+                    return new PlanAction(kind, kindText, null, null, null, reason, isSideEffect, pack);
+
                 case PlanActionKind.Advice:
                     return new PlanAction(kind, kindText, null, null, null, reason, isSideEffect);
 
@@ -124,6 +131,7 @@ namespace jubeater.aigoalplanner.Core
                 case "enable_module":  return PlanActionKind.EnableModule;
                 case "disable_module": return PlanActionKind.DisableModule;
                 case "set_setting":    return PlanActionKind.SetSetting;
+                case "download_pack":  return PlanActionKind.DownloadPack;
                 case "advice":         return PlanActionKind.Advice;
                 default:               return PlanActionKind.Unknown;
             }

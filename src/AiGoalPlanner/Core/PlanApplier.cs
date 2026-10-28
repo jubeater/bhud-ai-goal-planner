@@ -105,6 +105,9 @@ namespace jubeater.aigoalplanner.Core
                     case PlanActionKind.SetSetting:
                         return await SetSettingAsync(action, undo, cancellationToken).ConfigureAwait(false);
 
+                    case PlanActionKind.DownloadPack:
+                        return await DownloadPackAsync(action, undo, cancellationToken).ConfigureAwait(false);
+
                     default:
                         return new ApplyOutcome(action, false, "this kind of action cannot be applied");
                 }
@@ -157,7 +160,31 @@ namespace jubeater.aigoalplanner.Core
             return new ApplyOutcome(action, true);
         }
 
+        private async Task<ApplyOutcome> DownloadPackAsync(ReviewedAction action, List<UndoStep> undo,
+                                                           CancellationToken cancellationToken) {
+            MarkerPackChange change = await _world.DownloadMarkerPackAsync(action.Action.Pack, cancellationToken)
+                                                  .ConfigureAwait(false);
+
+            if (!change.Applied) {
+                return new ApplyOutcome(action, false, ProblemOr(change.Problem, "the pack could not be downloaded"));
+            }
+
+            if (!change.Changed) return new ApplyOutcome(action, true, changed: false);
+
+            undo.Add(new UndoStep(PlanActionKind.DownloadPack, null, null, null, change.PackName, change.FileName));
+
+            return new ApplyOutcome(action, true);
+        }
+
         private async Task<UndoOutcome> UndoTaking(UndoStep step, CancellationToken cancellationToken) {
+            if (step.Kind == PlanActionKind.DownloadPack) {
+                MarkerPackChange pack = await _world.DeleteMarkerPackAsync(step.Value, cancellationToken)
+                                                    .ConfigureAwait(false);
+
+                return new UndoOutcome(step, pack.Applied,
+                                       pack.Applied ? null : ProblemOr(pack.Problem, "the marker pack could not be deleted"));
+            }
+
             if (step.Kind == PlanActionKind.SetSetting) {
                 ModuleSettingChange change = await _world.SetSettingAsync(step.ModuleNamespace, step.SettingKey, step.Value,
                                                                           cancellationToken)

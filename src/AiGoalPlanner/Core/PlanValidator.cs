@@ -137,6 +137,9 @@ namespace jubeater.aigoalplanner.Core
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             private readonly HashSet<string>                          _settingKeys =
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            private readonly HashSet<string>                          _downloadPacks =
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            private MarkerPacksResult                                 _markerPacksResult;
 
             public Reviewer(IReadOnlyList<InstalledModuleInfo> modules, IBlishHudWorld world,
                             CancellationToken cancellationToken) {
@@ -148,6 +151,10 @@ namespace jubeater.aigoalplanner.Core
             public async Task<ReviewedAction> ReviewAsync(PlanAction action) {
                 if (action.Kind == PlanActionKind.Advice) {
                     return Accept(action, null, null, null, null, null);
+                }
+
+                if (action.Kind == PlanActionKind.DownloadPack) {
+                    return await ReviewDownloadPackAsync(action).ConfigureAwait(false);
                 }
 
                 if (action.Kind == PlanActionKind.Unknown) {
@@ -251,6 +258,40 @@ namespace jubeater.aigoalplanner.Core
             /// Player sees. A model that answered with "Pathing" instead of "bh.pathing" still gets
             /// the change it proposed.
             /// </summary>
+            private async Task<ReviewedAction> ReviewDownloadPackAsync(PlanAction action) {
+                string wanted = (action.Pack ?? string.Empty).Trim();
+
+                if (wanted.Length == 0) {
+                    return Reject(action, null, "The action does not say which marker pack to download.");
+                }
+
+                if (_markerPacksResult == null) {
+                    _markerPacksResult = await _world.ListMarkerPacksAsync(_cancellationToken).ConfigureAwait(false);
+                }
+
+                MarkerPackInfo pack = _markerPacksResult.Packs?.FirstOrDefault(p =>
+                    string.Equals(p.Name, wanted, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(p.FileName, wanted, StringComparison.OrdinalIgnoreCase));
+
+                if (pack == null) {
+                    return Reject(action, null, "\"" + wanted + "\" is not on Pathing's official marker pack list.");
+                }
+
+                if (!_downloadPacks.Add(pack.FileName)) {
+                    return Reject(action, null, pack.Name + " is already changed by another action in this plan.");
+                }
+
+                if (pack.Installed) {
+                    return Reject(action, null, pack.Name + " is already installed.");
+                }
+
+                string sizeText = pack.SizeMb > 0
+                    ? pack.SizeMb.ToString("0.#", CultureInfo.InvariantCulture) + " MB"
+                    : string.Empty;
+
+                return Accept(action, null, null, pack.Name, "not installed", sizeText);
+            }
+
             private InstalledModuleInfo Resolve(string module) {
                 string wanted = (module ?? string.Empty).Trim();
 
