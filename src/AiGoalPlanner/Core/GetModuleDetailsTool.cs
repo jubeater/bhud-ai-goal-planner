@@ -75,7 +75,11 @@ namespace jubeater.aigoalplanner.Core
                     ["message"] = details?.Problem ?? "Could not retrieve module details."
                 };
 
-                return new LookupAnswer(errJson.ToString(Formatting.None), "status=" + status + ", module=" + wanted);
+                string logDetail = !string.IsNullOrWhiteSpace(details?.Namespace)
+                    ? "status=" + status + ", module=" + details.Namespace
+                    : "status=" + status;
+
+                return new LookupAnswer(errJson.ToString(Formatting.None), logDetail);
             }
 
             var json = new JObject {

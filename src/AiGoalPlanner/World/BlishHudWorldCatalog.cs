@@ -125,7 +125,7 @@ namespace jubeater.aigoalplanner.World
         public async Task<CatalogModuleDetails> GetCatalogModuleDetailsAsync(string @namespace, CancellationToken cancellationToken) {
             CatalogPackageEntry entry = await GetCatalogPackageEntryAsync(@namespace, cancellationToken).ConfigureAwait(false);
             if (entry == null) {
-                return new CatalogModuleDetails(false, @namespace, problem: "Module not found in the catalog.");
+                return new CatalogModuleDetails(false, string.Empty, problem: "Module not found in the catalog.");
             }
 
             return await FetchCatalogModuleDetailsAsync(entry, cancellationToken).ConfigureAwait(false);

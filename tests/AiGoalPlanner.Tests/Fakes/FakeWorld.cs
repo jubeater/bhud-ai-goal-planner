@@ -268,7 +268,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
                 ));
             }
 
-            return Task.FromResult(new CatalogModuleDetails(false, wanted, problem: "Module not found in the catalog."));
+            return Task.FromResult(new CatalogModuleDetails(false, string.Empty, problem: "Module not found in the catalog."));
         }
 
         public Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {

@@ -268,5 +268,106 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("bh.community.pathing", result.Namespace);
             Assert.Equal("Markers and trails for Guild Wars 2.", result.Description);
         }
+
+        [Fact]
+        public async Task Raw_module_details_argument_must_not_leak_player_words_to_log() {
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1")
+                }
+            };
+            world.CatalogDetails["bh.community.pathing"] = new CatalogModuleDetails(
+                success: true,
+                @namespace: "bh.community.pathing",
+                name: "Pathing",
+                version: "3.2.1",
+                description: "Markers and trails.",
+                apiPermissions: new[] { "account" }
+            );
+
+            var logs = new List<string>();
+            AIFunction tool = GetModuleDetailsTool.Create(world, logs.Add);
+
+            string secretWord = "secret_player_token_12345";
+            await tool.InvokeAsync(new AIFunctionArguments { ["module"] = secretWord });
+
+            Assert.NotEmpty(logs);
+            foreach (string line in logs) {
+                Assert.DoesNotContain(secretWord, line);
+                Assert.DoesNotContain("secret", line, StringComparison.OrdinalIgnoreCase);
+            }
+
+            string notFoundLine = Assert.Single(logs);
+            Assert.Contains("status=not_found", notFoundLine);
+        }
+
+        [Fact]
+        public async Task Missing_catalog_hash_must_not_publish_verified_details() {
+            string manifest = @"{
+                ""name"": ""Pathing"",
+                ""version"": ""3.2.1"",
+                ""namespace"": ""bh.community.pathing"",
+                ""description"": ""Markers and trails."",
+                ""api_permissions"": [""account""]
+            }";
+            byte[] packageBytes = CreatePackageBytes(manifest);
+
+            Func<string, string, CancellationToken, Task> downloadFileAsync = (url, dest, ct) => {
+                File.WriteAllBytes(dest, packageBytes);
+                return Task.CompletedTask;
+            };
+
+            var entry = new CatalogPackageEntry("bh.community.pathing", "Pathing", "3.2.1", "http://pkg.test", null);
+            var service = new CatalogDetailsService(downloadFileAsync, _testTempDir);
+
+            CatalogModuleDetails details = await service.FetchCatalogModuleDetailsAsync(entry, CancellationToken.None);
+            Assert.False(details.Success);
+            Assert.Empty(Directory.GetFiles(_testTempDir));
+        }
+
+        [Fact]
+        public async Task Malformed_permissions_must_be_unknown_in_review() {
+            string manifest = @"{
+                ""name"": ""Pathing"",
+                ""version"": ""3.2.1"",
+                ""namespace"": ""bh.community.pathing"",
+                ""description"": ""Markers and trails."",
+                ""api_permissions"": ""account,characters""
+            }";
+            byte[] packageBytes = CreatePackageBytes(manifest);
+            string hash = Sha256Of(packageBytes);
+
+            Func<string, string, CancellationToken, Task> downloadFileAsync = (url, dest, ct) => {
+                File.WriteAllBytes(dest, packageBytes);
+                return Task.CompletedTask;
+            };
+
+            var entry = new CatalogPackageEntry("bh.community.pathing", "Pathing", "3.2.1", "http://pkg.test", hash);
+            var service = new CatalogDetailsService(downloadFileAsync, _testTempDir);
+
+            CatalogModuleDetails details = await service.FetchCatalogModuleDetailsAsync(entry, CancellationToken.None);
+            Assert.False(details.Success);
+
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1")
+                }
+            };
+            world.AnswerGetCatalogModuleDetails = (ns, ct) => Task.FromResult(details);
+
+            var plan = new Plan("Install Pathing", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "bh.community.pathing", null, null,
+                               "Markers", isSideEffect: false, gap: "Markers on map")
+            });
+
+            PlanReview review = await PlanValidator.ReviewAsync(plan, world, CancellationToken.None);
+            ReviewedAction action = Assert.Single(review.Actions);
+
+            Assert.True(action.IsAccepted);
+            Assert.True(action.CanApply);
+            Assert.False(action.PermissionsKnown);
+            Assert.Empty(action.ApiPermissions);
+            Assert.NotNull(action.DetailsProblem);
+        }
     }
 }

@@ -62,18 +62,20 @@ namespace jubeater.aigoalplanner.World
                 }
 
                 // Verify SHA-256 hash
-                if (!string.IsNullOrEmpty(entry.Hash)) {
-                    string computedHash;
-                    using (var sha = SHA256.Create())
-                    using (var stream = File.OpenRead(tempFilePath)) {
-                        byte[] hashBytes = sha.ComputeHash(stream);
-                        computedHash = BitConverter.ToString(hashBytes).Replace("-", "");
-                    }
+                if (string.IsNullOrWhiteSpace(entry.Hash)) {
+                    return new CatalogModuleDetails(false, entry.Namespace, entry.Name, entry.Version, problem: "Catalog entry has no package hash.");
+                }
 
-                    string cleanExpected = entry.Hash.Replace("-", "");
-                    if (!string.Equals(computedHash, cleanExpected, StringComparison.OrdinalIgnoreCase)) {
-                        return new CatalogModuleDetails(false, entry.Namespace, entry.Name, entry.Version, problem: "Hash mismatch.");
-                    }
+                string computedHash;
+                using (var sha = SHA256.Create())
+                using (var stream = File.OpenRead(tempFilePath)) {
+                    byte[] hashBytes = sha.ComputeHash(stream);
+                    computedHash = BitConverter.ToString(hashBytes).Replace("-", "");
+                }
+
+                string cleanExpected = entry.Hash.Replace("-", "");
+                if (!string.Equals(computedHash, cleanExpected, StringComparison.OrdinalIgnoreCase)) {
+                    return new CatalogModuleDetails(false, entry.Namespace, entry.Name, entry.Version, problem: "Hash mismatch.");
                 }
 
                 // Read manifest.json from the zip archive
@@ -99,20 +101,27 @@ namespace jubeater.aigoalplanner.World
                     description = descToken?.ToString() ?? string.Empty;
                 }
 
-                if (obj.TryGetValue("api_permissions", out JToken permsToken)) {
+                if (obj.TryGetValue("api_permissions", out JToken permsToken) && permsToken != null && permsToken.Type != JTokenType.Null) {
                     if (permsToken is JObject permsObj) {
                         foreach (JProperty prop in permsObj.Properties()) {
-                            if (!string.IsNullOrWhiteSpace(prop.Name)) {
-                                apiPermissions.Add(prop.Name.Trim().ToLowerInvariant());
+                            if (string.IsNullOrWhiteSpace(prop.Name)) {
+                                return new CatalogModuleDetails(false, entry.Namespace, entry.Name, entry.Version, problem: "Invalid api_permissions format in manifest.json.");
                             }
+                            apiPermissions.Add(prop.Name.Trim().ToLowerInvariant());
                         }
                     } else if (permsToken is JArray permsArr) {
                         foreach (JToken item in permsArr) {
-                            string val = item?.ToString()?.Trim();
-                            if (!string.IsNullOrEmpty(val)) {
-                                apiPermissions.Add(val.ToLowerInvariant());
+                            if (item == null || item.Type != JTokenType.String) {
+                                return new CatalogModuleDetails(false, entry.Namespace, entry.Name, entry.Version, problem: "Invalid api_permissions format in manifest.json.");
                             }
+                            string val = item.ToString().Trim();
+                            if (string.IsNullOrEmpty(val)) {
+                                return new CatalogModuleDetails(false, entry.Namespace, entry.Name, entry.Version, problem: "Invalid api_permissions format in manifest.json.");
+                            }
+                            apiPermissions.Add(val.ToLowerInvariant());
                         }
+                    } else {
+                        return new CatalogModuleDetails(false, entry.Namespace, entry.Name, entry.Version, problem: "Invalid api_permissions format in manifest.json.");
                     }
                 }
 
