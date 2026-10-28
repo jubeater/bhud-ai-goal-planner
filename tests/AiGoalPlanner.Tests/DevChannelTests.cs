@@ -391,6 +391,30 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task New_chat_on_an_unavailable_Chat_reports_its_Notice() {
+            var chat = Chat.Unavailable("Provider could not load.");
+
+            var inbox = new FakeDevInbox();
+            inbox.AddFile("reset.json", "{ \"id\": \"reset\", \"op\": \"new_chat\" }");
+
+            Assert.Equal("reset", await PollAsync(chat, inbox));
+
+            JObject json = Response(inbox, "reset");
+
+            Assert.True((bool)json["ok"]);
+
+            JArray messages = (JArray)json["messages"];
+            JToken notice   = Assert.Single(messages);
+
+            Assert.Equal("notice", (string)notice["author"]);
+            Assert.Equal("Provider could not load.", (string)notice["text"]);
+            Assert.Empty(json["lookups"]);
+            Assert.Empty(json["roundTrips"]);
+            Assert.Equal(JTokenType.Null, json["review"].Type);
+            Assert.False((bool)json["undoAvailable"]);
+        }
+
+        [Fact]
         public async Task State_reports_no_diagnostics_without_a_Provider_call() {
             var model = new ScriptedChatClient();
             model.WillCallTool("list_installed_modules", "call_1");
