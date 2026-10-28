@@ -181,14 +181,48 @@ namespace jubeater.aigoalplanner.Providers
             JToken usage = json["usage"];
 
             if (usage != null) {
-                response.Usage = new AiUsageDetails {
-                    InputTokenCount  = usage["prompt_tokens"]?.Value<long?>(),
-                    OutputTokenCount = usage["completion_tokens"]?.Value<long?>(),
-                    TotalTokenCount  = usage["total_tokens"]?.Value<long?>()
-                };
+                response.Usage = ReadUsage(usage);
             }
 
             return response;
+        }
+
+        /// <summary>
+        /// The Provider's usage block, or null when it is missing or reads as nothing the Chat
+        /// could show. Usage is best-effort display data: a block no Provider shape explains must
+        /// never replace a usable reply with a failure, so a block that cannot be read is no usage
+        /// rather than an error.
+        /// </summary>
+        private static AiUsageDetails ReadUsage(JToken usage) {
+            try {
+                if (!(usage is JObject usageObject)) return null;
+
+                return new AiUsageDetails {
+                    InputTokenCount       = usageObject["prompt_tokens"]?.Value<long?>(),
+                    OutputTokenCount      = usageObject["completion_tokens"]?.Value<long?>(),
+                    TotalTokenCount       = usageObject["total_tokens"]?.Value<long?>(),
+                    CachedInputTokenCount = ReadCachedInputTokens(usageObject)
+                };
+            } catch (Exception) {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// The cached input tokens in a usage block, however the Provider spells them: OpenAI nests
+        /// them as <c>prompt_tokens_details.cached_tokens</c>, DeepSeek also reports them flat as
+        /// <c>prompt_cache_hit_tokens</c> (the same number twice), and a Provider that reports no
+        /// caching leaves neither. A details block that is null or no object is absent, and the
+        /// flat field is tried instead.
+        /// </summary>
+        private static long? ReadCachedInputTokens(JObject usage) {
+            if (usage["prompt_tokens_details"] is JObject details) {
+                long? cached = details["cached_tokens"]?.Value<long?>();
+
+                if (cached.HasValue) return cached;
+            }
+
+            return usage["prompt_cache_hit_tokens"]?.Value<long?>();
         }
 
         /// <summary>

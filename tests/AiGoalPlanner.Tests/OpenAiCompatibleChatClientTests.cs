@@ -450,6 +450,119 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("[redacted]", exception.Message);
         }
 
+        [Fact]
+        public async Task Usage_counts_come_back_with_the_reply() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}],"
+              + "\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":80,\"total_tokens\":1280}}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Equal((long?)1200, response.Usage.InputTokenCount);
+            Assert.Equal((long?)80,   response.Usage.OutputTokenCount);
+            Assert.Equal((long?)1280, response.Usage.TotalTokenCount);
+            Assert.Null(response.Usage.CachedInputTokenCount);
+        }
+
+        [Fact]
+        public async Task Cached_tokens_come_back_from_OpenAIs_details_block() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}],"
+              + "\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":80,\"total_tokens\":1280,"
+              + "\"prompt_tokens_details\":{\"cached_tokens\":900}}}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Equal((long?)1200, response.Usage.InputTokenCount);
+            Assert.Equal((long?)900,  response.Usage.CachedInputTokenCount);
+        }
+
+        [Fact]
+        public async Task Cached_tokens_come_back_from_DeepSeeks_flat_field() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}],"
+              + "\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":80,\"total_tokens\":1280,"
+              + "\"prompt_cache_hit_tokens\":700,\"prompt_cache_miss_tokens\":500}}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Equal((long?)1200, response.Usage.InputTokenCount);
+            Assert.Equal((long?)700,  response.Usage.CachedInputTokenCount);
+        }
+
+        [Fact]
+        public async Task A_reply_without_a_usage_block_has_no_usage() {
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, ReplyBody));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Null(response.Usage);
+        }
+
+        [Fact]
+        public async Task Null_cache_details_are_read_as_no_cached_split() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}],"
+              + "\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":80,\"total_tokens\":1280,\"prompt_tokens_details\":null}}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Equal("Try the Pathing module.", response.Text);
+            Assert.Equal((long?)1200, response.Usage.InputTokenCount);
+            Assert.Equal((long?)80,   response.Usage.OutputTokenCount);
+            Assert.Null(response.Usage.CachedInputTokenCount);
+        }
+
+        [Fact]
+        public async Task Null_cache_details_still_fall_back_to_the_flat_cached_field() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}],"
+              + "\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":80,\"total_tokens\":1280,"
+              + "\"prompt_tokens_details\":null,\"prompt_cache_hit_tokens\":700}}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Equal((long?)700, response.Usage.CachedInputTokenCount);
+        }
+
+        [Fact]
+        public async Task Non_object_cache_details_are_read_as_no_cached_split() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}],"
+              + "\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":80,\"total_tokens\":1280,\"prompt_tokens_details\":\"oops\"}}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Equal((long?)1200, response.Usage.InputTokenCount);
+            Assert.Null(response.Usage.CachedInputTokenCount);
+        }
+
+        [Fact]
+        public async Task Odd_usage_values_are_read_as_no_usage_rather_than_replacing_the_reply() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}],"
+              + "\"usage\":{\"prompt_tokens\":\"lots\",\"completion_tokens\":80,\"total_tokens\":1280}}";
+
+            OpenAiCompatibleChatClient client = ClientFor(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+            ChatResponse response = await client.GetResponseAsync(new[] { Request("Hello") });
+
+            Assert.Equal("Try the Pathing module.", response.Text);
+            Assert.Null(response.Usage);
+        }
+
         private static AIFunctionDeclaration ListModulesTool() {
             return AIFunctionFactory.CreateDeclaration(
                 "list_installed_modules",

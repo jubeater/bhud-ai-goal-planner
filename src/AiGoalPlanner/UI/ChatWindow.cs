@@ -100,6 +100,7 @@ namespace jubeater.aigoalplanner.UI
         private readonly Scrollbar      _scrollbar;
         private readonly Label          _emptyHint;
         private readonly Label          _providerLabel;
+        private readonly Label          _tokenLabel;
         private readonly TextBox        _requestBox;
         private readonly StandardButton _sendButton;
         private readonly StandardButton _cancelButton;
@@ -277,6 +278,19 @@ namespace jubeater.aigoalplanner.UI
                 Text      = string.Empty
             };
 
+            // What this Chat has used in total, on its own line below the Provider row: the
+            // title-bar subtitle the totals sat in first turned out too narrow in game, running
+            // under the close button and out of the window, so they moved here where the full
+            // content width fits the counts, the cached split and the cost.
+            _tokenLabel = new Label {
+                Parent    = content,
+                Location  = new Point(0, ProviderRowTop + StandardButton.STANDARD_CONTROL_HEIGHT + 6),
+                Size      = new Point(_window.ContentRegion.Width - TextRightMargin, 20),
+                Font      = GameService.Content.DefaultFont14,
+                TextColor = HintColor,
+                Text      = string.Empty
+            };
+
             // The Review: what the AI proposed, one row per Action, and the two buttons that decide
             // what happens to it. It is its own area so a long Plan cannot push the conversation out
             // of the window.
@@ -357,6 +371,17 @@ namespace jubeater.aigoalplanner.UI
             if (_disposed) return;
 
             _providerLabel.Text = _describeProvider();
+        }
+
+        /// <summary>
+        /// Rewrites the per-Chat token line, for a settings change that brought no new message to
+        /// render: prices changed, so the per-Chat cost reads differently now. What a new message
+        /// uses is rewritten in the render pass instead.
+        /// </summary>
+        public void RefreshTokens() {
+            if (_disposed) return;
+
+            _tokenLabel.Text = TokenLine();
         }
 
         public void Dispose() {
@@ -558,8 +583,17 @@ namespace jubeater.aigoalplanner.UI
 
             int top = 0;
 
+            // The per-Chat totals sit on their own line under the Provider row, where the full
+            // content width fits the counts, the cached split and the cost; what one reply used
+            // sits under that reply instead.
+            _tokenLabel.Text = TokenLine();
+
             foreach (ChatMessage message in messages) {
                 top = AddLabel(Format(message), ColorFor(message.Author), top);
+
+                if (message.Author == ChatMessageAuthor.Ai && message.Usage != null && !message.Usage.IsEmpty) {
+                    top = AddLabel("    " + message.Usage.DescribeWithCost(message.EstimatedCostUsd), HintColor, top);
+                }
             }
 
             foreach (string line in _chat.ProgressLines) {
@@ -594,6 +628,18 @@ namespace jubeater.aigoalplanner.UI
             _messageControls.Add(label);
 
             return label.Bottom + MessageSpacing;
+        }
+
+        /// <summary>
+        /// The per-Chat token line under the Provider row: the tokens this Chat has used, with the
+        /// estimated cost when the Player entered prices. An empty Chat keeps the line empty.
+        /// </summary>
+        private string TokenLine() {
+            TokenUsage total = _chat.TotalUsage;
+
+            if (total.IsEmpty) return string.Empty;
+
+            return total.DescribeWithCost(_chat.TotalEstimatedCostUsd);
         }
 
         private static string Format(ChatMessage message) {

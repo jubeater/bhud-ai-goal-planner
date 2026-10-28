@@ -26,9 +26,10 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 
         public List<ChatOptions> RequestOptions { get; } = new List<ChatOptions>();
 
-        public void WillReply(string text) {
+        public void WillReply(string text, UsageDetails usage = null) {
             _script.Enqueue(new ChatResponse(new Microsoft.Extensions.AI.ChatMessage(ChatRole.Assistant, text)) {
-                FinishReason = ChatFinishReason.Stop
+                FinishReason = ChatFinishReason.Stop,
+                Usage        = usage
             });
         }
 
@@ -44,7 +45,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
         /// reply ends with, the way a Provider that cut the reply off would report it.
         /// </summary>
         public void WillCallTool(string toolName = "test_tool", string callId = "call_0", IDictionary<string, object> arguments = null, string text = "",
-                                 ChatFinishReason? finishReason = null) {
+                                 ChatFinishReason? finishReason = null, UsageDetails usage = null) {
             var contents = new List<AIContent>();
 
             if (text.Length > 0) contents.Add(new TextContent(text));
@@ -52,7 +53,8 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             contents.Add(new FunctionCallContent(callId, toolName, arguments));
 
             _script.Enqueue(new ChatResponse(new Microsoft.Extensions.AI.ChatMessage(ChatRole.Assistant, contents)) {
-                FinishReason = finishReason ?? ChatFinishReason.ToolCalls
+                FinishReason = finishReason ?? ChatFinishReason.ToolCalls,
+                Usage        = usage
             });
         }
 

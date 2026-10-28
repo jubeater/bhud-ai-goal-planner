@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1311,6 +1313,296 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Collection(chat.Messages,
                               request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
                               answer => Assert.Contains("Tekkit", answer.Text));
+        }
+
+        [Fact]
+        public async Task Usage_is_counted_across_a_tool_loop_and_shown_on_the_reply() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillCallTool("list_installed_modules", "call_1",
+                               usage: new UsageDetails { InputTokenCount = 1200, CachedInputTokenCount = 900, OutputTokenCount = 40 });
+            model.WillReply("You have no modules installed.",
+                            new UsageDetails { InputTokenCount = 1500, CachedInputTokenCount = 1100, OutputTokenCount = 80 });
+
+            var chat = NewChatWithTokens(model, world, TokenBudget.Default, null);
+
+            await chat.SendAsync("What modules do I have?");
+
+            ChatMessage answer = Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Ai);
+
+            Assert.Equal((long?)2700, answer.Usage.InputTokens);
+            Assert.Equal((long?)2000, answer.Usage.CachedInputTokens);
+            Assert.Equal((long?)120,  answer.Usage.OutputTokens);
+
+            Assert.Equal((long?)2700, chat.TotalUsage.InputTokens);
+            Assert.Equal((long?)2000, chat.TotalUsage.CachedInputTokens);
+            Assert.Equal((long?)120,  chat.TotalUsage.OutputTokens);
+        }
+
+        [Fact]
+        public async Task Usage_is_counted_per_Chat_across_Requests() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillReply("First answer.",  new UsageDetails { InputTokenCount = 100, OutputTokenCount = 10 });
+            model.WillReply("Second answer.", new UsageDetails { InputTokenCount = 200, OutputTokenCount = 20 });
+
+            var chat = NewChatWithTokens(model, world, TokenBudget.Default, null);
+
+            await chat.SendAsync("First request");
+            await chat.SendAsync("Second request");
+
+            Assert.Equal((long?)100, chat.Messages[1].Usage.InputTokens);
+            Assert.Equal((long?)200, chat.Messages[3].Usage.InputTokens);
+
+            Assert.Equal((long?)300, chat.TotalUsage.InputTokens);
+            Assert.Equal((long?)30,  chat.TotalUsage.OutputTokens);
+        }
+
+        [Fact]
+        public async Task A_reply_without_reported_usage_carries_no_counts() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillReply("An answer with no usage behind it.");
+
+            var chat = NewChatWithTokens(model, world, TokenBudget.Default, null);
+
+            await chat.SendAsync("Hello");
+
+            Assert.Null(chat.Messages[1].Usage);
+            Assert.True(chat.TotalUsage.IsEmpty);
+        }
+
+        [Fact]
+        public async Task The_budget_prompt_asks_once_per_Chat() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillReply("First answer.",  new UsageDetails { InputTokenCount = 60, OutputTokenCount = 10 });
+            model.WillReply("Second answer.", new UsageDetails { InputTokenCount = 60, OutputTokenCount = 10 });
+
+            var chat = NewChatWithTokens(model, world, 100, null);
+
+            await chat.SendAsync("First request");
+            await chat.SendAsync("Second request");
+
+            List<ChatMessage> prompts = chat.Messages
+                                            .Where(message => message.Author == ChatMessageAuthor.Notice
+                                                           && message.Text.Contains("Token budget reached"))
+                                            .ToList();
+
+            ChatMessage prompt = Assert.Single(prompts);
+
+            Assert.Contains("New chat", prompt.Text);
+
+            // Both answers still landed: the budget asks, it does not take the reply away.
+            Assert.Equal(2, chat.Messages.Count(message => message.Author == ChatMessageAuthor.Ai));
+        }
+
+        [Fact]
+        public async Task After_New_chat_totals_start_over_and_the_budget_asks_again() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillReply("First answer.",  new UsageDetails { InputTokenCount = 300, OutputTokenCount = 20 });
+            model.WillReply("Second answer.", new UsageDetails { InputTokenCount = 300, OutputTokenCount = 20 });
+
+            var chat = NewChatWithTokens(model, world, 100, null);
+
+            await chat.SendAsync("First request");
+
+            chat.StartNewChat();
+
+            Assert.True(chat.TotalUsage.IsEmpty);
+
+            await chat.SendAsync("Second request");
+
+            Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Notice
+                                                 && message.Text.Contains("Token budget reached"));
+        }
+
+        [Fact]
+        public async Task The_reply_carries_its_cost_when_prices_are_entered() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillReply("An answer.", new UsageDetails { InputTokenCount = 1200, OutputTokenCount = 80 });
+
+            var chat = NewChatWithTokens(model, world, TokenBudget.Default, new TokenPrice(3m, 15m));
+
+            await chat.SendAsync("Hello");
+
+            Assert.Equal(0.0048m, chat.Messages[1].EstimatedCostUsd);
+            Assert.Equal(0.0048m, chat.TotalEstimatedCostUsd);
+        }
+
+        [Fact]
+        public async Task Without_prices_tokens_are_counted_but_no_cost_is_shown() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillReply("An answer.", new UsageDetails { InputTokenCount = 1200, OutputTokenCount = 80 });
+
+            var chat = NewChatWithTokens(model, world, TokenBudget.Default, null);
+
+            await chat.SendAsync("Hello");
+
+            Assert.Equal((long?)1200, chat.Messages[1].Usage.InputTokens);
+            Assert.Null(chat.Messages[1].EstimatedCostUsd);
+            Assert.Null(chat.TotalEstimatedCostUsd);
+        }
+
+        [Fact]
+        public async Task The_budget_stops_a_tool_loop_before_the_next_call() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillCallTool("list_installed_modules", "call_1",
+                               usage: new UsageDetails { InputTokenCount = 60, OutputTokenCount = 10 });
+            model.WillCallTool("list_installed_modules", "call_2",
+                               usage: new UsageDetails { InputTokenCount = 60, OutputTokenCount = 10 });
+            model.WillReply("This reply must never be reached.");
+
+            var chat = NewChatWithTokens(model, world, 100, null);
+
+            await chat.SendAsync("What modules do I have?");
+
+            // The second round spent the budget, so the third call never happens: the tool results
+            // already in the history are kept, and the Player is asked instead of answered.
+            Assert.Equal(2, model.Requests.Count);
+
+            ChatMessage notice = Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Notice
+                                                                       && message.Text.Contains("Token budget reached"));
+
+            Assert.Contains("New chat", notice.Text);
+            Assert.DoesNotContain(chat.Messages, message => message.Author == ChatMessageAuthor.Ai);
+            Assert.Equal((long?)120, chat.TotalUsage.InputTokens);
+        }
+
+        [Fact]
+        public async Task After_a_budget_stop_the_next_message_continues_from_the_history() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillCallTool("list_installed_modules", "call_1",
+                               usage: new UsageDetails { InputTokenCount = 60, OutputTokenCount = 10 });
+            model.WillCallTool("list_installed_modules", "call_2",
+                               usage: new UsageDetails { InputTokenCount = 60, OutputTokenCount = 10 });
+            model.WillReply("Checked twice, all within the stopped loop's history.",
+                            new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 });
+
+            var chat = NewChatWithTokens(model, world, 100, null);
+
+            await chat.SendAsync("What modules do I have?");
+            await chat.SendAsync("Go on");
+
+            // The stopped loop's tool exchanges reached the model again, so it could answer; the
+            // budget was asked about once, and continuing is the Player's answer.
+            Assert.Equal(3, model.Requests.Count);
+            Assert.Equal("Checked twice, all within the stopped loop's history.", chat.Messages.Last().Text);
+            Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Notice
+                                                 && message.Text.Contains("Token budget reached"));
+            Assert.Equal((long?)130, chat.TotalUsage.InputTokens);
+        }
+
+        [Fact]
+        public async Task A_budget_change_takes_effect_before_the_next_call() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            long budget = 1000000;
+
+            model.WillRunWhenTheReplyIsReady(() => budget = 50);
+            model.WillCallTool("list_installed_modules", "call_1",
+                               usage: new UsageDetails { InputTokenCount = 60, OutputTokenCount = 10 });
+            model.WillCallTool("list_installed_modules", "call_2");
+            model.WillReply("This reply must never be reached.");
+
+            // The Chat reads the budget through its callback, so moving the variable moves the
+            // limit the running Request is checked against.
+            var chat = new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"), Lookups.For(world),
+                                logDebug: null, logWarn: null, plans: null, tokenBudget: () => budget, tokenPrices: null);
+
+            await chat.SendAsync("What modules do I have?");
+
+            Assert.Equal(1, model.Requests.Count);
+            Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Notice
+                                                 && message.Text.Contains("Token budget reached"));
+        }
+
+        [Fact]
+        public async Task Usage_left_by_a_request_without_a_reply_is_not_added_to_the_next_reply() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+
+            model.WillCallTool("list_installed_modules", "call_1", finishReason: ChatFinishReason.Length,
+                               usage: new UsageDetails { InputTokenCount = 100, OutputTokenCount = 10 });
+            model.WillReply("Answered fresh.",
+                            new UsageDetails { InputTokenCount = 200, OutputTokenCount = 20 });
+
+            var chat = NewChatWithTokens(model, world, TokenBudget.Default, null);
+
+            await chat.SendAsync("What modules do I have?");
+            await chat.SendAsync("Tell me again");
+
+            // The cut-off Request spent tokens but left no reply; the next reply carries only its
+            // own Request, while the Chat total keeps everything spent.
+            ChatMessage answer = Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Ai);
+
+            Assert.Equal((long?)200, answer.Usage.InputTokens);
+            Assert.Equal((long?)20,  answer.Usage.OutputTokens);
+            Assert.Equal((long?)300, chat.TotalUsage.InputTokens);
+            Assert.Equal((long?)30,  chat.TotalUsage.OutputTokens);
+        }
+
+        [Fact]
+        public async Task The_reply_is_costed_at_the_prices_of_the_Provider_that_answered() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            TokenPrice prices = new TokenPrice(3m, 15m);
+
+            // The Player switches Provider while the first one is still answering: the reply is
+            // costed at the prices in force when it was asked for, not the ones it lands in.
+            model.WillRunWhenTheReplyIsReady(() => prices = new TokenPrice(30m, 150m));
+            model.WillReply("An answer.", new UsageDetails { InputTokenCount = 1200, OutputTokenCount = 80 });
+
+            var chat = new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"), Lookups.For(world),
+                                logDebug: null, logWarn: null, plans: null, tokenBudget: null, tokenPrices: () => prices);
+
+            await chat.SendAsync("Hello");
+
+            Assert.Equal(0.0048m, chat.Messages[1].EstimatedCostUsd);
+            Assert.Equal(0.0048m, chat.TotalEstimatedCostUsd);
+        }
+
+        [Fact]
+        public async Task A_reply_whose_cache_metadata_is_null_still_reaches_the_Chat_with_its_counts() {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Try the Pathing module.\"},\"finish_reason\":\"stop\"}],"
+              + "\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":80,\"total_tokens\":1280,\"prompt_tokens_details\":null}}";
+            var endpoint = new StubHttpMessageHandler(HttpStatusCode.OK, body);
+            var client = new OpenAiCompatibleChatClient(
+                ProviderSettings.Parse("https://provider.test/v1", "test-model", string.Empty), new HttpClient(endpoint));
+
+            var chat = new Chat(() => client, () => SystemPrompt.For("test-model", "https://provider.test/v1"));
+
+            await chat.SendAsync("Hello");
+
+            ChatMessage answer = Assert.Single(chat.Messages, message => message.Author == ChatMessageAuthor.Ai);
+
+            Assert.Equal("Try the Pathing module.", answer.Text);
+            Assert.Equal((long?)1200, answer.Usage.InputTokens);
+            Assert.Null(answer.Usage.CachedInputTokens);
+        }
+
+        /// <summary>
+        /// The Chat with a Token Budget and prices for the token tests: the scripted model answers,
+        /// and the Lookups run against an in-memory world, wired the way the module wires them.
+        /// </summary>
+        private static Chat NewChatWithTokens(ScriptedChatClient model, FakeWorld world, long budget, TokenPrice prices) {
+            return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"), Lookups.For(world),
+                            logDebug: null, logWarn: null, plans: null, tokenBudget: () => budget, tokenPrices: () => prices);
         }
     }
 }
