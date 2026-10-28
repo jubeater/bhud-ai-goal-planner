@@ -51,7 +51,29 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("installed", action.ProposedValue);
             Assert.Equal("Shows markers on map", action.Gap);
             Assert.Equal(new[] { "account", "characters" }, action.ApiPermissions);
+            Assert.Equal("Markers and trails for Guild Wars 2.", action.Description);
+            Assert.True(action.PermissionsKnown);
             Assert.Empty(action.Dependencies);
+        }
+
+        [Fact]
+        public async Task Install_is_accepted_with_unknown_permissions_when_details_cannot_be_fetched() {
+            var plan = new Plan("Install Pathing", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "bh.community.pathing", null, null,
+                               "Needed for markers", isSideEffect: false, gap: "Shows markers on map")
+            });
+
+            _world.AnswerGetCatalogModuleDetails = (ns, ct) =>
+                Task.FromResult(new CatalogModuleDetails(false, ns, problem: "Hash mismatch."));
+
+            PlanReview review = await PlanValidator.ReviewAsync(plan, _world, CancellationToken.None);
+
+            ReviewedAction action = Assert.Single(review.Actions);
+            Assert.True(action.IsAccepted);
+            Assert.True(action.CanApply);
+            Assert.False(action.PermissionsKnown);
+            Assert.Empty(action.ApiPermissions);
+            Assert.Contains("Hash mismatch", action.DetailsProblem);
         }
 
         [Fact]

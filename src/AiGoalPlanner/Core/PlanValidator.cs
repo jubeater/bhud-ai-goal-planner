@@ -401,6 +401,24 @@ namespace jubeater.aigoalplanner.Core
                 _installedInPlan.Add(catalogModule.Namespace);
                 _installedInPlan.Add(catalogModule.Name);
 
+                CatalogModuleDetails details = await _world.GetCatalogModuleDetailsAsync(catalogModule.Namespace, _cancellationToken).ConfigureAwait(false);
+
+                string description;
+                IReadOnlyList<string> apiPerms;
+                bool permissionsKnown;
+                string detailsProblem = null;
+
+                if (details != null && details.Success) {
+                    description = details.Description;
+                    apiPerms = details.ApiPermissions;
+                    permissionsKnown = true;
+                } else {
+                    description = catalogModule.Description;
+                    apiPerms = Array.Empty<string>();
+                    permissionsKnown = false;
+                    detailsProblem = details?.Problem ?? "Could not fetch module details.";
+                }
+
                 var displayDeps = catalogModule.Dependencies?
                     .Where(dep => !string.IsNullOrWhiteSpace(dep) && !string.Equals(dep.Trim(), "bh.blishhud", StringComparison.OrdinalIgnoreCase))
                     .ToList();
@@ -408,7 +426,10 @@ namespace jubeater.aigoalplanner.Core
                 return new ReviewedAction(action, catalogModule.Namespace, catalogModule.Name, null, catalogModule.Name,
                                           "not installed", "installed", null,
                                           dependencies: displayDeps,
-                                          apiPermissions: catalogModule.ApiPermissions);
+                                          apiPermissions: apiPerms,
+                                          description: description,
+                                          permissionsKnown: permissionsKnown,
+                                          detailsProblem: detailsProblem);
             }
 
             private InstalledModuleInfo Resolve(string module) {

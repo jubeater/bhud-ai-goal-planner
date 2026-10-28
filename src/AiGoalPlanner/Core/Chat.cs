@@ -1231,6 +1231,12 @@ namespace jubeater.aigoalplanner.Core
             if (hadDownload) {
                 instruction += " Use find_marker_categories to look up marker categories for the downloaded pack. If the pack appears in skipped_packs, tell the Player plainly that the pack's category list couldn't be read, and that the Player can find it in Pathing's menu under the pack's name; do not suggest waiting for indexing or restarting Pathing.";
             }
+            bool hadInstall = (earlier != null && earlier.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.Install && o.Changed))
+                           || (applied != null && applied.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.Install && o.Changed));
+            if (hadInstall) {
+                instruction += " If a newly installed module requested GW2 API permissions, tell the Player to check and confirm them in that module's settings and restart Blish HUD if it needs API access.";
+            }
+
             return instruction;
         }
 

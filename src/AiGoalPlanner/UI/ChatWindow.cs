@@ -776,10 +776,19 @@ namespace jubeater.aigoalplanner.UI
                 if (!string.IsNullOrWhiteSpace(action.Gap)) {
                     parts.Add("Gap: " + action.Gap.Trim());
                 }
+                if (!string.IsNullOrWhiteSpace(action.Description)) {
+                    parts.Add(action.Description.Trim());
+                }
                 if (action.Dependencies != null && action.Dependencies.Count > 0) {
                     parts.Add("Dependencies: " + string.Join(", ", action.Dependencies));
                 }
-                if (action.ApiPermissions != null && action.ApiPermissions.Count > 0) {
+                if (!action.PermissionsKnown) {
+                    string detailsNote = !string.IsNullOrWhiteSpace(action.DetailsProblem)
+                        ? "Could not load module details (" + action.DetailsProblem + ")"
+                        : "Could not load module details";
+                    parts.Add(detailsNote);
+                    parts.Add("API permissions: unknown");
+                } else if (action.ApiPermissions != null && action.ApiPermissions.Count > 0) {
                     parts.Add("API permissions: " + string.Join(", ", action.ApiPermissions));
                 }
                 if (!string.IsNullOrWhiteSpace(action.Action.Reason)) {

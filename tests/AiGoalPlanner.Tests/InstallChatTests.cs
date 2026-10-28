@@ -96,6 +96,41 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("Pathing: install and enable it", action.Summary);
             Assert.Equal("Markers and trails on map", action.Gap);
             Assert.Equal(new[] { "account", "characters" }, action.ApiPermissions);
+            Assert.Equal("Markers and trails for Guild Wars 2.", action.Description);
+            Assert.True(action.PermissionsKnown);
+        }
+
+        [Fact]
+        public async Task Review_shows_permissions_as_unknown_when_details_fail_and_allows_approval() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", new[] { "bh.blishhud" })
+                }
+            };
+            world.AnswerGetCatalogModuleDetails = (ns, ct) =>
+                Task.FromResult(new CatalogModuleDetails(false, ns, problem: "Network timeout."));
+
+            model.WillCallTool("submit_plan", "call_1",
+                               Plan("I propose installing Pathing.",
+                                    InstallAction("bh.community.pathing", "Markers on map")));
+
+            var chat = NewChat(model, world);
+            await chat.SendAsync("Install pathing");
+
+            Assert.NotNull(chat.Review);
+            ReviewedAction action = Assert.Single(chat.Review.Actions);
+            Assert.True(action.IsAccepted);
+            Assert.True(action.CanApply);
+            Assert.False(action.PermissionsKnown);
+            Assert.Empty(action.ApiPermissions);
+            Assert.Contains("Network timeout", action.DetailsProblem);
+
+            // Player can still approve and apply
+            model.WillReply("Installed.");
+            await chat.ApplyAsync(new[] { 0 });
+            Assert.Equal(1, world.InstallCalls);
+            Assert.Contains("install bh.community.pathing", world.Writes);
         }
 
         [Fact]
@@ -233,6 +268,36 @@ namespace jubeater.aigoalplanner.Tests
             Assert.False(installed.Enabled);
 
             Assert.Contains(chat.Messages, m => m.Author == ChatMessageAuthor.Report && m.Text.Contains("Undid 1 change: Pathing: disable it"));
+        }
+
+        [Fact]
+        public async Task Continuation_instructs_to_confirm_permissions_and_restart_after_install() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", new[] { "bh.blishhud" })
+                }
+            };
+            world.CatalogDetails["bh.community.pathing"] = new CatalogModuleDetails(
+                true, "bh.community.pathing", "Pathing", "3.2.1",
+                "Markers and trails.", new[] { "account" }
+            );
+
+            model.WillCallTool("submit_plan", "call_1",
+                               Plan("I propose installing Pathing.",
+                                    InstallAction("bh.community.pathing", "Markers on map")));
+
+            var chat = NewChat(model, world);
+            await chat.SendAsync("Install pathing");
+
+            model.WillReply("Please check Pathing permissions.");
+            await chat.ApplyAsync(new[] { 0 });
+
+            // The instruction sent to the model for the continuation must include permission instructions
+            var lastRequest = model.Requests.Last();
+            var continuationMsg = string.Join(" ", lastRequest.Select(m => m.Text));
+            Assert.Contains("permissions", continuationMsg, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("restart", continuationMsg, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]

@@ -12,7 +12,7 @@ namespace jubeater.aigoalplanner.Core
     {
         private static readonly IReadOnlyList<string> NoStrings = new string[0];
         public ReviewedAction(PlanAction action, string moduleNamespace, string moduleName, string settingKey,
-                              string targetName, string currentValue, string proposedValue, string problem, IReadOnlyList<string> dependencies = null, IReadOnlyList<string> apiPermissions = null) {
+                              string targetName, string currentValue, string proposedValue, string problem, IReadOnlyList<string> dependencies = null, IReadOnlyList<string> apiPermissions = null, string description = null, bool permissionsKnown = true, string detailsProblem = null) {
             Action          = action ?? throw new ArgumentNullException(nameof(action));
             ModuleNamespace = moduleNamespace ?? string.Empty;
             ModuleName      = moduleName      ?? string.Empty;
@@ -22,7 +22,10 @@ namespace jubeater.aigoalplanner.Core
             ProposedValue   = proposedValue   ?? string.Empty;
             Problem         = problem         ?? string.Empty;
             Dependencies    = dependencies    ?? NoStrings;
-            ApiPermissions  = apiPermissions  ?? NoStrings;
+            ApiPermissions   = apiPermissions  ?? NoStrings;
+            Description      = description     ?? string.Empty;
+            PermissionsKnown = permissionsKnown;
+            DetailsProblem   = detailsProblem  ?? string.Empty;
             Summary         = Describe(action, ModuleName, TargetName, ProposedValue);
         }
 
@@ -58,7 +61,10 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>Whether the validator let the Action through.</summary>
         public IReadOnlyList<string> Dependencies   { get; }
-        public IReadOnlyList<string> ApiPermissions { get; }
+        public IReadOnlyList<string> ApiPermissions   { get; }
+        public string                Description      { get; }
+        public bool                  PermissionsKnown { get; }
+        public string                DetailsProblem   { get; }
         public string                Gap            => Action.Gap;
 
         public bool IsAccepted => Problem.Length == 0;
