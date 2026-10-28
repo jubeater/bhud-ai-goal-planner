@@ -26,5 +26,5 @@ Either way:
 - **Experiments:** try things out as test cases in `tests/`, so nothing gets built into `%TEMP%`.
 - **Test output:** run `dotnet test --nologo -v q` and show only failing lines.
 - **Stj5Check:** build `tests/AiGoalPlanner.Stj5Check` and run its `.exe`. It must print `RESULT: OK` (ADR-0008).
-- **In game:** scripted checks run through the developer channel: `scripts/dev-ask.ps1`, `dev-op.ps1` and `dev-shot.ps1` (README, "Scripted in-game checks"). They need Blish HUD with `--debug`, the module loaded and the setting on; the maintainer runs them, agents don't.
+- **In game:** in-game checks run through the developer channel: `scripts/dev-ask.ps1`, `dev-op.ps1` and `dev-shot.ps1` (README, "Scripted in-game checks"). They need Blish HUD started by `scripts/dev-run.ps1` and the module's developer channel setting on.
 - **Merging:** the maintainer squash-merges a PR once its latest review has no open findings and its in-game check has passed.
