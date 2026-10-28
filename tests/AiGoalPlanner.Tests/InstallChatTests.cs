@@ -422,5 +422,80 @@ namespace jubeater.aigoalplanner.Tests
             Assert.False(applied.Outcomes[1].Succeeded);
             Assert.Contains("requires dependency \"bh.community.pathing\"", applied.Outcomes[1].Problem);
         }
+
+        [Fact]
+        public async Task Completed_install_is_recorded_when_enable_fails() {
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers", new[] { "bh.blishhud" })
+                }
+            };
+            world.AnswerSetModuleEnabled = (ns, en) => {
+                return new ModuleChange(false, false, "Module threw in LoadAsync");
+            };
+
+            var plan = new Plan("Install Pathing", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "bh.community.pathing", null, null,
+                               "Need pathing", isSideEffect: false, gap: "Pathing gap")
+            });
+
+            IBlishHudWorld target = new GameThreadWorld(world, new ImmediateGameThread());
+            var applier = new PlanApplier(target);
+            var reviewed = new ReviewedAction(plan.Actions[0], "bh.community.pathing", "Pathing", null, "Pathing",
+                                              "not installed", "installed", null);
+            var review = new PlanReview(plan, new[] { reviewed });
+
+            AppliedPlan applied = await applier.ApplyAsync(review, new[] { 0 }, CancellationToken.None);
+
+            Assert.Equal(1, world.InstallCalls);
+            ApplyOutcome outcome = Assert.Single(applied.Outcomes);
+            Assert.True(applied.AnyChanged);
+            Assert.True(outcome.Changed);
+            Assert.False(outcome.Succeeded);
+            Assert.Equal("Module threw in LoadAsync", outcome.Problem);
+            UndoStep undo = Assert.Single(applied.Undo);
+            Assert.Equal(PlanActionKind.Install, undo.Kind);
+            Assert.Equal("bh.community.pathing", undo.ModuleNamespace);
+        }
+
+        [Fact]
+        public async Task Completed_install_is_recorded_when_cancelled_during_download() {
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers", new[] { "bh.blishhud" })
+                }
+            };
+
+            var cts = new CancellationTokenSource();
+            world.AnswerInstallModule = async (ns, ct) => {
+                cts.Cancel();
+                await Task.Yield();
+                world.Modules.Add(new InstalledModuleInfo(ns, "Pathing", "3.2.1", "Markers", enabled: false));
+                world.Writes.Add("install " + ns);
+                return new ModuleInstallChange(true, true, "Pathing", ns, "3.2.1");
+            };
+
+            var plan = new Plan("Install Pathing", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "bh.community.pathing", null, null,
+                               "Need pathing", isSideEffect: false, gap: "Pathing gap")
+            });
+
+            IBlishHudWorld target = new GameThreadWorld(world, new ImmediateGameThread());
+            var applier = new PlanApplier(target);
+            var reviewed = new ReviewedAction(plan.Actions[0], "bh.community.pathing", "Pathing", null, "Pathing",
+                                              "not installed", "installed", null);
+            var review = new PlanReview(plan, new[] { reviewed });
+
+            AppliedPlan applied = await applier.ApplyAsync(review, new[] { 0 }, cts.Token);
+
+            Assert.Equal(1, world.InstallCalls);
+            Assert.True(applied.Cancelled);
+            Assert.True(applied.AnyChanged);
+            ApplyOutcome outcome = Assert.Single(applied.Outcomes);
+            Assert.True(outcome.Changed);
+            UndoStep undo = Assert.Single(applied.Undo);
+            Assert.Equal(PlanActionKind.Install, undo.Kind);
+            Assert.Equal("bh.community.pathing", undo.ModuleNamespace);
+        }
     }
 }

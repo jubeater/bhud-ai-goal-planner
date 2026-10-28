@@ -159,14 +159,29 @@ namespace jubeater.aigoalplanner.Core
             ModuleInstallChange change = await ReadAsync(() => _world.InstallModuleAsync(@namespace, cancellationToken), cancellationToken).ConfigureAwait(false);
             if (!change.Applied || !change.Changed) return change;
 
-            ModuleChange enableChange = await SetModuleEnabledAsync(change.Namespace, true, cancellationToken).ConfigureAwait(false);
-            if (!enableChange.Applied) {
-                return new ModuleInstallChange(false, false, change.ModuleName, change.Namespace, change.Version,
-                    ProblemOr(enableChange.Problem, "Blish HUD could not enable " + change.ModuleName + "."));
-            }
+            try {
+                if (cancellationToken.IsCancellationRequested) {
+                    return new ModuleInstallChange(true, true, change.ModuleName, change.Namespace, change.Version,
+                        "Installation completed, but enabling was cancelled.");
+                }
 
-            return change;
+                ModuleChange enableChange = await SetModuleEnabledAsync(change.Namespace, true, cancellationToken).ConfigureAwait(false);
+                if (!enableChange.Applied) {
+                    return new ModuleInstallChange(true, true, change.ModuleName, change.Namespace, change.Version,
+                        ProblemOr(enableChange.Problem, "Blish HUD could not enable " + change.ModuleName + "."));
+                }
+
+                return change;
+            } catch (OperationCanceledException) {
+                return new ModuleInstallChange(true, true, change.ModuleName, change.Namespace, change.Version,
+                    "Installation completed, but enabling was cancelled.");
+            } catch (Exception ex) {
+                return new ModuleInstallChange(true, true, change.ModuleName, change.Namespace, change.Version,
+                    ProblemOr(ex.Message, "Blish HUD could not enable " + change.ModuleName + "."));
+            }
         }
+
+
 
         private async Task<T> ReadAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken) {
             Task<T> queued = await _gameThread.RunAsync(read, cancellationToken).ConfigureAwait(false);
