@@ -771,6 +771,23 @@ namespace jubeater.aigoalplanner.UI
         /// AI proposes it.
         /// </summary>
         private static string DetailOf(ReviewedAction action) {
+            if (action.Action.Kind == PlanActionKind.Install) {
+                var parts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(action.Gap)) {
+                    parts.Add("Gap: " + action.Gap.Trim());
+                }
+                if (action.Dependencies != null && action.Dependencies.Count > 0) {
+                    parts.Add("Dependencies: " + string.Join(", ", action.Dependencies));
+                }
+                if (action.ApiPermissions != null && action.ApiPermissions.Count > 0) {
+                    parts.Add("API permissions: " + string.Join(", ", action.ApiPermissions));
+                }
+                if (!string.IsNullOrWhiteSpace(action.Action.Reason)) {
+                    parts.Add(action.Action.Reason.Trim());
+                }
+                return string.Join(". ", parts);
+            }
+
             return "Now " + action.CurrentValue + " → " + action.ProposedValue + ". " + action.Action.Reason;
         }
 

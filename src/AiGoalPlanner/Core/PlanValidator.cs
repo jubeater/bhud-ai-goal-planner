@@ -149,6 +149,11 @@ namespace jubeater.aigoalplanner.Core
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             private readonly HashSet<string>                          _downloadPacks =
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            private readonly HashSet<string>                          _installs =
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            private readonly HashSet<string>                          _installedInPlan =
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            private IReadOnlyList<CatalogModuleInfo>                  _catalogModules;
             private MarkerPacksResult                                 _markerPacksResult;
 
             public Reviewer(IReadOnlyList<InstalledModuleInfo> modules, IBlishHudWorld world,
@@ -161,6 +166,10 @@ namespace jubeater.aigoalplanner.Core
             public async Task<ReviewedAction> ReviewAsync(PlanAction action) {
                 if (action.Kind == PlanActionKind.Advice) {
                     return Accept(action, null, null, null, null, null);
+                }
+
+                if (action.Kind == PlanActionKind.Install) {
+                    return await ReviewInstallAsync(action).ConfigureAwait(false);
                 }
 
                 if (action.Kind == PlanActionKind.DownloadPack) {
@@ -304,6 +313,69 @@ namespace jubeater.aigoalplanner.Core
 
 
                 return Accept(action, null, null, pack.Name, "not installed", sizeText);
+            }
+
+                        private async Task<ReviewedAction> ReviewInstallAsync(PlanAction action) {
+                if (string.IsNullOrWhiteSpace(action.Gap)) {
+                    return Reject(action, null, "The install action does not state the Gap it fills.");
+                }
+
+                string wanted = (action.Module ?? string.Empty).Trim();
+                if (wanted.Length == 0) {
+                    return Reject(action, null, "The action does not say which module to install.");
+                }
+
+                InstalledModuleInfo installed = Resolve(wanted);
+                if (installed != null) {
+                    return Reject(action, installed, installed.Name + " is already installed.");
+                }
+
+                if (_catalogModules == null) {
+                    _catalogModules = await _world.GetCatalogAsync(_cancellationToken).ConfigureAwait(false);
+                }
+
+                CatalogModuleInfo catalogModule = _catalogModules?.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Namespace, wanted, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(candidate.Name, wanted, StringComparison.OrdinalIgnoreCase));
+
+                if (catalogModule == null) {
+                    return Reject(action, null, "\"" + wanted + "\" is not in the module catalog.");
+                }
+
+                if (!_installs.Add(catalogModule.Namespace)) {
+                    return Reject(action, null, catalogModule.Name + " is already changed by another action in this plan.");
+                }
+
+                if (catalogModule.Dependencies != null) {
+                    foreach (string dep in catalogModule.Dependencies) {
+                        string depTrimmed = (dep ?? string.Empty).Trim();
+                        if (depTrimmed.Length == 0 || string.Equals(depTrimmed, "bh.blishhud", StringComparison.OrdinalIgnoreCase)) {
+                            continue;
+                        }
+
+                        bool isInstalled = _modules.Any(m =>
+                            string.Equals(m.Namespace, depTrimmed, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(m.Name, depTrimmed, StringComparison.OrdinalIgnoreCase));
+
+                        bool isInPlan = _installedInPlan.Contains(depTrimmed);
+
+                        if (!isInstalled && !isInPlan) {
+                            return Reject(action, null, catalogModule.Name + " requires dependency \"" + depTrimmed + "\", which is not installed or in this plan.");
+                        }
+                    }
+                }
+
+                _installedInPlan.Add(catalogModule.Namespace);
+                _installedInPlan.Add(catalogModule.Name);
+
+                var displayDeps = catalogModule.Dependencies?
+                    .Where(dep => !string.IsNullOrWhiteSpace(dep) && !string.Equals(dep.Trim(), "bh.blishhud", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                return new ReviewedAction(action, catalogModule.Namespace, catalogModule.Name, null, catalogModule.Name,
+                                          "not installed", "installed", null,
+                                          dependencies: displayDeps,
+                                          apiPermissions: catalogModule.ApiPermissions);
             }
 
             private InstalledModuleInfo Resolve(string module) {
