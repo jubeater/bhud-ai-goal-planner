@@ -163,6 +163,47 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task The_hero_points_preset_without_Pathing_proposes_install_through_catalog_action() {
+            Preset preset = PresetLibrary.Load().Single(candidate => candidate.Name == "Hero points");
+
+            var model = new ScriptedChatClient();
+            model.WillCallTool(ListInstalledModulesTool.Name, "call_modules", new Dictionary<string, object>());
+            model.WillCallTool(SearchCatalogTool.Name, "call_catalog",
+                               new Dictionary<string, object> { ["query"] = "pathing" });
+            model.WillCallTool(SubmitPlanTool.Name, "call_plan",
+                               Plan("Pathing is not installed. I suggest installing it from the Catalog.",
+                                    InstallAction("bh.community.pathing", "Markers and trails for hero point routes", "Needed for markers and trails")));
+
+            var world = new FakeWorld {
+                LocationResult = new PlayerLocationResult(
+                    LocationStatus.Ok,
+                    new PlayerLocation("Test Character", 999, "Test Map", 99, "Test Region")),
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers and trails.", new[] { "bh.blishhud" })
+                }
+            };
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync(preset.Request);
+
+            Assert.True(world.ListCalls >= 1);
+            Assert.True(world.CatalogCalls >= 1);
+
+            PlanReview review = Assert.IsType<PlanReview>(chat.Review);
+            ReviewedAction install = Assert.Single(review.Actions);
+            Assert.Equal(PlanActionKind.Install, install.Action.Kind);
+            Assert.True(install.IsAccepted);
+            Assert.True(install.CanApply);
+            Assert.Equal("bh.community.pathing", install.ModuleNamespace);
+
+            model.WillReply("Pathing has been installed.");
+            await chat.ApplyAsync(new[] { 0 });
+
+            Assert.Equal(1, world.InstallCalls);
+            Assert.True(world.Modules.Any(m => m.Namespace == "bh.community.pathing"));
+        }
+
+        [Fact]
         public async Task The_hero_points_preset_enables_an_installed_but_disabled_Pathing_and_continues() {
             Preset preset = PresetLibrary.Load().Single(candidate => candidate.Name == "Hero points");
 
@@ -269,6 +310,16 @@ namespace jubeater.aigoalplanner.Tests
                 ["kind"]           = "advice",
                 ["reason"]         = reason,
                 ["is_side_effect"] = false
+            };
+        }
+
+        private static IDictionary<string, object> InstallAction(string @namespace, string gap = "Markers and trails", string reason = "Install Pathing for markers", bool sideEffect = false) {
+            return new Dictionary<string, object> {
+                ["kind"]           = "install",
+                ["module"]         = @namespace,
+                ["gap"]            = gap,
+                ["reason"]         = reason,
+                ["is_side_effect"] = sideEffect
             };
         }
 
