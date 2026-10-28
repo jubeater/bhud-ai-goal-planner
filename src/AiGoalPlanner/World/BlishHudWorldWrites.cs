@@ -24,6 +24,29 @@ namespace jubeater.aigoalplanner.World
     /// </remarks>
     public sealed partial class BlishHudWorld
     {
+        public Task<ModuleChange> DeleteModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            string wanted = (@namespace ?? string.Empty).Trim();
+
+            if (string.Equals(wanted, GetModuleSettingsTool.ThisModuleNamespace, StringComparison.OrdinalIgnoreCase)) {
+                return Task.FromResult(new ModuleChange(false, true, "AI Goal Planner cannot delete itself.", changed: false));
+            }
+
+            ModuleManager manager = Find(wanted);
+
+            if (manager == null) {
+                return Task.FromResult(new ModuleChange(false, false, "The module is not installed.", changed: false));
+            }
+
+            try {
+                bool wasEnabled = manager.Enabled;
+                manager.DeleteModule();
+                return Task.FromResult(new ModuleChange(true, wasEnabled, null, changed: true));
+            } catch (Exception ex) {
+                _logWarn?.Invoke("DeleteModule failed: " + ex.GetType().Name);
+                return Task.FromResult(new ModuleChange(false, manager.Enabled, "Failed to delete module: " + ex.GetType().Name, changed: false));
+            }
+        }
+
         public Task<ModuleChange> SetModuleEnabledAsync(string @namespace, bool enabled, CancellationToken cancellationToken) {
             string        wanted  = (@namespace ?? string.Empty).Trim();
             ModuleManager manager = Find(wanted);

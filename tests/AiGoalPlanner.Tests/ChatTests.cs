@@ -1627,6 +1627,29 @@ namespace jubeater.aigoalplanner.Tests
         private static Chat NewChatWithTokens(ScriptedChatClient model, FakeWorld world, long budget, TokenPrice prices) {
             return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"), Lookups.For(world),
                             logDebug: null, logWarn: null, plans: null, tokenBudget: () => budget, tokenPrices: () => prices);
+        }
+
+        [Fact]
+        public async Task Search_catalog_searches_and_lists_available_modules() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers and trails for Guild Wars 2.", new[] { "bh.blishhud" })
+                }
+            };
+
+            model.WillCallTool("search_catalog", "call_1",
+                               new Dictionary<string, object> { ["query"] = "pathing" });
+            model.WillReply("Pathing 3.2.1 is available in the catalog.");
+
+            var chat = NewChat(model, world);
+            await chat.SendAsync("Can I install Pathing?");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              answer => Assert.Contains("Pathing", answer.Text));
+
+            Assert.Equal(1, world.CatalogCalls);
 
         }
     }

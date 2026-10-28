@@ -68,6 +68,8 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("disable_module", prompt);
             Assert.Contains("set_setting", prompt);
             Assert.Contains("advice", prompt);
+            Assert.Contains("install", prompt);
+            Assert.Contains("download_pack", prompt);
             Assert.Contains("is_side_effect", prompt);
         }
 
@@ -80,6 +82,17 @@ namespace jubeater.aigoalplanner.Tests
             foreach (AIFunctionDeclaration lookup in registry.Declarations) {
                 Assert.Contains(lookup.Name, prompt);
             }
+        }
+
+        [Fact]
+        public void It_carries_the_install_policy() {
+            string prompt = SystemPrompt.For("beam:cloud", "https://ollama.com/v1");
+
+            Assert.Contains("Installed Modules first", prompt);
+            Assert.Contains("enabling disabled ones", prompt);
+            Assert.Contains("Gap", prompt);
+            Assert.Contains("overlap", prompt);
+            Assert.Contains("abandoned", prompt);
         }
 
         [Theory]

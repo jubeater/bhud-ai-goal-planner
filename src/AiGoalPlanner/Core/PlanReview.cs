@@ -10,8 +10,9 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     public sealed class ReviewedAction
     {
+        private static readonly IReadOnlyList<string> NoStrings = new string[0];
         public ReviewedAction(PlanAction action, string moduleNamespace, string moduleName, string settingKey,
-                              string targetName, string currentValue, string proposedValue, string problem) {
+                              string targetName, string currentValue, string proposedValue, string problem, IReadOnlyList<string> dependencies = null, IReadOnlyList<string> apiPermissions = null, string description = null, bool permissionsKnown = true, string detailsProblem = null) {
             Action          = action ?? throw new ArgumentNullException(nameof(action));
             ModuleNamespace = moduleNamespace ?? string.Empty;
             ModuleName      = moduleName      ?? string.Empty;
@@ -20,6 +21,11 @@ namespace jubeater.aigoalplanner.Core
             CurrentValue    = currentValue    ?? string.Empty;
             ProposedValue   = proposedValue   ?? string.Empty;
             Problem         = problem         ?? string.Empty;
+            Dependencies    = dependencies    ?? NoStrings;
+            ApiPermissions   = apiPermissions  ?? NoStrings;
+            Description      = description     ?? string.Empty;
+            PermissionsKnown = permissionsKnown;
+            DetailsProblem   = detailsProblem  ?? string.Empty;
             Summary         = Describe(action, ModuleName, TargetName, ProposedValue);
         }
 
@@ -54,6 +60,13 @@ namespace jubeater.aigoalplanner.Core
         public string Problem { get; }
 
         /// <summary>Whether the validator let the Action through.</summary>
+        public IReadOnlyList<string> Dependencies   { get; }
+        public IReadOnlyList<string> ApiPermissions   { get; }
+        public string                Description      { get; }
+        public bool                  PermissionsKnown { get; }
+        public string                DetailsProblem   { get; }
+        public string                Gap            => Action.Gap;
+
         public bool IsAccepted => Problem.Length == 0;
 
         /// <summary>
@@ -69,6 +82,7 @@ namespace jubeater.aigoalplanner.Core
             string subject = moduleName.Length == 0 ? action.Module : moduleName;
 
             switch (action.Kind) {
+                case PlanActionKind.Install:       return subject + ": install and enable it";
                 case PlanActionKind.EnableModule:  return subject + ": enable it";
                 case PlanActionKind.DisableModule: return subject + ": disable it";
                 case PlanActionKind.SetSetting:

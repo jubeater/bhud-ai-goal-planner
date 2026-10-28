@@ -44,16 +44,20 @@ namespace jubeater.aigoalplanner.World
         private readonly Gw2HeroChallengeResolver _resolver;
         private readonly IMarkerCategoryService   _markerCategoryService;
         private readonly IMarkerPackService       _markerPackService;
+        private readonly ICatalogDetailsService   _catalogDetailsService;
+
 
         public BlishHudWorld() : this(null, null, null, null) { }
 
-        public BlishHudWorld(Gw2ApiManager gw2ApiManager, IGw2StaticDataCache cache = null, Action<string> logWarn = null, IGw2HeroChallengeApi challengeApi = null, IMarkerCategoryService markerCategoryService = null, IMarkerPackService markerPackService = null) {
+        public BlishHudWorld(Gw2ApiManager gw2ApiManager, IGw2StaticDataCache cache = null, Action<string> logWarn = null, IGw2HeroChallengeApi challengeApi = null, IMarkerCategoryService markerCategoryService = null, IMarkerPackService markerPackService = null, ICatalogDetailsService catalogDetailsService = null) {
             _gw2ApiManager = gw2ApiManager;
             _cache         = cache;
             _logWarn       = logWarn;
             _challengeApi  = challengeApi ?? (gw2ApiManager != null ? new Gw2SharpHeroChallengeApi(gw2ApiManager) : null);
             _markerCategoryService = markerCategoryService;
             _markerPackService     = markerPackService;
+            _catalogDetailsService = catalogDetailsService ?? new CatalogDetailsService(logWarn: logWarn);
+
             if (_cache != null && _challengeApi != null) {
                 _resolver = new Gw2HeroChallengeResolver(_cache, _challengeApi, _logWarn);
             }

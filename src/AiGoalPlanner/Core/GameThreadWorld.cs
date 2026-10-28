@@ -82,6 +82,10 @@ namespace jubeater.aigoalplanner.Core
             return change;
         }
 
+        public Task<ModuleChange> DeleteModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.DeleteModuleAsync(@namespace, cancellationToken), cancellationToken);
+        }
+
         public async Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
             MarkerPackChange change = await _world.DeleteMarkerPackAsync(fileName, cancellationToken).ConfigureAwait(false);
             if (!change.Applied || !change.Changed) return change;
@@ -151,6 +155,55 @@ namespace jubeater.aigoalplanner.Core
         /// that awaited something would resume wherever that await completed, off the game thread,
         /// which is exactly what ADR-0009 is here to prevent.
         /// </summary>
+        public Task<IReadOnlyList<CatalogModuleInfo>> GetCatalogAsync(CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.GetCatalogAsync(cancellationToken), cancellationToken);
+        }
+
+        public Task<CatalogPackageEntry> GetCatalogPackageEntryAsync(string @namespace, CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.GetCatalogPackageEntryAsync(@namespace, cancellationToken), cancellationToken);
+        }
+
+        public Task<CatalogModuleDetails> FetchCatalogModuleDetailsAsync(CatalogPackageEntry entry, CancellationToken cancellationToken) {
+            return _world.FetchCatalogModuleDetailsAsync(entry, cancellationToken);
+        }
+
+        public async Task<CatalogModuleDetails> GetCatalogModuleDetailsAsync(string @namespace, CancellationToken cancellationToken) {
+            CatalogPackageEntry entry = await ReadAsync(() => _world.GetCatalogPackageEntryAsync(@namespace, cancellationToken), cancellationToken).ConfigureAwait(false);
+            if (entry == null) {
+                return new CatalogModuleDetails(false, string.Empty, problem: "Module not found in the catalog.");
+            }
+
+            return await _world.FetchCatalogModuleDetailsAsync(entry, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            ModuleInstallChange change = await ReadAsync(() => _world.InstallModuleAsync(@namespace, cancellationToken), cancellationToken).ConfigureAwait(false);
+            if (!change.Applied || !change.Changed) return change;
+
+            try {
+                if (cancellationToken.IsCancellationRequested) {
+                    return new ModuleInstallChange(true, true, change.ModuleName, change.Namespace, change.Version,
+                        "Installation completed, but enabling was cancelled.");
+                }
+
+                ModuleChange enableChange = await SetModuleEnabledAsync(change.Namespace, true, cancellationToken).ConfigureAwait(false);
+                if (!enableChange.Applied) {
+                    return new ModuleInstallChange(true, true, change.ModuleName, change.Namespace, change.Version,
+                        ProblemOr(enableChange.Problem, "Blish HUD could not enable " + change.ModuleName + "."));
+                }
+
+                return change;
+            } catch (OperationCanceledException) {
+                return new ModuleInstallChange(true, true, change.ModuleName, change.Namespace, change.Version,
+                    "Installation completed, but enabling was cancelled.");
+            } catch (Exception ex) {
+                return new ModuleInstallChange(true, true, change.ModuleName, change.Namespace, change.Version,
+                    "Blish HUD could not enable " + change.ModuleName + " (" + ex.GetType().Name + ").");
+            }
+        }
+
+
+
         private async Task<T> ReadAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken) {
             Task<T> queued = await _gameThread.RunAsync(read, cancellationToken).ConfigureAwait(false);
 

@@ -713,6 +713,32 @@ namespace jubeater.aigoalplanner.UI
                 if (message.Author == ChatMessageAuthor.Ai && message.Usage != null && !message.Usage.IsEmpty) {
                     top = AddLabel("    " + message.Usage.DescribeWithCost(message.EstimatedCostUsd), HintColor, top);
                 }
+
+                if (message.Author == ChatMessageAuthor.Report && message.RemovableModules != null) {
+                    foreach (RemovableModuleInfo mod in message.RemovableModules) {
+                        if (_chat.CanRemoveModule(mod.Namespace)) {
+                            bool awaiting = _chat.IsAwaitingRemoveConfirmation(mod.Namespace);
+                            string buttonText = awaiting ? "Confirm remove " + mod.Name : "Remove " + mod.Name;
+                            BitmapFont font = GameService.Content.DefaultFont16;
+                            int buttonWidth = Math.Min(Math.Max(160, (int)font.MeasureString(buttonText).Width + 30), _messageList.Width - TextRightMargin);
+                            var removeButton = new StandardButton {
+                                Parent   = _messageList,
+                                Text     = buttonText,
+                                Location = new Point(0, top),
+                                Width    = buttonWidth,
+                                Height   = StandardButton.STANDARD_CONTROL_HEIGHT,
+                                Enabled  = !_requestInFlight
+                            };
+                            string modNs = mod.Namespace;
+                            removeButton.Click += (s, e) => {
+                                RunWhileInFlight("Removing the module failed.",
+                                                 ct => _chat.RemoveModuleAsync(modNs, _chat.IsAwaitingRemoveConfirmation(modNs), ct));
+                            };
+                            _messageControls.Add(removeButton);
+                            top = removeButton.Bottom + MessageSpacing;
+                        }
+                    }
+                }
             }
 
             foreach (string line in _chat.ProgressLines) {
@@ -890,6 +916,32 @@ namespace jubeater.aigoalplanner.UI
         /// AI proposes it.
         /// </summary>
         private static string DetailOf(ReviewedAction action) {
+            if (action.Action.Kind == PlanActionKind.Install) {
+                var parts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(action.Gap)) {
+                    parts.Add("Gap: " + action.Gap.Trim());
+                }
+                if (!string.IsNullOrWhiteSpace(action.Description)) {
+                    parts.Add(action.Description.Trim());
+                }
+                if (action.Dependencies != null && action.Dependencies.Count > 0) {
+                    parts.Add("Dependencies: " + string.Join(", ", action.Dependencies));
+                }
+                if (!action.PermissionsKnown) {
+                    string detailsNote = !string.IsNullOrWhiteSpace(action.DetailsProblem)
+                        ? "Could not load module details (" + action.DetailsProblem + ")"
+                        : "Could not load module details";
+                    parts.Add(detailsNote);
+                    parts.Add("API permissions: unknown");
+                } else if (action.ApiPermissions != null && action.ApiPermissions.Count > 0) {
+                    parts.Add("API permissions: " + string.Join(", ", action.ApiPermissions));
+                }
+                if (!string.IsNullOrWhiteSpace(action.Action.Reason)) {
+                    parts.Add(action.Action.Reason.Trim());
+                }
+                return string.Join(". ", parts);
+            }
+
             return "Now " + action.CurrentValue + " → " + action.ProposedValue + ". " + action.Action.Reason;
         }
 

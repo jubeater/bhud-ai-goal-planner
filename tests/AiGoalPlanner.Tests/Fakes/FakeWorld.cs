@@ -64,6 +64,8 @@ namespace jubeater.aigoalplanner.Tests.Fakes
 
         /// <summary>When set, answers every Setting change instead of making it.</summary>
         public Func<string, string, string, ModuleSettingChange> AnswerSetSetting;
+        public Func<string, ModuleChange> AnswerDeleteModule { get; set; }
+        public int DeleteModuleCalls { get; private set; }
 
         /// <summary>
         /// Every change that was made through this world, in order, as "enable ns", "disable ns" or
@@ -199,6 +201,94 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             Writes.Add("delete " + fileName);
 
             return Task.FromResult(new MarkerPackChange(applied: true, changed: true, packName: fileName, fileName: fileName, sizeMb: 0));
+        }
+
+        public List<CatalogModuleInfo> CatalogModules { get; } = new List<CatalogModuleInfo>();
+        public int CatalogCalls { get; private set; }
+        public int InstallCalls { get; private set; }
+        public Func<CancellationToken, Task<IReadOnlyList<CatalogModuleInfo>>> AnswerGetCatalog { get; set; }
+        public Func<string, CancellationToken, Task<ModuleInstallChange>> AnswerInstallModule { get; set; }
+
+        public Task<IReadOnlyList<CatalogModuleInfo>> GetCatalogAsync(CancellationToken cancellationToken) {
+            CatalogCalls++;
+            if (AnswerGetCatalog != null) return AnswerGetCatalog(cancellationToken);
+            return Task.FromResult<IReadOnlyList<CatalogModuleInfo>>(CatalogModules.ToList());
+        }
+
+        public Dictionary<string, CatalogModuleDetails> CatalogDetails { get; } =
+            new Dictionary<string, CatalogModuleDetails>(StringComparer.OrdinalIgnoreCase);
+
+        public Func<string, CancellationToken, Task<CatalogPackageEntry>> AnswerGetCatalogPackageEntry { get; set; }
+        public Func<CatalogPackageEntry, CancellationToken, Task<CatalogModuleDetails>> AnswerFetchCatalogModuleDetails { get; set; }
+        public Func<string, CancellationToken, Task<CatalogModuleDetails>> AnswerGetCatalogModuleDetails { get; set; }
+        public int CatalogDetailsCalls { get; private set; }
+
+        public Task<CatalogPackageEntry> GetCatalogPackageEntryAsync(string @namespace, CancellationToken cancellationToken) {
+            if (AnswerGetCatalogPackageEntry != null) return AnswerGetCatalogPackageEntry(@namespace, cancellationToken);
+
+            string wanted = (@namespace ?? string.Empty).Trim();
+            CatalogModuleInfo existing = CatalogModules.FirstOrDefault(m =>
+                string.Equals(m.Namespace, wanted, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, wanted, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null) {
+                return Task.FromResult(new CatalogPackageEntry(existing.Namespace, existing.Name, existing.Version, "http://pkg.test/" + existing.Namespace, "FAKEHASH"));
+            }
+
+            return Task.FromResult<CatalogPackageEntry>(null);
+        }
+
+        public Task<CatalogModuleDetails> FetchCatalogModuleDetailsAsync(CatalogPackageEntry entry, CancellationToken cancellationToken) {
+            if (AnswerFetchCatalogModuleDetails != null) return AnswerFetchCatalogModuleDetails(entry, cancellationToken);
+            return GetCatalogModuleDetailsAsync(entry.Namespace, cancellationToken);
+        }
+
+        public Task<CatalogModuleDetails> GetCatalogModuleDetailsAsync(string @namespace, CancellationToken cancellationToken) {
+            CatalogDetailsCalls++;
+            if (AnswerGetCatalogModuleDetails != null) return AnswerGetCatalogModuleDetails(@namespace, cancellationToken);
+
+            string wanted = (@namespace ?? string.Empty).Trim();
+            if (CatalogDetails.TryGetValue(wanted, out CatalogModuleDetails found)) {
+                return Task.FromResult(found);
+            }
+
+            CatalogModuleDetails byName = CatalogDetails.Values.FirstOrDefault(d => string.Equals(d.Name, wanted, StringComparison.OrdinalIgnoreCase));
+            if (byName != null) return Task.FromResult(byName);
+
+            CatalogModuleInfo existing = CatalogModules.FirstOrDefault(m =>
+                string.Equals(m.Namespace, wanted, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, wanted, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null) {
+                return Task.FromResult(new CatalogModuleDetails(
+                    success: true,
+                    @namespace: existing.Namespace,
+                    name: existing.Name,
+                    version: existing.Version,
+                    description: existing.Description,
+                    apiPermissions: existing.ApiPermissions
+                ));
+            }
+
+            return Task.FromResult(new CatalogModuleDetails(false, string.Empty, problem: "Module not found in the catalog."));
+        }
+
+        public Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
+            InstallCalls++;
+            if (AnswerInstallModule != null) return AnswerInstallModule(@namespace, cancellationToken);
+            CatalogModuleInfo existing = CatalogModules.FirstOrDefault(m =>
+                string.Equals(m.Namespace, @namespace, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, @namespace, StringComparison.OrdinalIgnoreCase));
+            string name = existing?.Name ?? @namespace;
+            string ns = existing?.Namespace ?? @namespace;
+            string version = existing?.Version ?? "1.0.0";
+            string desc = existing?.Description ?? string.Empty;
+            if (Modules.Any(m => string.Equals(m.Namespace, ns, StringComparison.OrdinalIgnoreCase))) {
+                return Task.FromResult(new ModuleInstallChange(false, false, name, ns, version, name + " is already installed."));
+            }
+            Modules.Add(new InstalledModuleInfo(ns, name, version, desc, enabled: false));
+            Writes.Add("install " + ns);
+            return Task.FromResult(new ModuleInstallChange(true, true, name, ns, version));
         }
 
         private void RestartPathingIfEnabled() {

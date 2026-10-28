@@ -11,6 +11,7 @@ namespace jubeater.aigoalplanner.Core
     public enum PlanActionKind
     {
         Unknown,
+        Install,
         EnableModule,
         DisableModule,
         SetSetting,
@@ -31,7 +32,7 @@ namespace jubeater.aigoalplanner.Core
     public sealed class PlanAction
     {
         public PlanAction(PlanActionKind kind, string kindText, string module, string key, string value,
-                          string reason, bool isSideEffect, string pack = null) {
+                          string reason, bool isSideEffect, string pack = null, string gap = null) {
             Kind         = kind;
             KindText     = kindText ?? string.Empty;
             Module       = module   ?? string.Empty;
@@ -40,6 +41,7 @@ namespace jubeater.aigoalplanner.Core
             Reason       = reason   ?? string.Empty;
             IsSideEffect = isSideEffect;
             Pack         = pack     ?? string.Empty;
+            Gap          = gap      ?? string.Empty;
         }
 
         public PlanActionKind Kind { get; }
@@ -67,6 +69,9 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>The Marker Pack name or file name, for <see cref="PlanActionKind.DownloadPack"/>. Empty otherwise.</summary>
         public string Pack { get; }
+
+        /// <summary>The Gap that justifies an install Action, e.g. what missing ability it fills.</summary>
+        public string Gap { get; }
     }
 
     /// <summary>

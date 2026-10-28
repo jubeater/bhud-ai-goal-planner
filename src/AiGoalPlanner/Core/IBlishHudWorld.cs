@@ -91,6 +91,38 @@ namespace jubeater.aigoalplanner.Core
         /// Deletes a marker pack file from the markers directory and restarts Pathing.
         /// </summary>
         Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Completely deletes an installed module from Blish HUD: disables it, unregisters it, and deletes
+        /// the module (.bhm) file from disk.
+        /// </summary>
+        Task<ModuleChange> DeleteModuleAsync(string @namespace, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Retrieves available modules from the official Blish HUD module catalog.
+        /// </summary>
+        Task<IReadOnlyList<CatalogModuleInfo>> GetCatalogAsync(CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Reads package information for one catalog module on the game thread.
+        /// </summary>
+        Task<CatalogPackageEntry> GetCatalogPackageEntryAsync(string @namespace, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Fetches package details (download, hash check, manifest parse) off the game thread for a captured catalog entry.
+        /// </summary>
+        Task<CatalogModuleDetails> FetchCatalogModuleDetailsAsync(CatalogPackageEntry entry, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Retrieves detailed information for one candidate module from the official Blish HUD catalog,
+        /// including its description and requested GW2 API permissions.
+        /// </summary>
+        Task<CatalogModuleDetails> GetCatalogModuleDetailsAsync(string @namespace, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Installs a module from the official Blish HUD catalog by its namespace.
+        /// </summary>
+        Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken);
     }
 
     /// <summary>

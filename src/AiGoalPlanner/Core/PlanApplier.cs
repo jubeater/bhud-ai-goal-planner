@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -41,9 +42,23 @@ namespace jubeater.aigoalplanner.Core
             var outcomes = new List<ApplyOutcome>();
             var undo     = new List<UndoStep>();
 
-            foreach (ReviewedAction action in Chosen(review, actionIndexes)) {
+            List<ReviewedAction> chosen = Chosen(review, actionIndexes);
+            HashSet<string> installedModules = null;
+            if (chosen.Any(a => a.Action.Kind == PlanActionKind.Install)) {
+                IReadOnlyList<InstalledModuleInfo> initialModules = await _world.ListInstalledModulesAsync(cancellationToken).ConfigureAwait(false);
+                installedModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (initialModules != null) {
+                    foreach (var m in initialModules) {
+                        if (!string.IsNullOrWhiteSpace(m.Namespace)) installedModules.Add(m.Namespace);
+                        if (!string.IsNullOrWhiteSpace(m.Name)) installedModules.Add(m.Name);
+                    }
+                }
+
+            }
+
+            foreach (ReviewedAction action in chosen) {
                 try {
-                    outcomes.Add(await ApplyOneAsync(action, undo, cancellationToken).ConfigureAwait(false));
+                    outcomes.Add(await ApplyOneAsync(action, undo, installedModules, cancellationToken).ConfigureAwait(false));
                 } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
                     // What is done is done, and the Player can still undo it.
                     return new AppliedPlan(outcomes, undo, cancelled: true);
@@ -91,10 +106,54 @@ namespace jubeater.aigoalplanner.Core
                 chosen.Add(action);
             }
 
-            return chosen;
+            return OrderByDependencies(chosen);
         }
 
-        private async Task<ApplyOutcome> ApplyOneAsync(ReviewedAction action, List<UndoStep> undo,
+        private static List<ReviewedAction> OrderByDependencies(List<ReviewedAction> actions) {
+            var result = new List<ReviewedAction>(actions.Count);
+            var remaining = new List<ReviewedAction>(actions);
+
+            while (remaining.Count > 0) {
+                int readyIndex = -1;
+                for (int i = 0; i < remaining.Count; i++) {
+                    ReviewedAction candidate = remaining[i];
+                    if (candidate.Action.Kind != PlanActionKind.Install || candidate.Dependencies == null || candidate.Dependencies.Count == 0) {
+                        readyIndex = i;
+                        break;
+                    }
+
+                    bool dependsOnRemaining = false;
+                    foreach (string dep in candidate.Dependencies) {
+                        string depTrimmed = (dep ?? string.Empty).Trim();
+                        if (string.Equals(depTrimmed, "bh.blishhud", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (remaining.Any(other => other != candidate &&
+                            other.Action.Kind == PlanActionKind.Install &&
+                            (string.Equals(other.ModuleNamespace, depTrimmed, StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(other.ModuleName, depTrimmed, StringComparison.OrdinalIgnoreCase)))) {
+                            dependsOnRemaining = true;
+                            break;
+                        }
+                    }
+
+                    if (!dependsOnRemaining) {
+                        readyIndex = i;
+                        break;
+                    }
+                }
+
+                if (readyIndex >= 0) {
+                    result.Add(remaining[readyIndex]);
+                    remaining.RemoveAt(readyIndex);
+                } else {
+                    result.AddRange(remaining);
+                    break;
+                }
+            }
+
+            return result;
+        }
+
+        private async Task<ApplyOutcome> ApplyOneAsync(ReviewedAction action, List<UndoStep> undo, HashSet<string> installedModules,
                                                        CancellationToken cancellationToken) {
             try {
                 switch (action.Action.Kind) {
@@ -104,6 +163,9 @@ namespace jubeater.aigoalplanner.Core
 
                     case PlanActionKind.SetSetting:
                         return await SetSettingAsync(action, undo, cancellationToken).ConfigureAwait(false);
+
+                    case PlanActionKind.Install:
+                        return await InstallModuleAsync(action, undo, installedModules, cancellationToken).ConfigureAwait(false);
 
                     case PlanActionKind.DownloadPack:
                         return await DownloadPackAsync(action, undo, cancellationToken).ConfigureAwait(false);
@@ -180,7 +242,58 @@ namespace jubeater.aigoalplanner.Core
             return new ApplyOutcome(action, true);
         }
 
+        private async Task<ApplyOutcome> InstallModuleAsync(ReviewedAction action, List<UndoStep> undo, HashSet<string> installedModules,
+                                                            CancellationToken cancellationToken) {
+            if (installedModules != null && (installedModules.Contains(action.ModuleNamespace) || installedModules.Contains(action.ModuleName))) {
+                return new ApplyOutcome(action, false, action.ModuleName + " is already installed.", changed: false);
+            }
+
+            if (action.Dependencies != null) {
+                foreach (string dep in action.Dependencies) {
+                    string depTrimmed = (dep ?? string.Empty).Trim();
+                    if (depTrimmed.Length == 0 || string.Equals(depTrimmed, "bh.blishhud", StringComparison.OrdinalIgnoreCase)) {
+                        continue;
+                    }
+
+                    if (installedModules == null || !installedModules.Contains(depTrimmed)) {
+                        return new ApplyOutcome(action, false, action.ModuleName + " requires dependency \"" + depTrimmed + "\", which is not installed.", changed: false);
+                    }
+                }
+            }
+
+            ModuleInstallChange change = await _world.InstallModuleAsync(action.ModuleNamespace, cancellationToken)
+                                                     .ConfigureAwait(false);
+
+            if (!change.Applied) {
+                return new ApplyOutcome(action, false, ProblemOr(change.Problem, "the module could not be installed"));
+            }
+
+            if (!change.Changed) return new ApplyOutcome(action, true, changed: false);
+
+            if (installedModules != null) {
+                if (!string.IsNullOrWhiteSpace(change.Namespace)) installedModules.Add(change.Namespace);
+                if (!string.IsNullOrWhiteSpace(change.ModuleName)) installedModules.Add(change.ModuleName);
+            }
+
+            undo.Add(new UndoStep(PlanActionKind.Install, action.ModuleNamespace, action.ModuleName, null, null, null));
+
+            if (!string.IsNullOrEmpty(change.Problem)) {
+                return new ApplyOutcome(action, false, change.Problem, changed: true);
+            }
+
+            return new ApplyOutcome(action, true);
+        }
+
         private async Task<UndoOutcome> UndoTaking(UndoStep step, CancellationToken cancellationToken) {
+            if (step.Kind == PlanActionKind.Install) {
+                ModuleChange installChange = await _world.SetModuleEnabledAsync(step.ModuleNamespace,
+                                                                                false,
+                                                                                cancellationToken)
+                                                         .ConfigureAwait(false);
+
+                return new UndoOutcome(step, installChange.Applied,
+                                       installChange.Applied ? null : ProblemOr(installChange.Problem, "the module did not accept the change"));
+            }
             if (step.Kind == PlanActionKind.DownloadPack) {
                 MarkerPackChange pack = await _world.DeleteMarkerPackAsync(step.Value, cancellationToken)
                                                     .ConfigureAwait(false);
