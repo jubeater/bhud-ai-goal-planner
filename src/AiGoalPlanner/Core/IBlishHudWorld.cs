@@ -68,6 +68,12 @@ namespace jubeater.aigoalplanner.Core
         /// answers whether it happened, the value before, and — when it did not — why.
         /// </summary>
         Task<ModuleSettingChange> SetSettingAsync(string @namespace, string key, string value, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Finds Pathing marker categories matching a search query in installed marker packs and reports
+        /// their visibility and marker/trail counts on the queried or current map.
+        /// </summary>
+        Task<MarkerCategoriesResult> FindMarkerCategoriesAsync(string search, int? mapId, CancellationToken cancellationToken);
     }
 
     /// <summary>

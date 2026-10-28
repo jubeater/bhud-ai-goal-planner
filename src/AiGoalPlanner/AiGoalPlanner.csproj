@@ -20,6 +20,8 @@
   <ItemGroup>
     <!-- ProviderKeyStore uses ProtectedData (DPAPI), which lives in System.Security on net48. -->
     <Reference Include="System.Security" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
   </ItemGroup>
 
   <ItemGroup>

@@ -167,6 +167,10 @@ internal static class Program
                                                          CancellationToken cancellationToken) {
             return Task.FromResult(new ModuleSettingChange(false, null, "This check does not change Settings."));
         }
+
+        public Task<MarkerCategoriesResult> FindMarkerCategoriesAsync(string search, int? mapId, CancellationToken cancellationToken) {
+            return Task.FromResult(MarkerCategoriesResult.NoPacks());
+        }
     }
 
     private sealed class StubProvider : HttpMessageHandler
