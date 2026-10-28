@@ -53,6 +53,8 @@ namespace jubeater.aigoalplanner.Tests.Fakes
                                characterName: "Test Character", mapId: 1205, mapName: "Domain of Vabbi", regionName: "Crystal Desert");
 
         public Func<ProgressKind, CancellationToken, Task<ProgressResult>> AnswerGetProgress { get; set; }
+        public MarkerCategoriesResult MarkerCategoriesResult { get; set; } = MarkerCategoriesResult.NoPacks();
+        public Func<string, int?, CancellationToken, Task<MarkerCategoriesResult>> AnswerFindMarkerCategories { get; set; }
 
         /// <summary>
         /// When set, answers every module state change instead of changing one, so a test can make
@@ -74,6 +76,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
         public int LocationCalls      { get; private set; }
         public int AccountAccessCalls { get; private set; }
         public int ProgressCalls      { get; private set; }
+        public int MarkerCategoriesCalls { get; private set; }
         public int ModuleWrites       { get; private set; }
         public int SettingWrites      { get; private set; }
 
@@ -119,6 +122,14 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             ProgressResult result = kind == ProgressKind.Mastery ? MasteryProgressResult : HeroPointsProgressResult;
 
             return Task.FromResult(result);
+        }
+
+        public Task<MarkerCategoriesResult> FindMarkerCategoriesAsync(string search, int? mapId, CancellationToken cancellationToken) {
+            MarkerCategoriesCalls++;
+
+            if (AnswerFindMarkerCategories != null) return AnswerFindMarkerCategories(search, mapId, cancellationToken);
+
+            return Task.FromResult(MarkerCategoriesResult);
         }
 
         /// <summary>

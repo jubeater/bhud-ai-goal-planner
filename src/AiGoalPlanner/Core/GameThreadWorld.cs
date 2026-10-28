@@ -60,6 +60,11 @@ namespace jubeater.aigoalplanner.Core
             return ReadAsync(() => _world.SetSettingAsync(@namespace, key, value, cancellationToken), cancellationToken);
         }
 
+        public Task<MarkerCategoriesResult> FindMarkerCategoriesAsync(string search, int? mapId, CancellationToken cancellationToken) {
+            // Reading packs runs off the game thread, since it's file I/O and touches no Blish HUD state (ADR-0009).
+            return ReadAsync(() => _world.FindMarkerCategoriesAsync(search, mapId, cancellationToken), cancellationToken);
+        }
+
         /// <summary>
         /// Hands one read to the game thread and carries its answer back. The read itself is the
         /// queued call: a world read answers from live state, so its task is already complete when

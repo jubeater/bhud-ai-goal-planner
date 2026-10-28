@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.ComponentModel.Composition;
 using System.Collections.Generic;
 using System.Net.Http;
@@ -117,8 +118,11 @@ namespace jubeater.aigoalplanner
             try {
                 // The world is built once: reads and writes both go through it, so every one of
                 // them happens on the game thread (ADR-0009).
-                var cache = new Gw2StaticDataCache(DirectoriesManager.GetFullDirectoryPath("aigoalplanner"), LogWarn);
-                var blishWorld = new BlishHudWorld(Gw2ApiManager, cache, LogWarn);
+                string moduleDir = DirectoriesManager.GetFullDirectoryPath("aigoalplanner");
+                var cache = new Gw2StaticDataCache(moduleDir, LogWarn);
+                string markersDir = DirectoriesManager.GetFullDirectoryPath("markers");
+                var markerService = new MarkerCategoryService(markersDir, Path.Combine(moduleDir, "cache"), LogWarn);
+                var blishWorld = new BlishHudWorld(Gw2ApiManager, cache, LogWarn, challengeApi: null, markerCategoryService: markerService);
                 _world = new GameThreadWorld(blishWorld, new OverlayGameThread());
 
                 _plans = new Plans(_world, () => _autoApplySetting.Value, LogDebug);

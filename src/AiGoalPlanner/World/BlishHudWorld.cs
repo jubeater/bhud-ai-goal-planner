@@ -42,14 +42,16 @@ namespace jubeater.aigoalplanner.World
         private readonly Action<string>           _logWarn;
         private readonly IGw2HeroChallengeApi     _challengeApi;
         private readonly Gw2HeroChallengeResolver _resolver;
+        private readonly IMarkerCategoryService   _markerCategoryService;
 
         public BlishHudWorld() : this(null, null, null, null) { }
 
-        public BlishHudWorld(Gw2ApiManager gw2ApiManager, IGw2StaticDataCache cache = null, Action<string> logWarn = null, IGw2HeroChallengeApi challengeApi = null) {
+        public BlishHudWorld(Gw2ApiManager gw2ApiManager, IGw2StaticDataCache cache = null, Action<string> logWarn = null, IGw2HeroChallengeApi challengeApi = null, IMarkerCategoryService markerCategoryService = null) {
             _gw2ApiManager = gw2ApiManager;
             _cache         = cache;
             _logWarn       = logWarn;
             _challengeApi  = challengeApi ?? (gw2ApiManager != null ? new Gw2SharpHeroChallengeApi(gw2ApiManager) : null);
+            _markerCategoryService = markerCategoryService;
             if (_cache != null && _challengeApi != null) {
                 _resolver = new Gw2HeroChallengeResolver(_cache, _challengeApi, _logWarn);
             }
@@ -612,6 +614,36 @@ namespace jubeater.aigoalplanner.World
                 case double number: return number.ToString(CultureInfo.InvariantCulture);
                 default:            return Convert.ToString(value, CultureInfo.InvariantCulture);
             }
+        }
+
+        public async Task<MarkerCategoriesResult> FindMarkerCategoriesAsync(string search, int? mapId, CancellationToken cancellationToken) {
+            bool pathingInstalled = GameService.Module.Modules != null && GameService.Module.Modules.Any(m =>
+                string.Equals(m.Manifest?.Namespace, "bh.community.pathing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Manifest?.Namespace, "bh.pathing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Manifest?.Name, "Pathing", StringComparison.OrdinalIgnoreCase));
+
+            if (!pathingInstalled) {
+                return MarkerCategoriesResult.NoPathing();
+            }
+
+            int targetMapId = mapId ?? 0;
+            string mapName = null;
+
+            if (targetMapId <= 0) {
+                targetMapId = GameService.Gw2Mumble.CurrentMap?.Id ?? 0;
+                mapName = GameService.Gw2Mumble.CurrentMumbleMapName;
+            }
+
+            if (_cache != null && targetMapId > 0 && string.IsNullOrEmpty(mapName)) {
+                CachedMapInfo mapInfo = await GetMapAsync(targetMapId, cancellationToken).ConfigureAwait(false);
+                mapName = mapInfo?.Name;
+            }
+
+            if (_markerCategoryService == null) {
+                return MarkerCategoriesResult.NoPacks();
+            }
+
+            return await _markerCategoryService.FindCategoriesAsync(search, targetMapId, mapName, cancellationToken).ConfigureAwait(false);
         }
     }
 }
