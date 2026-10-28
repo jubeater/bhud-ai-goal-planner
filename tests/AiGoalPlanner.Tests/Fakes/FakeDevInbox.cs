@@ -13,6 +13,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
     internal sealed class FakeDevInbox : IDevInbox
     {
         private readonly Dictionary<string, string> _files = new Dictionary<string, string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, DateTime> _changed = new Dictionary<string, DateTime>(StringComparer.Ordinal);
 
         /// <summary>Responses written so far, by request id.</summary>
         public readonly Dictionary<string, string> Responses = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -20,8 +21,9 @@ namespace jubeater.aigoalplanner.Tests.Fakes
         /// <summary>Request files removed after handling, in the order they were removed.</summary>
         public readonly List<string> Removed = new List<string>();
 
-        public void AddFile(string fileName, string json) {
-            _files[fileName] = json;
+        public void AddFile(string fileName, string json, DateTime? changedUtc = null) {
+            _files[fileName]   = json;
+            _changed[fileName] = changedUtc ?? DateTime.MaxValue;
         }
 
         public IReadOnlyList<string> Waiting {
@@ -32,8 +34,13 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             return _files[fileName];
         }
 
+        public DateTime GetChangedUtc(string fileName) {
+            return _changed[fileName];
+        }
+
         public void Remove(string fileName) {
             _files.Remove(fileName);
+            _changed.Remove(fileName);
             Removed.Add(fileName);
         }
 

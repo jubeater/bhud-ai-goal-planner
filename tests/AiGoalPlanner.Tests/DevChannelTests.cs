@@ -231,6 +231,87 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_request_from_a_disabled_period_never_runs() {
+            var model = new ScriptedChatClient();
+            model.WillReply("An answer.");
+
+            var chat  = NewChannelChat(model, PlayerWorld());
+            var inbox = new FakeDevInbox();
+
+            DateTime now = new DateTime(2026, 10, 28, 12, 0, 0, DateTimeKind.Utc);
+            bool open    = true;
+
+            var channel = new DevChannel(chat, isOpen: () => open, logDebug: null, inbox: inbox,
+                                         utcNow: () => now);
+
+            open = false;
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"stale request\" }",
+                          changedUtc: now);
+
+            now = now.AddSeconds(1);
+            Assert.Null(await channel.PollAsync());
+
+            open = true;
+            Assert.Null(await channel.PollAsync());
+
+            Assert.Empty(model.Requests);
+            Assert.Empty(inbox.Responses);
+            Assert.Equal(new[] { "a1.json" }, inbox.Waiting);
+        }
+
+        [Fact]
+        public async Task A_request_written_after_reopening_runs() {
+            var model = new ScriptedChatClient();
+
+            var chat  = NewChannelChat(model, PlayerWorld());
+            var inbox = new FakeDevInbox();
+
+            DateTime now = new DateTime(2026, 10, 28, 12, 0, 0, DateTimeKind.Utc);
+            bool open    = true;
+
+            var channel = new DevChannel(chat, isOpen: () => open, logDebug: null, inbox: inbox,
+                                         utcNow: () => now);
+
+            open = false;
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"stale request\" }",
+                          changedUtc: now);
+
+            now = now.AddSeconds(1);
+            Assert.Null(await channel.PollAsync());
+
+            open = true;
+            now = now.AddSeconds(1);
+            inbox.AddFile("a2.json", "{ \"id\": \"a2\", \"op\": \"state\" }", changedUtc: now);
+
+            Assert.Equal("a2", await channel.PollAsync());
+            Assert.True((bool)Response(inbox, "a2")["ok"]);
+            Assert.Equal(new[] { "a2.json" }, inbox.Removed);
+            Assert.Equal(new[] { "a1.json" }, inbox.Waiting);
+        }
+
+        [Fact]
+        public async Task Files_predating_a_restart_never_run() {
+            var model = new ScriptedChatClient();
+
+            var chat  = NewChannelChat(model, PlayerWorld());
+            var inbox = new FakeDevInbox();
+
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"state\" }",
+                          changedUtc: DateTime.UtcNow.AddHours(-1));
+
+            var channel = new DevChannel(chat, isOpen: () => true, logDebug: null, inbox: inbox);
+
+            Assert.Null(await channel.PollAsync());
+            Assert.Empty(inbox.Responses);
+            Assert.Equal(new[] { "a1.json" }, inbox.Waiting);
+
+            inbox.AddFile("a2.json", "{ \"id\": \"a2\", \"op\": \"state\" }");
+
+            Assert.Equal("a2", await channel.PollAsync());
+            Assert.True((bool)Response(inbox, "a2")["ok"]);
+        }
+
+        [Fact]
         public async Task A_direct_request_with_a_gate_missing_answers_channel_off() {
             var model = new ScriptedChatClient();
 

@@ -42,7 +42,15 @@ namespace jubeater.aigoalplanner.Core
         private readonly IDevInbox        _inbox;
         private readonly TimeSpan         _busyTimeout;
         private readonly TimeSpan         _operationTimeout;
+        private readonly Func<DateTime>   _utcNow;
         private readonly SemaphoreSlim    _gate = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// Files last seen no newer than this are stale: they were already waiting the last time a
+        /// gate was closed, or they predate this channel, so they are left alone and never run.
+        /// Re-saving a file counts as new and runs.
+        /// </summary>
+        private DateTime _notBeforeUtc;
 
         /// <summary>
         /// Builds the channel. <paramref name="isOpen"/> says whether the Player turned the module
@@ -53,13 +61,16 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         public DevChannel(Chat chat, Func<bool> isOpen, Action<string> logDebug, IDevInbox inbox,
                           TimeSpan busyTimeout = default(TimeSpan),
-                          TimeSpan operationTimeout = default(TimeSpan)) {
+                          TimeSpan operationTimeout = default(TimeSpan),
+                          Func<DateTime> utcNow = null) {
             _chat             = chat   ?? throw new ArgumentNullException(nameof(chat));
             _isOpen           = isOpen ?? throw new ArgumentNullException(nameof(isOpen));
             _logDebug         = logDebug;
             _inbox            = inbox  ?? throw new ArgumentNullException(nameof(inbox));
             _busyTimeout      = busyTimeout      <= TimeSpan.Zero ? DefaultBusyTimeout      : busyTimeout;
             _operationTimeout = operationTimeout <= TimeSpan.Zero ? DefaultOperationTimeout : operationTimeout;
+            _utcNow           = utcNow ?? (() => DateTime.UtcNow);
+            _notBeforeUtc     = _utcNow();
         }
 
         /// <summary>
@@ -118,15 +129,22 @@ namespace jubeater.aigoalplanner.Core
         /// Handles the next waiting request file, if the gates are open and one is waiting: read it,
         /// run it, write its response and delete the file. Answers the handled request's id, or null
         /// when there was nothing to handle. Files too big or not shaped like a request are rejected
-        /// without being run; files whose names cannot be a request id are left alone.
+        /// without being run; files whose names cannot be a request id, and files already waiting the
+        /// last time a gate was closed, are left alone and never run.
         /// </summary>
         public async Task<string> PollAsync(CancellationToken cancellationToken = default(CancellationToken)) {
-            if (!_isOpen()) return null;
+            if (!_isOpen()) {
+                _notBeforeUtc = _utcNow();
+
+                return null;
+            }
 
             foreach (string fileName in _inbox.Waiting) {
                 if (!IsRequestFile(fileName, out string stem)) continue;
 
                 try {
+                    if (_inbox.GetChangedUtc(fileName) < _notBeforeUtc) continue;
+
                     string json = _inbox.Read(fileName);
                     string id;
                     DevResponse response;

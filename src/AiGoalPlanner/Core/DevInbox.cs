@@ -20,6 +20,13 @@ namespace jubeater.aigoalplanner.Core
         /// <summary>Reads one waiting request file.</summary>
         string Read(string fileName);
 
+        /// <summary>
+        /// When the file last arrived or changed, in UTC: the later of its creation and last write,
+        /// so a re-saved file counts as new. The channel never runs files older than the last moment
+        /// it saw a closed gate.
+        /// </summary>
+        DateTime GetChangedUtc(string fileName);
+
         /// <summary>Deletes a handled request file.</summary>
         void Remove(string fileName);
 
@@ -57,6 +64,15 @@ namespace jubeater.aigoalplanner.Core
 
         public string Read(string fileName) {
             return File.ReadAllText(Path.Combine(Inbox, fileName));
+        }
+
+        public DateTime GetChangedUtc(string fileName) {
+            string path = Path.Combine(Inbox, fileName);
+
+            DateTime created = File.GetCreationTimeUtc(path);
+            DateTime written = File.GetLastWriteTimeUtc(path);
+
+            return created > written ? created : written;
         }
 
         public void Remove(string fileName) {
