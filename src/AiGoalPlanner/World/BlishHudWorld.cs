@@ -43,15 +43,17 @@ namespace jubeater.aigoalplanner.World
         private readonly IGw2HeroChallengeApi     _challengeApi;
         private readonly Gw2HeroChallengeResolver _resolver;
         private readonly IMarkerCategoryService   _markerCategoryService;
+        private readonly IMarkerPackService       _markerPackService;
 
         public BlishHudWorld() : this(null, null, null, null) { }
 
-        public BlishHudWorld(Gw2ApiManager gw2ApiManager, IGw2StaticDataCache cache = null, Action<string> logWarn = null, IGw2HeroChallengeApi challengeApi = null, IMarkerCategoryService markerCategoryService = null) {
+        public BlishHudWorld(Gw2ApiManager gw2ApiManager, IGw2StaticDataCache cache = null, Action<string> logWarn = null, IGw2HeroChallengeApi challengeApi = null, IMarkerCategoryService markerCategoryService = null, IMarkerPackService markerPackService = null) {
             _gw2ApiManager = gw2ApiManager;
             _cache         = cache;
             _logWarn       = logWarn;
             _challengeApi  = challengeApi ?? (gw2ApiManager != null ? new Gw2SharpHeroChallengeApi(gw2ApiManager) : null);
             _markerCategoryService = markerCategoryService;
+            _markerPackService     = markerPackService;
             if (_cache != null && _challengeApi != null) {
                 _resolver = new Gw2HeroChallengeResolver(_cache, _challengeApi, _logWarn);
             }
@@ -644,6 +646,62 @@ namespace jubeater.aigoalplanner.World
             }
 
             return await _markerCategoryService.FindCategoriesAsync(search, targetMapId, mapName, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<MarkerPacksResult> ListMarkerPacksAsync(CancellationToken cancellationToken) {
+            bool pathingInstalled = GameService.Module.Modules != null && GameService.Module.Modules.Any(m =>
+                string.Equals(m.Manifest?.Namespace, "bh.community.pathing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Manifest?.Namespace, "bh.pathing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Manifest?.Name, "Pathing", StringComparison.OrdinalIgnoreCase));
+
+            if (_markerPackService == null) {
+                return new MarkerPacksResult(MarkerPacksStatus.Ok, Array.Empty<MarkerPackInfo>(), pathingInstalled);
+            }
+
+            return await _markerPackService.GetPacksAsync(pathingInstalled, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<MarkerPackChange> DownloadMarkerPackAsync(string pack, CancellationToken cancellationToken) {
+            if (_markerPackService == null) {
+                return new MarkerPackChange(false, false, pack, null, 0, "Marker pack service is unavailable.");
+            }
+
+            MarkerPackChange change = await _markerPackService.DownloadPackAsync(pack, cancellationToken).ConfigureAwait(false);
+            if (!change.Applied || !change.Changed) {
+                return change;
+            }
+
+            await RestartPathingIfEnabledAsync(cancellationToken).ConfigureAwait(false);
+
+            return change;
+        }
+
+        public async Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
+            if (_markerPackService == null) {
+                return new MarkerPackChange(false, false, null, fileName, 0, "Marker pack service is unavailable.");
+            }
+
+            MarkerPackChange change = await _markerPackService.DeletePackAsync(fileName, cancellationToken).ConfigureAwait(false);
+            if (!change.Applied || !change.Changed) {
+                return change;
+            }
+
+            await RestartPathingIfEnabledAsync(cancellationToken).ConfigureAwait(false);
+
+            return change;
+        }
+
+        private async Task RestartPathingIfEnabledAsync(CancellationToken cancellationToken) {
+            var pathingModule = GameService.Module.Modules?.FirstOrDefault(m =>
+                string.Equals(m.Manifest?.Namespace, "bh.community.pathing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Manifest?.Namespace, "bh.pathing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Manifest?.Name, "Pathing", StringComparison.OrdinalIgnoreCase));
+
+            if (pathingModule != null && pathingModule.Enabled && !string.IsNullOrEmpty(pathingModule.Manifest?.Namespace)) {
+                string ns = pathingModule.Manifest.Namespace;
+                await SetModuleEnabledAsync(ns, false, cancellationToken).ConfigureAwait(false);
+                await SetModuleEnabledAsync(ns, true, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 }

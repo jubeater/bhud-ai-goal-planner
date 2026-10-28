@@ -122,7 +122,8 @@ namespace jubeater.aigoalplanner
                 var cache = new Gw2StaticDataCache(moduleDir, LogWarn);
                 string markersDir = DirectoriesManager.GetFullDirectoryPath("markers");
                 var markerService = new MarkerCategoryService(markersDir, Path.Combine(moduleDir, "cache"), LogWarn);
-                var blishWorld = new BlishHudWorld(Gw2ApiManager, cache, LogWarn, challengeApi: null, markerCategoryService: markerService);
+                var packService = new MarkerPackService(markersDir, Path.Combine(moduleDir, "cache"), LogWarn);
+                var blishWorld = new BlishHudWorld(Gw2ApiManager, cache, LogWarn, challengeApi: null, markerCategoryService: markerService, markerPackService: packService);
                 _world = new GameThreadWorld(blishWorld, new OverlayGameThread());
 
                 _plans = new Plans(_world, () => _autoApplySetting.Value, LogDebug);

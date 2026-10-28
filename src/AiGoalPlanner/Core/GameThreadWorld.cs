@@ -65,6 +65,18 @@ namespace jubeater.aigoalplanner.Core
             return ReadAsync(() => _world.FindMarkerCategoriesAsync(search, mapId, cancellationToken), cancellationToken);
         }
 
+        public Task<MarkerPacksResult> ListMarkerPacksAsync(CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.ListMarkerPacksAsync(cancellationToken), cancellationToken);
+        }
+
+        public Task<MarkerPackChange> DownloadMarkerPackAsync(string pack, CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.DownloadMarkerPackAsync(pack, cancellationToken), cancellationToken);
+        }
+
+        public Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.DeleteMarkerPackAsync(fileName, cancellationToken), cancellationToken);
+        }
+
         /// <summary>
         /// Hands one read to the game thread and carries its answer back. The read itself is the
         /// queued call: a world read answers from live state, so its task is already complete when
