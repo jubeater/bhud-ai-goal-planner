@@ -1,0 +1,5 @@
+{
+  "name": "Hero points",
+  "request": "Help me finish the hero points on my current map and region. Check what I have installed and what my progress is, download a marker pack if I need one, and tell me exactly which Pathing category to turn on.",
+  "hints": "Hero points goal. Call get_location for the current map and character, get_progress with kind hero_points for the missing challenges on the map and region, list_installed_modules to see whether Pathing is there and enabled, and list_marker_packs for available packs with hero point routes. When a pack is needed, propose download_pack (it always needs Review) and, after it applies, use find_marker_categories on the new pack in the Continuation to name the exact category display path to turn on and whether it is on now. Give directions only: never claim to have turned a category on. If Pathing is missing or disabled, advise the Player to install or enable it by hand; do not propose an install."
+}

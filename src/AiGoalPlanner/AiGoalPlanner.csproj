@@ -25,6 +25,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Preset data files travel in the assembly, so adding one needs no code change: every
+         Presets/*.json file is read by PresetLibrary. -->
+    <EmbeddedResource Include="Presets\*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="BlishHUD" Version="1.3.0">
       <!-- Our own content lives in ref/; Blish HUD's own content is never bundled into a module. -->
       <ExcludeAssets>contentFiles</ExcludeAssets>

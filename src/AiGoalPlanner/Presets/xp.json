@@ -1,0 +1,5 @@
+{
+  "name": "XP",
+  "request": "Help me set up for fast XP on this character. Check what I have installed and what my account owns, and get me to a working setup.",
+  "hints": "XP goal. Call get_location for the current character and map, get_account_access for Owned Content, and list_installed_modules plus get_module_settings for what the Player already has; prefer Installed Modules and never propose an install. At max level XP feeds mastery tracks, so get_progress with kind mastery applies too. Use list_marker_packs and find_marker_categories for packs with leveling or event categories; propose download_pack when one is needed and give the category display path as directions. Never claim to have turned a category on."
+}

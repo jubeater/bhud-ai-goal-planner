@@ -1,0 +1,5 @@
+{
+  "name": "Mastery points",
+  "request": "Help me earn mastery points and finish my open mastery tracks. Check my progress and what my account owns, and point me at what to do next.",
+  "hints": "Mastery goal. Call get_progress with kind mastery for point totals and unfinished tracks, get_account_access for Owned Content, and get_location for the current map and region. Suggest only content the account owns, and say when the best option needs content the Player does not own. Use list_marker_packs and find_marker_categories for packs with mastery insight categories; propose download_pack when one is needed and give the category display path as directions. Never claim to have turned a category on."
+}
