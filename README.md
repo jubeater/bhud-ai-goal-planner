@@ -80,6 +80,22 @@ It is built from the same Settings as the Provider client, so it names the model
 next Request really uses, and it is not one of the Chat's messages: the Player never reads it, and New
 chat leaves it in place. This is the identity message only — #5 grows it into the full system prompt.
 
+## Token usage and Token Budget
+
+Tokens are the unit the module counts in, because prices differ by Provider (ADR-0002). What each
+reply used sits under that reply in the Chat window — input, output, and the cached split when the
+Provider reports it — and the window's subtitle carries the whole Chat's total. Both come from the
+Provider's usage data; a Provider that reports none leaves no counts.
+
+One Chat may use 300,000 tokens before the Chat asks whether to go on: send another message to keep
+going, or start a **New chat** to start over. The question is asked once per Chat, and asking costs
+no tokens itself — the model is not asked to ask it. The **Token Budget** in Provider settings
+changes the limit, and `0` means no limit.
+
+Optionally enter the **prices in $ per million tokens** for the Provider in use — input and output
+separately — to see an estimated cost next to the counts. Prices differ by Provider, so they are
+remembered per endpoint; with either field empty nothing is shown.
+
 ## The Provider client and what the module ships
 
 `OpenAiCompatibleChatClient` is the one Client for every Provider (ADR-0007): it speaks the OpenAI
