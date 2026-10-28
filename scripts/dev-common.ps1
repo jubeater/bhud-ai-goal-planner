@@ -1,0 +1,125 @@
+<#
+.SYNOPSIS
+    Shared helpers for the developer channel scripts (dev-ask, dev-op).
+
+    The channel watches <Documents>\Guild Wars 2\addons\blishhud\aigoalplanner\dev\inbox for
+    request files and writes dev\outbox\<id>.json answers. These helpers write a request, wait for
+    its response and print it readably. They only read and write those folders.
+#>
+
+$script:DevRoot = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Guild Wars 2\addons\blishhud\aigoalplanner\dev'
+$script:DevInbox = Join-Path $script:DevRoot 'inbox'
+$script:DevOutbox = Join-Path $script:DevRoot 'outbox'
+$script:DevCounter = 0
+
+function New-DevId {
+    $script:DevCounter++
+    return 'ps-{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $script:DevCounter
+}
+
+function Write-DevRequest {
+    param(
+        [string] $Op,
+        [string] $Text = $null,
+        [int[]] $Actions = $null
+    )
+
+    if (-not (Test-Path $script:DevInbox)) {
+        throw "Inbox folder '$script:DevInbox' not found. Is Blish HUD running with the module loaded?"
+    }
+
+    $id = New-DevId
+    $request = [ordered]@{ id = $id; op = $Op }
+
+    if ($Text -ne $null) { $request['text'] = $Text }
+    if ($Actions -ne $null) { $request['actions'] = $Actions }
+
+    $path = Join-Path $script:DevInbox ($id + '.json')
+    ConvertTo-Json $request -Compress | Set-Content -Path $path -Encoding UTF8
+
+    return $id
+}
+
+function Wait-DevResponse {
+    param(
+        [string] $Id,
+        [int] $TimeoutSec = 120
+    )
+
+    $path = Join-Path $script:DevOutbox ($Id + '.json')
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+
+    while (-not (Test-Path $path)) {
+        if ((Get-Date) -gt $deadline) {
+            throw "No response for '$Id' after $TimeoutSec s. Is Blish HUD started with --debug, the module loaded, and 'Developer channel (for testing only)' turned on?"
+        }
+
+        Start-Sleep -Milliseconds 250
+    }
+
+    return Get-Content -Path $path -Raw | ConvertFrom-Json
+}
+
+function Show-DevResponse {
+    param($Response)
+
+    if (-not $Response.ok) {
+        Write-Output "error: $($Response.error)"
+        return
+    }
+
+    foreach ($message in $Response.messages) {
+        Write-Output "[$($message.author)] $($message.text)"
+    }
+
+    if ($Response.review -ne $null) {
+        Write-Output ''
+        Write-Output 'Review:'
+
+        $index = 0
+        foreach ($action in $Response.review.actions) {
+            $flags = @()
+
+            if ($action.sideEffect) { $flags += 'side effect' }
+            if ($action.accepted) { $flags += 'accepted' } else { $flags += 'rejected' }
+
+            Write-Output ("  [{0}] {1} / {2}: {3} -> {4} ({5})" -f $index, $action.module, $action.target,
+                          $action.current, $action.proposed, ($flags -join ', '))
+            Write-Output "       reason: $($action.reason)"
+
+            if (-not $action.accepted) {
+                Write-Output "       problem: $($action.problem)"
+            }
+
+            $index++
+        }
+    }
+
+    if ($Response.lookups.Count -gt 0) {
+        Write-Output ''
+        Write-Output 'Lookups:'
+
+        foreach ($lookup in $Response.lookups) {
+            Write-Output ("  {0}: {1} ms, {2}, {3} chars" -f $lookup.name, $lookup.durationMs,
+                          $lookup.detail, $lookup.chars)
+        }
+    }
+
+    if ($Response.roundTrips.Count -gt 0) {
+        Write-Output ''
+        Write-Output 'Provider round trips:'
+
+        foreach ($round in $Response.roundTrips) {
+            Write-Output ("  {0} ms, finish_reason={1}, tool_calls={2}" -f $round.durationMs,
+                          $round.finishReason, $round.toolCalls)
+        }
+    }
+
+    if ($Response.applied -ne $null) {
+        Write-Output ''
+        Write-Output "Applied: $($Response.applied.describe)"
+    }
+
+    Write-Output ''
+    Write-Output "undoAvailable: $($Response.undoAvailable)"
+}
