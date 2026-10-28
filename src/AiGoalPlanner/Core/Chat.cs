@@ -92,16 +92,16 @@ namespace jubeater.aigoalplanner.Core
 
 #if DEBUG
         /// <summary>
-        /// The Provider round trips of the Request that is on its way or ran last, oldest first, each
-        /// with how long it took and how it finished. The developer channel reads them to report what
-        /// an in-game check did; no other caller does.
+        /// The Provider round trips so far in this Chat, oldest first, each with how long it took
+        /// and how it finished. The developer channel reads back only what each operation added;
+        /// no other caller reads these.
         /// </summary>
         private readonly List<DevRoundTrip> _roundTrips = new List<DevRoundTrip>();
 
         /// <summary>
-        /// The Lookups the Request that is on its way or ran last went through, oldest first, each
-        /// with its name, how long it took and what it read. The developer channel reads them to report
-        /// what an in-game check did; no other caller does.
+        /// The Lookups run so far in this Chat, oldest first, each with its name, how long it took
+        /// and what it read. The developer channel reads back only what each operation added; no
+        /// other caller reads these.
         /// </summary>
         private readonly List<DevLookup> _lookups = new List<DevLookup>();
 
@@ -268,9 +268,9 @@ namespace jubeater.aigoalplanner.Core
 
 #if DEBUG
         /// <summary>
-        /// The Provider round trips of the Request that is on its way or ran last, oldest first, each
-        /// with how long it took and how it finished — the same what the debug log keeps, in the shape
-        /// the developer channel reports. Empty when no Request has run through this Chat yet.
+        /// The Provider round trips so far in this Chat, oldest first, each with how long it took
+        /// and how it finished — the same what the debug log keeps, in the shape the developer
+        /// channel reports. Empty when no Request has run through this Chat yet.
         /// </summary>
         public IReadOnlyList<DevRoundTrip> RoundTrips {
             get {
@@ -281,9 +281,9 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
-        /// The Lookups the Request that is on its way or ran last went through, oldest first, each
-        /// with its name, how long it took and what it read — the same what the debug log keeps, in the
-        /// shape the developer channel reports. Empty when no Request has run through this Chat yet.
+        /// The Lookups run so far in this Chat, oldest first, each with its name, how long it took
+        /// and what it read — the same what the debug log keeps, in the shape the developer channel
+        /// reports. Empty when no Request has run through this Chat yet.
         /// </summary>
         public IReadOnlyList<DevLookup> Lookups {
             get {
@@ -521,15 +521,6 @@ namespace jubeater.aigoalplanner.Core
             int executedToolCalls = 0;
             int continuations     = 0;
             int round             = 0;
-
-#if DEBUG
-            // Each Request reports what it did, so what the developer channel reads back is what the
-            // Request that just ran left behind, not what an earlier one left.
-            lock (_messagesLock) {
-                _roundTrips.Clear();
-                _lookups.Clear();
-            }
-#endif
 
             while (true) {
                 round++;

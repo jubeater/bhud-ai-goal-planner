@@ -318,9 +318,12 @@ namespace jubeater.aigoalplanner.Core
 
         private async Task<DevResponse> ExecuteAsync(DevRequest request, CancellationToken cancellationToken) {
             // What the Chat held before this operation: the response reports only what the operation
-            // added, not the earlier conversation.
-            int messagesBefore = _chat.Messages.Count;
-            AppliedPlan applied = null;
+            // added — messages, Lookups and round trips alike — so an operation that makes no
+            // Provider call reports none.
+            int messagesBefore   = _chat.Messages.Count;
+            int roundTripsBefore = _chat.RoundTrips.Count;
+            int lookupsBefore    = _chat.Lookups.Count;
+            AppliedPlan applied  = null;
 
             switch (request.Op) {
                 case DevRequestOp.Send:
@@ -342,7 +345,11 @@ namespace jubeater.aigoalplanner.Core
 
                 case DevRequestOp.NewChat:
                     _chat.StartNewChat();
-                    break;
+
+                    // New chat replaces the conversation instead of adding to it: what is there now
+                    // — the fresh Chat, or its failure Notice — is what the operation produced.
+                    return Ok(_chat, _chat.Messages.ToList(), _chat.RoundTrips.ToList(), _chat.Lookups.ToList(),
+                              applied);
 
                 case DevRequestOp.State:
                     break;
@@ -351,12 +358,15 @@ namespace jubeater.aigoalplanner.Core
                     return DevResponse.Failed(DevErrors.BadRequest);
             }
 
-            return Ok(_chat, _chat.Messages.Skip(messagesBefore).ToList(), applied);
+            return Ok(_chat, _chat.Messages.Skip(messagesBefore).ToList(),
+                      _chat.RoundTrips.Skip(roundTripsBefore).ToList(), _chat.Lookups.Skip(lookupsBefore).ToList(),
+                      applied);
         }
 
-        private static DevResponse Ok(Chat chat, IReadOnlyList<ChatMessage> added, AppliedPlan applied = null) {
-            return new DevResponse(true, null, added, chat.Review, chat.CanUndo,
-                                   chat.RoundTrips, chat.Lookups, applied);
+        private static DevResponse Ok(Chat chat, IReadOnlyList<ChatMessage> added,
+                                      IReadOnlyList<DevRoundTrip> roundTrips, IReadOnlyList<DevLookup> lookups,
+                                      AppliedPlan applied = null) {
+            return new DevResponse(true, null, added, chat.Review, chat.CanUndo, roundTrips, lookups, applied);
         }
 
         private static string DescribeOp(DevRequest request) {

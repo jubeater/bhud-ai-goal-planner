@@ -391,6 +391,90 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task State_reports_no_diagnostics_without_a_Provider_call() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool("list_installed_modules", "call_1");
+            model.WillReply("You have Pathing installed.");
+
+            var chat  = NewChannelChat(model, PlayerWorld());
+            var inbox = new FakeDevInbox();
+
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"What modules do I have?\" }");
+            inbox.AddFile("a6.json", "{ \"id\": \"a6\", \"op\": \"state\" }");
+
+            Assert.Equal("a1", await PollAsync(chat, inbox));
+            Assert.NotEmpty(Response(inbox, "a1")["lookups"]);
+
+            Assert.Equal("a6", await PollAsync(chat, inbox));
+
+            JObject state = Response(inbox, "a6");
+
+            Assert.True((bool)state["ok"]);
+            Assert.Empty(state["messages"]);
+            Assert.Empty(state["lookups"]);
+            Assert.Empty(state["roundTrips"]);
+        }
+
+        [Fact]
+        public async Task Cancel_review_reports_no_diagnostics() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool(SubmitPlanTool.Name, "call_1",
+                                Plan("I suggest hiding the mount markers.",
+                                     Action("set_setting", "bh.mounts", key: "Show markers", value: "false",
+                                            reason: "You asked for the markers to go.")));
+
+            var chat  = NewChannelChat(model, PlayerWorld());
+            var inbox = new FakeDevInbox();
+
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"turn off the markers in Mounts\" }");
+            inbox.AddFile("a3.json", "{ \"id\": \"a3\", \"op\": \"cancel_review\" }");
+
+            Assert.Equal("a1", await PollAsync(chat, inbox));
+            Assert.NotEmpty(Response(inbox, "a1")["roundTrips"]);
+
+            Assert.Equal("a3", await PollAsync(chat, inbox));
+
+            JObject cancelled = Response(inbox, "a3");
+
+            Assert.True((bool)cancelled["ok"]);
+            Assert.Empty(cancelled["messages"]);
+            Assert.Empty(cancelled["lookups"]);
+            Assert.Empty(cancelled["roundTrips"]);
+            Assert.Null(chat.Review);
+        }
+
+        [Fact]
+        public async Task Undo_reports_no_diagnostics() {
+            var model = new ScriptedChatClient();
+            model.WillCallTool(SubmitPlanTool.Name, "call_1",
+                                Plan("I suggest hiding the mount markers.",
+                                     Action("set_setting", "bh.mounts", key: "Show markers", value: "false",
+                                            reason: "You asked for the markers to go.")));
+            model.WillReply("Anything else?");
+
+            var world = PlayerWorld();
+            var chat  = NewChannelChat(model, world);
+            var inbox = new FakeDevInbox();
+
+            inbox.AddFile("a1.json", "{ \"id\": \"a1\", \"op\": \"send\", \"text\": \"turn off the markers in Mounts\" }");
+            inbox.AddFile("a2.json", "{ \"id\": \"a2\", \"op\": \"apply\", \"actions\": [0] }");
+            inbox.AddFile("a4.json", "{ \"id\": \"a4\", \"op\": \"undo\" }");
+
+            Assert.Equal("a1", await PollAsync(chat, inbox));
+            Assert.Equal("a2", await PollAsync(chat, inbox));
+            Assert.NotEmpty(Response(inbox, "a2")["roundTrips"]);
+
+            Assert.Equal("a4", await PollAsync(chat, inbox));
+
+            JObject undone = Response(inbox, "a4");
+
+            Assert.True((bool)undone["ok"]);
+            Assert.NotEmpty(undone["messages"]);
+            Assert.Empty(undone["lookups"]);
+            Assert.Empty(undone["roundTrips"]);
+        }
+
+        [Fact]
         public async Task A_direct_request_with_a_gate_missing_answers_channel_off() {
             var model = new ScriptedChatClient();
 
