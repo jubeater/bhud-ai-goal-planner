@@ -20,7 +20,7 @@ param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string] $Op,
     [Parameter(Position = 1)]
-    [string] $Actions,
+    [string[]] $Actions,
     [int] $TimeoutSec = 120
 )
 
@@ -30,11 +30,11 @@ $ErrorActionPreference = 'Stop'
 
 switch ($Op) {
     'apply' {
-        if ([string]::IsNullOrWhiteSpace($Actions)) {
+        if ($Actions -eq $null -or $Actions.Count -eq 0) {
             throw "Usage: scripts\dev-op.ps1 apply 0,2"
         }
 
-        $picked = $Actions.Split(',') | ForEach-Object { [int]$_.Trim() }
+        $picked = ConvertTo-DevActionIndexes -Actions $Actions
         $id = Write-DevRequest -Op 'apply' -Actions $picked
     }
     'cancel_review' { $id = Write-DevRequest -Op 'cancel_review' }

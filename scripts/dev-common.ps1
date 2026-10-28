@@ -14,9 +14,44 @@ $script:DevCounter = 0
 
 function New-DevId {
     $script:DevCounter++
-    return 'ps-{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $script:DevCounter
+    return 'ps-{0}-{1}-{2}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $PID, $script:DevCounter
 }
 
+<#
+.SYNOPSIS
+    Normalizes the apply indexes from dev-op.ps1 into integers.
+
+.DESCRIPTION
+    Accepts both spellings the shell produces: one "0,2" string or an array of strings, and splits
+    each entry on commas. Anything that is not an integer is an error, so a typo never becomes a
+    truncated or rounded index.
+#>
+function ConvertTo-DevActionIndexes {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]] $Actions
+    )
+
+    $indexes = @()
+
+    foreach ($entry in $Actions) {
+        foreach ($part in ($entry -split ',')) {
+            $trimmed = $part.Trim()
+
+            if ($trimmed -notmatch '^-?\d+$') {
+                throw "Action index '$trimmed' is not an integer. Usage: scripts\dev-op.ps1 apply 0,2"
+            }
+
+            $indexes += [int]$trimmed
+        }
+    }
+
+    if ($indexes.Count -eq 0) {
+        throw "Usage: scripts\dev-op.ps1 apply 0,2"
+    }
+
+    return $indexes
+}
 function Write-DevRequest {
     param(
         [string] $Op,
