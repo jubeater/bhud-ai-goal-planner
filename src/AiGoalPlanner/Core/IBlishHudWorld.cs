@@ -98,6 +98,22 @@ namespace jubeater.aigoalplanner.Core
         Task<IReadOnlyList<CatalogModuleInfo>> GetCatalogAsync(CancellationToken cancellationToken);
 
         /// <summary>
+        /// Reads package information for one catalog module on the game thread.
+        /// </summary>
+        Task<CatalogPackageEntry> GetCatalogPackageEntryAsync(string @namespace, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Fetches package details (download, hash check, manifest parse) off the game thread for a captured catalog entry.
+        /// </summary>
+        Task<CatalogModuleDetails> FetchCatalogModuleDetailsAsync(CatalogPackageEntry entry, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Retrieves detailed information for one candidate module from the official Blish HUD catalog,
+        /// including its description and requested GW2 API permissions.
+        /// </summary>
+        Task<CatalogModuleDetails> GetCatalogModuleDetailsAsync(string @namespace, CancellationToken cancellationToken);
+
+        /// <summary>
         /// Installs a module from the official Blish HUD catalog by its namespace.
         /// </summary>
         Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken);

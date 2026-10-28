@@ -213,6 +213,64 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             return Task.FromResult<IReadOnlyList<CatalogModuleInfo>>(CatalogModules.ToList());
         }
 
+        public Dictionary<string, CatalogModuleDetails> CatalogDetails { get; } =
+            new Dictionary<string, CatalogModuleDetails>(StringComparer.OrdinalIgnoreCase);
+
+        public Func<string, CancellationToken, Task<CatalogPackageEntry>> AnswerGetCatalogPackageEntry { get; set; }
+        public Func<CatalogPackageEntry, CancellationToken, Task<CatalogModuleDetails>> AnswerFetchCatalogModuleDetails { get; set; }
+        public Func<string, CancellationToken, Task<CatalogModuleDetails>> AnswerGetCatalogModuleDetails { get; set; }
+        public int CatalogDetailsCalls { get; private set; }
+
+        public Task<CatalogPackageEntry> GetCatalogPackageEntryAsync(string @namespace, CancellationToken cancellationToken) {
+            if (AnswerGetCatalogPackageEntry != null) return AnswerGetCatalogPackageEntry(@namespace, cancellationToken);
+
+            string wanted = (@namespace ?? string.Empty).Trim();
+            CatalogModuleInfo existing = CatalogModules.FirstOrDefault(m =>
+                string.Equals(m.Namespace, wanted, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, wanted, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null) {
+                return Task.FromResult(new CatalogPackageEntry(existing.Namespace, existing.Name, existing.Version, "http://pkg.test/" + existing.Namespace, "FAKEHASH"));
+            }
+
+            return Task.FromResult<CatalogPackageEntry>(null);
+        }
+
+        public Task<CatalogModuleDetails> FetchCatalogModuleDetailsAsync(CatalogPackageEntry entry, CancellationToken cancellationToken) {
+            if (AnswerFetchCatalogModuleDetails != null) return AnswerFetchCatalogModuleDetails(entry, cancellationToken);
+            return GetCatalogModuleDetailsAsync(entry.Namespace, cancellationToken);
+        }
+
+        public Task<CatalogModuleDetails> GetCatalogModuleDetailsAsync(string @namespace, CancellationToken cancellationToken) {
+            CatalogDetailsCalls++;
+            if (AnswerGetCatalogModuleDetails != null) return AnswerGetCatalogModuleDetails(@namespace, cancellationToken);
+
+            string wanted = (@namespace ?? string.Empty).Trim();
+            if (CatalogDetails.TryGetValue(wanted, out CatalogModuleDetails found)) {
+                return Task.FromResult(found);
+            }
+
+            CatalogModuleDetails byName = CatalogDetails.Values.FirstOrDefault(d => string.Equals(d.Name, wanted, StringComparison.OrdinalIgnoreCase));
+            if (byName != null) return Task.FromResult(byName);
+
+            CatalogModuleInfo existing = CatalogModules.FirstOrDefault(m =>
+                string.Equals(m.Namespace, wanted, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, wanted, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null) {
+                return Task.FromResult(new CatalogModuleDetails(
+                    success: true,
+                    @namespace: existing.Namespace,
+                    name: existing.Name,
+                    version: existing.Version,
+                    description: existing.Description,
+                    apiPermissions: existing.ApiPermissions
+                ));
+            }
+
+            return Task.FromResult(new CatalogModuleDetails(false, wanted, problem: "Module not found in the catalog."));
+        }
+
         public Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
             InstallCalls++;
             if (AnswerInstallModule != null) return AnswerInstallModule(@namespace, cancellationToken);

@@ -189,6 +189,18 @@ internal static class Program
             });
         }
 
+        public Task<CatalogPackageEntry> GetCatalogPackageEntryAsync(string @namespace, CancellationToken cancellationToken) {
+            return Task.FromResult(new CatalogPackageEntry("bh.pathing", "Pathing", "3.2.1", "http://pkg.test/pathing", "HASH"));
+        }
+
+        public Task<CatalogModuleDetails> FetchCatalogModuleDetailsAsync(CatalogPackageEntry entry, CancellationToken cancellationToken) {
+            return Task.FromResult(new CatalogModuleDetails(true, entry.Namespace, entry.Name, entry.Version, "Shows markers and trails."));
+        }
+
+        public Task<CatalogModuleDetails> GetCatalogModuleDetailsAsync(string @namespace, CancellationToken cancellationToken) {
+            return Task.FromResult(new CatalogModuleDetails(true, @namespace, "Pathing", "3.2.1", "Shows markers and trails."));
+        }
+
         public Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
             return Task.FromResult(new ModuleInstallChange(false, false, @namespace, @namespace, null, "Stj5Check does not install modules."));
         }

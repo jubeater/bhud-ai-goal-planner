@@ -155,6 +155,23 @@ namespace jubeater.aigoalplanner.Core
             return ReadAsync(() => _world.GetCatalogAsync(cancellationToken), cancellationToken);
         }
 
+        public Task<CatalogPackageEntry> GetCatalogPackageEntryAsync(string @namespace, CancellationToken cancellationToken) {
+            return ReadAsync(() => _world.GetCatalogPackageEntryAsync(@namespace, cancellationToken), cancellationToken);
+        }
+
+        public Task<CatalogModuleDetails> FetchCatalogModuleDetailsAsync(CatalogPackageEntry entry, CancellationToken cancellationToken) {
+            return _world.FetchCatalogModuleDetailsAsync(entry, cancellationToken);
+        }
+
+        public async Task<CatalogModuleDetails> GetCatalogModuleDetailsAsync(string @namespace, CancellationToken cancellationToken) {
+            CatalogPackageEntry entry = await ReadAsync(() => _world.GetCatalogPackageEntryAsync(@namespace, cancellationToken), cancellationToken).ConfigureAwait(false);
+            if (entry == null) {
+                return new CatalogModuleDetails(false, @namespace, problem: "Module not found in the catalog.");
+            }
+
+            return await _world.FetchCatalogModuleDetailsAsync(entry, cancellationToken).ConfigureAwait(false);
+        }
+
         public async Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
             ModuleInstallChange change = await ReadAsync(() => _world.InstallModuleAsync(@namespace, cancellationToken), cancellationToken).ConfigureAwait(false);
             if (!change.Applied || !change.Changed) return change;

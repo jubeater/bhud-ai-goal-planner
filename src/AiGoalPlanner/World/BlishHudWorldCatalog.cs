@@ -50,29 +50,12 @@ namespace jubeater.aigoalplanner.World
                                     }
                                 }
 
-                                string desc = string.Empty;
-                                var apiPerms = new List<string>();
-
-                                ModuleManager installedManager = GameService.Module.Modules
-                                    .FirstOrDefault(candidate => string.Equals(candidate.Manifest.Namespace, m.Namespace, StringComparison.OrdinalIgnoreCase));
-
-                                if (installedManager?.Manifest != null) {
-                                    desc = installedManager.Manifest.Description ?? string.Empty;
-                                    if (installedManager.Manifest.ApiPermissions != null) {
-                                        foreach (var kvp in installedManager.Manifest.ApiPermissions) {
-                                            apiPerms.Add(kvp.Key.ToString().ToLowerInvariant());
-                                        }
-                                    }
-                                }
-
                                 list.Add(new CatalogModuleInfo(
                                     m.Namespace,
                                     m.Name,
                                     VersionTextOf(m),
-                                    desc,
                                     deps,
-                                    m.IsPreview,
-                                    apiPerms
+                                    m.IsPreview
                                 ));
                             }
                         }
@@ -83,6 +66,69 @@ namespace jubeater.aigoalplanner.World
             }
 
             return Task.FromResult<IReadOnlyList<CatalogModuleInfo>>(list);
+        }
+
+        public Task<CatalogPackageEntry> GetCatalogPackageEntryAsync(string @namespace, CancellationToken cancellationToken) {
+            string wanted = (@namespace ?? string.Empty).Trim();
+
+            try {
+                var repoHandler = GameService.Module.ModulePkgRepoHandler;
+                PkgManifest target = null;
+
+                if (repoHandler?.PkgRepos != null) {
+                    var filters = new Func<PkgManifest, bool>[] { StaticPkgRepoProvider.FilterShowOnlySupportedVersion };
+
+                    foreach (var repo in repoHandler.PkgRepos) {
+                        var manifests = repo.GetPkgManifests(filters);
+                        if (manifests != null) {
+                            foreach (var m in manifests) {
+                                if (string.Equals(m.Namespace, wanted, StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(m.Name, wanted, StringComparison.OrdinalIgnoreCase)) {
+                                    if (target == null) {
+                                        target = m;
+                                    } else {
+                                        IComparable vCur = VersionOf(target);
+                                        IComparable vNew = VersionOf(m);
+                                        if (vCur != null && vNew != null && vNew.CompareTo(vCur) > 0) {
+                                            target = m;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (target != null) break;
+                    }
+                }
+
+                if (target == null) {
+                    return Task.FromResult<CatalogPackageEntry>(null);
+                }
+
+                return Task.FromResult(new CatalogPackageEntry(
+                    target.Namespace,
+                    target.Name,
+                    VersionTextOf(target),
+                    target.Location,
+                    target.Hash
+                ));
+            } catch (Exception ex) {
+                _logWarn?.Invoke("Failed to find catalog entry: " + ex.GetType().Name);
+                return Task.FromResult<CatalogPackageEntry>(null);
+            }
+        }
+
+        public Task<CatalogModuleDetails> FetchCatalogModuleDetailsAsync(CatalogPackageEntry entry, CancellationToken cancellationToken) {
+            return _catalogDetailsService.FetchCatalogModuleDetailsAsync(entry, cancellationToken);
+        }
+
+        public async Task<CatalogModuleDetails> GetCatalogModuleDetailsAsync(string @namespace, CancellationToken cancellationToken) {
+            CatalogPackageEntry entry = await GetCatalogPackageEntryAsync(@namespace, cancellationToken).ConfigureAwait(false);
+            if (entry == null) {
+                return new CatalogModuleDetails(false, @namespace, problem: "Module not found in the catalog.");
+            }
+
+            return await FetchCatalogModuleDetailsAsync(entry, cancellationToken).ConfigureAwait(false);
         }
 
         public async Task<ModuleInstallChange> InstallModuleAsync(string @namespace, CancellationToken cancellationToken) {
