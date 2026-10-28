@@ -322,5 +322,36 @@ namespace jubeater.aigoalplanner.Tests
             Assert.False(outcome.Succeeded);
             Assert.Contains("already installed", outcome.Problem);
         }
+
+        [Fact]
+        public async Task Approved_installs_are_applied_in_dependency_order() {
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers", new[] { "bh.blishhud" }),
+                    new CatalogModuleInfo("bh.addon", "Addon Module", "1.0.0", "Addon", new[] { "bh.blishhud", "bh.community.pathing" })
+                }
+            };
+
+            var plan = new Plan("Install Addon then Pathing", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "bh.addon", null, null,
+                               "Need addon", isSideEffect: false, gap: "Addon gap"),
+                new PlanAction(PlanActionKind.Install, "install", "bh.community.pathing", null, null,
+                               "Need pathing", isSideEffect: false, gap: "Pathing gap")
+            });
+
+            var applier = new PlanApplier(world);
+            var reviewedAddon = new ReviewedAction(plan.Actions[0], "bh.addon", "Addon Module", null, "Addon Module",
+                                                   "not installed", "installed", null, dependencies: new[] { "bh.community.pathing" });
+            var reviewedPathing = new ReviewedAction(plan.Actions[1], "bh.community.pathing", "Pathing", null, "Pathing",
+                                                     "not installed", "installed", null);
+            var review = new PlanReview(plan, new[] { reviewedAddon, reviewedPathing });
+
+            AppliedPlan applied = await applier.ApplyAsync(review, new[] { 0, 1 }, CancellationToken.None);
+
+            Assert.Equal(2, world.InstallCalls);
+            // Must have installed dependency (bh.community.pathing) before dependent (bh.addon)
+            Assert.Equal("install bh.community.pathing", world.Writes[0]);
+            Assert.Equal("install bh.addon", world.Writes[1]);
+        }
     }
 }

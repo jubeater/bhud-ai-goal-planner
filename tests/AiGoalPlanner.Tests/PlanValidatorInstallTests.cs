@@ -214,5 +214,21 @@ namespace jubeater.aigoalplanner.Tests
             Assert.False(action.CanApply);
             Assert.Contains("is already installed", action.Problem);
         }
+
+        [Fact]
+        public async Task Dependency_later_in_same_plan_is_accepted() {
+            var plan = new Plan("Install Addon before Pathing", new[] {
+                new PlanAction(PlanActionKind.Install, "install", "bh.addon", null, null,
+                               "Need addon", isSideEffect: false, gap: "Addon gap"),
+                new PlanAction(PlanActionKind.Install, "install", "bh.community.pathing", null, null,
+                               "Need pathing", isSideEffect: false, gap: "Pathing gap")
+            });
+
+            PlanReview review = await PlanValidator.ReviewAsync(plan, _world, CancellationToken.None);
+
+            Assert.Equal(2, review.Actions.Count);
+            Assert.True(review.Actions[0].IsAccepted);
+            Assert.True(review.Actions[1].IsAccepted);
+        }
     }
 }

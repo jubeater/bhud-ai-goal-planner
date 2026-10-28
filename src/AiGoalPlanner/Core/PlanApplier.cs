@@ -92,7 +92,51 @@ namespace jubeater.aigoalplanner.Core
                 chosen.Add(action);
             }
 
-            return chosen;
+            return OrderByDependencies(chosen);
+        }
+
+        private static List<ReviewedAction> OrderByDependencies(List<ReviewedAction> actions) {
+            var result = new List<ReviewedAction>(actions.Count);
+            var remaining = new List<ReviewedAction>(actions);
+
+            while (remaining.Count > 0) {
+                int readyIndex = -1;
+                for (int i = 0; i < remaining.Count; i++) {
+                    ReviewedAction candidate = remaining[i];
+                    if (candidate.Action.Kind != PlanActionKind.Install || candidate.Dependencies == null || candidate.Dependencies.Count == 0) {
+                        readyIndex = i;
+                        break;
+                    }
+
+                    bool dependsOnRemaining = false;
+                    foreach (string dep in candidate.Dependencies) {
+                        string depTrimmed = (dep ?? string.Empty).Trim();
+                        if (string.Equals(depTrimmed, "bh.blishhud", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (remaining.Any(other => other != candidate &&
+                            other.Action.Kind == PlanActionKind.Install &&
+                            (string.Equals(other.ModuleNamespace, depTrimmed, StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(other.ModuleName, depTrimmed, StringComparison.OrdinalIgnoreCase)))) {
+                            dependsOnRemaining = true;
+                            break;
+                        }
+                    }
+
+                    if (!dependsOnRemaining) {
+                        readyIndex = i;
+                        break;
+                    }
+                }
+
+                if (readyIndex >= 0) {
+                    result.Add(remaining[readyIndex]);
+                    remaining.RemoveAt(readyIndex);
+                } else {
+                    result.AddRange(remaining);
+                    break;
+                }
+            }
+
+            return result;
         }
 
         private async Task<ApplyOutcome> ApplyOneAsync(ReviewedAction action, List<UndoStep> undo,

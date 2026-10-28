@@ -36,6 +36,7 @@ namespace jubeater.aigoalplanner.Core
                                                                    .ConfigureAwait(false);
 
             var reviewer = new Reviewer(modules, world, cancellationToken);
+            await reviewer.InitializeAsync(plan.Actions).ConfigureAwait(false);
             var actions  = new List<ReviewedAction>(plan.Actions.Count);
 
             foreach (PlanAction action in plan.Actions) {
@@ -161,6 +162,34 @@ namespace jubeater.aigoalplanner.Core
                 _modules           = modules ?? new InstalledModuleInfo[0];
                 _world             = world;
                 _cancellationToken = cancellationToken;
+            }
+
+            public async Task InitializeAsync(IEnumerable<PlanAction> actions) {
+                if (actions == null) return;
+                bool hasInstalls = actions.Any(a => a.Kind == PlanActionKind.Install);
+                if (!hasInstalls) return;
+
+                if (_catalogModules == null) {
+                    _catalogModules = await _world.GetCatalogAsync(_cancellationToken).ConfigureAwait(false);
+                }
+
+                if (_catalogModules != null) {
+                    foreach (PlanAction action in actions.Where(a => a.Kind == PlanActionKind.Install)) {
+                        string wanted = (action.Module ?? string.Empty).Trim();
+                        if (wanted.Length == 0) continue;
+
+                        CatalogModuleInfo cat = _catalogModules.FirstOrDefault(c =>
+                            string.Equals(c.Namespace, wanted, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(c.Name, wanted, StringComparison.OrdinalIgnoreCase));
+
+                        if (cat != null) {
+                            _installedInPlan.Add(cat.Namespace);
+                            _installedInPlan.Add(cat.Name);
+                        } else {
+                            _installedInPlan.Add(wanted);
+                        }
+                    }
+                }
             }
 
             public async Task<ReviewedAction> ReviewAsync(PlanAction action) {
