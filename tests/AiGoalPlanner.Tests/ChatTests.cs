@@ -1316,6 +1316,30 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+
+        public async Task List_marker_packs_shows_available_and_installed_marker_packs() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld {
+                MarkerPacks = {
+                    new MarkerPackInfo("Tekkit's All-In-One", "tw_ALL_IN_ONE.taco", "Jack-of-all-trades", "Hero Points", 47.1, "https://example.com/tw.taco", "1", false)
+                }
+            };
+
+            model.WillCallTool("list_marker_packs", "call_1",
+                               new Dictionary<string, object> { ["search"] = "tekkit" });
+            model.WillReply("Tekkit's All-In-One is available to download from the official list (47.1 MB).");
+
+            var chat = NewChat(model, world);
+            await chat.SendAsync("What marker packs are available?");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              answer => Assert.Contains("Tekkit", answer.Text));
+
+            Assert.Equal(1, world.MarkerPacksCalls);
+        }
+
+        [Fact]
         public async Task Usage_is_counted_across_a_tool_loop_and_shown_on_the_reply() {
             var model = new ScriptedChatClient();
             var world = new FakeWorld();
@@ -1603,6 +1627,7 @@ namespace jubeater.aigoalplanner.Tests
         private static Chat NewChatWithTokens(ScriptedChatClient model, FakeWorld world, long budget, TokenPrice prices) {
             return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"), Lookups.For(world),
                             logDebug: null, logWarn: null, plans: null, tokenBudget: () => budget, tokenPrices: () => prices);
+
         }
     }
 }

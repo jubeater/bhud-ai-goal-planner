@@ -1,0 +1,47 @@
+[
+  {
+    "Name": "Tekkit's All-In-One",
+    "Description": "Jack-of-all-trades with markers and trails for most content.",
+    "Download": "https://www.tekkitsworkshop.net/download?download=1:tw-all-in-one",
+    "Info": "https://www.tekkitsworkshop.net/",
+    "FileName": "tw_ALL_IN_ONE.taco",
+    "Categories": "Festivals, Jumping Puzzles, Achievements, Gathering, Map Completion",
+    "Version": "8670d958782845ceec77424ded4a0790",
+    "Size": 47.09116,
+    "TotalDownloads": 589,
+    "AuthorName": "Tekkit's Workshop",
+    "AuthorUsername": "",
+    "LastUpdate": "2026-09-29T14:30:16.9578592Z",
+    "MapIds": [ 1210, 1045, 1211, 32, 31, 873 ]
+  },
+  {
+    "Name": "[fast] TacO Markers",
+    "Description": "A set of markers and trails for some of the most profitable solo-farming gathering routes across a wide range of maps.",
+    "Download": "https://fast.farming-community.eu/assets/downloads/fast_TacO_pack.taco",
+    "Info": "https://fast.farming-community.eu/farming/guides/fast-taco-marker",
+    "FileName": "fast_TacO_pack.taco",
+    "Categories": "Solo Farming",
+    "Version": "https://fast.farming-community.eu/fast/markers/fast_TacO_pack.taco",
+    "Size": 0.63182163,
+    "TotalDownloads": 195,
+    "AuthorName": "[fast]",
+    "AuthorUsername": "",
+    "LastUpdate": "2024-08-27T13:15:17.1130223Z",
+    "MapIds": [ 1343, 1165, 1195, 1041 ]
+  },
+  {
+    "Name": "Twisted Castle",
+    "Description": "Markers for Twisted Castle (Raid Wing 3). Features: Meta pathing, (Slower) Intended Pathing, Buttons, and Gate Portals",
+    "Download": "https://github.com/SZG5/gw2-twisted-castle/releases/latest/download/TwistedCastle.taco",
+    "Info": "https://github.com/SZG5/gw2-twisted-castle",
+    "FileName": "TwistedCastle.taco",
+    "Categories": "Raids",
+    "Version": "75977869",
+    "Size": 0.28022194,
+    "TotalDownloads": 14,
+    "AuthorName": "Z. Long",
+    "AuthorUsername": "S Z G.4359",
+    "LastUpdate": "2022-08-26T23:07:30",
+    "MapIds": [ 1156 ]
+  }
+]

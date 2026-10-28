@@ -74,6 +74,23 @@ namespace jubeater.aigoalplanner.Core
         /// their visibility and marker/trail counts on the queried or current map.
         /// </summary>
         Task<MarkerCategoriesResult> FindMarkerCategoriesAsync(string search, int? mapId, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Lists available Marker Packs from Pathing's official repository list and packs installed in the
+        /// shared markers directory.
+        /// </summary>
+        Task<MarkerPacksResult> ListMarkerPacksAsync(CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Downloads an official Pathing marker pack, verifies it, writes it to the markers directory,
+        /// and restarts Pathing.
+        /// </summary>
+        Task<MarkerPackChange> DownloadMarkerPackAsync(string pack, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Deletes a marker pack file from the markers directory and restarts Pathing.
+        /// </summary>
+        Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken);
     }
 
     /// <summary>

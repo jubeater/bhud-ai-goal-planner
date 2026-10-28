@@ -732,8 +732,8 @@ namespace jubeater.aigoalplanner.UI
             var box = new Checkbox {
                 Parent           = _reviewPanel,
                 Location         = new Point(0, top),
-                Width            = _reviewPanel.Width - SideEffectWidth,
-                Text             = action.Summary,
+                Width            = 20,
+                Text             = string.Empty,
                 Enabled          = action.CanApply,
                 Checked          = action.CanApply && !_reviewUnchosen.Contains(index),
                 BasicTooltipText = action.Action.Reason
@@ -748,7 +748,13 @@ namespace jubeater.aigoalplanner.UI
                 AddReviewLabel("Side effect", SideEffectColor, top, _reviewPanel.Width - SideEffectWidth);
             }
 
-            int detail = top + box.Height + 2;
+            int labelRightMargin = action.Action.IsSideEffect ? SideEffectWidth : 0;
+            Color summaryColor = action.CanApply ? Color.White : HintColor;
+            int summaryBottom = AddReviewLabel(action.Summary, summaryColor, top, 24, labelRightMargin, () => {
+                if (box.Enabled) box.Checked = !box.Checked;
+            });
+
+            int detail = Math.Max(top + box.Height, summaryBottom) + 2;
 
             if (!action.IsAccepted) {
                 return AddReviewLabel(ProblemOf(action), NoticeColor, detail, ReviewIndent) + MessageSpacing;
@@ -790,10 +796,10 @@ namespace jubeater.aigoalplanner.UI
         /// <paramref name="left"/> and wraps inside what is left of the panel, so a long reason cannot
         /// run out of it.
         /// </summary>
-        private int AddReviewLabel(string text, Color color, int top, int left) {
+        private int AddReviewLabel(string text, Color color, int top, int left, int rightMargin = 0, Action onClick = null) {
             BitmapFont font = GameService.Content.DefaultFont14;
 
-            int width = _reviewPanel.Width - left - TextRightMargin;
+            int width = _reviewPanel.Width - left - TextRightMargin - rightMargin;
 
             var label = new Label {
                 Parent         = _reviewPanel,
@@ -806,6 +812,10 @@ namespace jubeater.aigoalplanner.UI
 
             label.RecalculateLayout();
             label.Location = new Point(left, top);
+
+            if (onClick != null) {
+                label.Click += (sender, e) => onClick();
+            }
 
             _reviewControls.Add(label);
 

@@ -485,7 +485,27 @@ namespace jubeater.aigoalplanner.Core
 
                 SetReview(generation, null);
 
-                AppliedPlan applied = await _plans.ApplyAsync(review, actionIndexes, cancellationToken).ConfigureAwait(false);
+                ReviewedAction downloadAction = null;
+                if (actionIndexes != null) {
+                    foreach (int index in actionIndexes) {
+                        if (index >= 0 && index < review.Actions.Count && review.Actions[index].CanApply &&
+                            review.Actions[index].Action.Kind == PlanActionKind.DownloadPack) {
+                            downloadAction = review.Actions[index];
+                            break;
+                        }
+                    }
+                }
+
+                if (downloadAction != null) {
+                    AddProgress(generation, "Downloading " + downloadAction.Action.Pack + ".");
+                }
+
+                AppliedPlan applied;
+                try {
+                    applied = await _plans.ApplyAsync(review, actionIndexes, cancellationToken).ConfigureAwait(false);
+                } finally {
+                    ClearProgress(generation);
+                }
 
 #if DEBUG
                 _lastApply = applied;
@@ -496,13 +516,25 @@ namespace jubeater.aigoalplanner.Core
                 // Nothing was ticked and nothing was applied before the Review: there is nothing to
                 // tell the model and nothing to carry on from. A Review with an Auto-apply behind it
                 // is resolved all the same, so its outcome is still owed to the model.
-                if (applied.Outcomes.Count == 0 && !HasAppliedBeforeReview) return;
 
-                if (!TryAppendApplyOutcome(generation, applied)) return;
 
-                // The Player stopped this Apply part-way. What was applied is reported and in the
-                // journal, and the Request ends as any cancelled Request does.
+
+
+                bool hadAppliedBeforeReview = HasAppliedBeforeReview;
+
+                if (applied.Outcomes.Count > 0 || hadAppliedBeforeReview) {
+                    if (!TryAppendApplyOutcome(generation, applied)) return;
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
+
+                if (applied.Outcomes.Count == 0 && !hadAppliedBeforeReview) return;
+
+
+
+
+
+
 
                 try {
                     await RunRequest(generation, cancellationToken).ConfigureAwait(false);
@@ -1182,7 +1214,7 @@ namespace jubeater.aigoalplanner.Core
                             : applied.Describe() + " ";
 
                 _modelHistory.Add(new AiChatMessage(ChatRole.User,
-                                                    text + "Look up anything you now need to, and tell the Player what you suggest next."));
+                                                    text + GetContinuationInstruction(earlier, applied)));
             }
 
             return true;
@@ -1192,6 +1224,16 @@ namespace jubeater.aigoalplanner.Core
         /// The message to replay for what the model said this round: its tool calls, and any words
         /// it said along with them.
         /// </summary>
+        private static string GetContinuationInstruction(AppliedPlan earlier, AppliedPlan applied) {
+            string instruction = "Look up anything you now need to, and tell the Player what you suggest next.";
+            bool hadDownload = (earlier != null && earlier.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.DownloadPack && o.Changed))
+                            || (applied != null && applied.Outcomes.Any(o => o.Action.Action.Kind == PlanActionKind.DownloadPack && o.Changed));
+            if (hadDownload) {
+                instruction += " Use find_marker_categories to look up marker categories for the downloaded pack. If the pack appears in skipped_packs, tell the Player plainly that the pack's category list couldn't be read, and that the Player can find it in Pathing's menu under the pack's name; do not suggest waiting for indexing or restarting Pathing.";
+            }
+            return instruction;
+        }
+
         private static AiChatMessage AssistantMessageOf(ChatResponse response) {
             if (response.Messages.Count == 1) return response.Messages[0];
 

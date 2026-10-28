@@ -158,5 +158,56 @@ namespace jubeater.aigoalplanner.Tests.Fakes
         public static ModuleSettingsResult Ok(string moduleName, params ModuleSettingInfo[] settings) {
             return new ModuleSettingsResult(ModuleSettingsStatus.Ok, moduleName, settings);
         }
+
+        public int MarkerPacksCalls { get; private set; }
+        public int DownloadMarkerPackCalls { get; private set; }
+        public int DeleteMarkerPackCalls { get; private set; }
+        public MarkerPacksResult MarkerPacksResult { get; set; }
+        public List<MarkerPackInfo> MarkerPacks { get; set; } = new List<MarkerPackInfo>();
+        public List<string> DownloadedPacks { get; } = new List<string>();
+        public Func<CancellationToken, Task<MarkerPacksResult>> AnswerListMarkerPacks { get; set; }
+        public Func<string, CancellationToken, Task<MarkerPackChange>> AnswerDownloadMarkerPack { get; set; }
+        public Func<string, CancellationToken, Task<MarkerPackChange>> AnswerDeleteMarkerPack { get; set; }
+
+        public Task<MarkerPacksResult> ListMarkerPacksAsync(CancellationToken cancellationToken) {
+            MarkerPacksCalls++;
+            if (AnswerListMarkerPacks != null) return AnswerListMarkerPacks(cancellationToken);
+            if (MarkerPacksResult != null) return Task.FromResult(MarkerPacksResult);
+            return Task.FromResult(new MarkerPacksResult(MarkerPacksStatus.Ok, MarkerPacks.ToArray()));
+        }
+
+        public Task<MarkerPackChange> DownloadMarkerPackAsync(string pack, CancellationToken cancellationToken) {
+            DownloadMarkerPackCalls++;
+            if (AnswerDownloadMarkerPack != null) return AnswerDownloadMarkerPack(pack, cancellationToken);
+            DownloadedPacks.Add(pack);
+            Writes.Add("download " + pack);
+
+            MarkerPackInfo existing = MarkerPacks.FirstOrDefault(p => string.Equals(p.Name, pack, StringComparison.OrdinalIgnoreCase) || string.Equals(p.FileName, pack, StringComparison.OrdinalIgnoreCase));
+            string packName = existing?.Name ?? pack;
+            string fileName = existing?.FileName ?? (pack + ".taco");
+            double sizeMb = existing?.SizeMb ?? 10.0;
+            return Task.FromResult(new MarkerPackChange(applied: true, changed: true, packName: packName, fileName: fileName, sizeMb: sizeMb));
+        }
+
+        public Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
+            DeleteMarkerPackCalls++;
+            if (AnswerDeleteMarkerPack != null) return AnswerDeleteMarkerPack(fileName, cancellationToken);
+            MarkerPackInfo existing = MarkerPacks.FirstOrDefault(p => string.Equals(p.FileName, fileName, StringComparison.OrdinalIgnoreCase) || string.Equals(p.Name, fileName, StringComparison.OrdinalIgnoreCase));
+            string packName = existing?.Name ?? fileName;
+            DownloadedPacks.Remove(fileName);
+            DownloadedPacks.Remove(packName);
+            Writes.Add("delete " + fileName);
+
+            return Task.FromResult(new MarkerPackChange(applied: true, changed: true, packName: fileName, fileName: fileName, sizeMb: 0));
+        }
+
+        private void RestartPathingIfEnabled() {
+            InstalledModuleInfo pathing = Modules.FirstOrDefault(m =>
+                (Same(m.Namespace, "bh.community.pathing") || Same(m.Namespace, "bh.pathing") || Same(m.Name, "Pathing")) && m.Enabled);
+            if (pathing != null) {
+                Writes.Add("disable " + pathing.Namespace);
+                Writes.Add("enable " + pathing.Namespace);
+            }
+        }
     }
 }

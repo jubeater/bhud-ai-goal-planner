@@ -10,11 +10,11 @@ namespace jubeater.aigoalplanner.Core
     /// </summary>
     public sealed class ApplyOutcome
     {
-        public ApplyOutcome(ReviewedAction action, bool succeeded, string problem = null, bool changed = true) {
+        public ApplyOutcome(ReviewedAction action, bool succeeded, string problem = null, bool? changed = null) {
             Action    = action ?? throw new ArgumentNullException(nameof(action));
             Succeeded = succeeded;
             Problem   = problem ?? string.Empty;
-            Changed   = changed && succeeded;
+            Changed   = changed ?? succeeded;
         }
 
         public ReviewedAction Action { get; }
@@ -69,6 +69,9 @@ namespace jubeater.aigoalplanner.Core
                 switch (Kind) {
                     case PlanActionKind.EnableModule:  return ModuleName + ": enable it";
                     case PlanActionKind.DisableModule: return ModuleName + ": disable it";
+                    case PlanActionKind.DownloadPack:
+                        string pack = TargetName.Length == 0 ? Value : TargetName;
+                        return "Pathing: delete marker pack " + pack;
                     default:
                         string setting = TargetName.Length == 0 ? SettingKey : TargetName;
 
@@ -122,14 +125,18 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         public string Describe() {
             List<string> changed = Outcomes.Where(outcome => outcome.Changed)
-                                           .Select(outcome => outcome.Action.Summary)
+                                           .Select(outcome => string.IsNullOrEmpty(outcome.Problem)
+                                                       ? outcome.Action.Summary
+                                                       : outcome.Action.Summary + " (" + outcome.Problem + ")")
                                            .ToList();
 
             List<string> unchanged = Outcomes.Where(outcome => outcome.Succeeded && !outcome.Changed)
-                                             .Select(outcome => outcome.Action.Summary)
+                                             .Select(outcome => string.IsNullOrEmpty(outcome.Problem)
+                                                       ? outcome.Action.Summary
+                                                       : outcome.Action.Summary + " (" + outcome.Problem + ")")
                                              .ToList();
 
-            List<ApplyOutcome> failed = Outcomes.Where(outcome => !outcome.Succeeded).ToList();
+            List<ApplyOutcome> failed = Outcomes.Where(outcome => !outcome.Succeeded && !outcome.Changed).ToList();
 
             var text = new StringBuilder();
 

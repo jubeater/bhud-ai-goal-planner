@@ -171,6 +171,18 @@ internal static class Program
         public Task<MarkerCategoriesResult> FindMarkerCategoriesAsync(string search, int? mapId, CancellationToken cancellationToken) {
             return Task.FromResult(MarkerCategoriesResult.NoPacks());
         }
+
+        public Task<MarkerPacksResult> ListMarkerPacksAsync(CancellationToken cancellationToken) {
+            return Task.FromResult(new MarkerPacksResult(MarkerPacksStatus.Ok, Array.Empty<MarkerPackInfo>()));
+        }
+
+        public Task<MarkerPackChange> DownloadMarkerPackAsync(string pack, CancellationToken cancellationToken) {
+            return Task.FromResult(new MarkerPackChange(false, false, pack, null, 0, "Stj5Check does not download packs."));
+        }
+
+        public Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
+            return Task.FromResult(new MarkerPackChange(false, false, null, fileName, 0, "Stj5Check does not delete packs."));
+        }
     }
 
     private sealed class StubProvider : HttpMessageHandler

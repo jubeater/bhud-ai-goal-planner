@@ -14,6 +14,7 @@ namespace jubeater.aigoalplanner.Core
         EnableModule,
         DisableModule,
         SetSetting,
+        DownloadPack,
         Advice
     }
 
@@ -30,7 +31,7 @@ namespace jubeater.aigoalplanner.Core
     public sealed class PlanAction
     {
         public PlanAction(PlanActionKind kind, string kindText, string module, string key, string value,
-                          string reason, bool isSideEffect) {
+                          string reason, bool isSideEffect, string pack = null) {
             Kind         = kind;
             KindText     = kindText ?? string.Empty;
             Module       = module   ?? string.Empty;
@@ -38,6 +39,7 @@ namespace jubeater.aigoalplanner.Core
             Value        = value    ?? string.Empty;
             Reason       = reason   ?? string.Empty;
             IsSideEffect = isSideEffect;
+            Pack         = pack     ?? string.Empty;
         }
 
         public PlanActionKind Kind { get; }
@@ -62,6 +64,9 @@ namespace jubeater.aigoalplanner.Core
 
         /// <summary>Whether the Player did not ask for this change but the Request needs it.</summary>
         public bool IsSideEffect { get; }
+
+        /// <summary>The Marker Pack name or file name, for <see cref="PlanActionKind.DownloadPack"/>. Empty otherwise.</summary>
+        public string Pack { get; }
     }
 
     /// <summary>
