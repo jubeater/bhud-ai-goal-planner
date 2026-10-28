@@ -514,7 +514,7 @@ namespace jubeater.aigoalplanner.Core
                 _lastApply = applied;
 #endif
 
-                RecordInstalledModules(applied);
+                RecordInstalledModules(generation, applied);
                 ShowReport(generation, applied.Describe());
 
                 // Nothing was ticked and nothing was applied before the Review: there is nothing to
@@ -694,11 +694,14 @@ namespace jubeater.aigoalplanner.Core
 
         public void StartNewChat() {
             lock (_messagesLock) {
+                // Provenance and messages cleared under _messagesLock below
+
+
+            }
+            lock (_messagesLock) {
                 _installedInThisChat.Clear();
                 _removableModules.Clear();
                 _awaitingRemoveConfirmation.Clear();
-            }
-            lock (_messagesLock) {
                 _messages.Clear();
                 _modelHistory.Clear();
                 _progressLines.Clear();
@@ -1157,9 +1160,10 @@ namespace jubeater.aigoalplanner.Core
             TryAppend(generation, new ChatMessage(ChatMessageAuthor.Report, text, removableModules: removableModules));
         }
 
-        private void RecordInstalledModules(AppliedPlan applied) {
+        private void RecordInstalledModules(int generation, AppliedPlan applied) {
             if (applied == null || applied.Outcomes == null) return;
             lock (_messagesLock) {
+                if (generation != Volatile.Read(ref _generation)) return;
                 foreach (ApplyOutcome o in applied.Outcomes) {
                     if (o.Action.Action.Kind == PlanActionKind.Install && o.Changed && !string.IsNullOrWhiteSpace(o.Action.ModuleNamespace)) {
                         _installedInThisChat.Add(o.Action.ModuleNamespace);
@@ -1213,7 +1217,7 @@ namespace jubeater.aigoalplanner.Core
                 if (generation != Volatile.Read(ref _generation)) return;
 
                 _appliedBeforeReview = applied;
-                RecordInstalledModules(applied);
+                RecordInstalledModules(generation, applied);
             }
         }
 

@@ -673,5 +673,53 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Equal("DeleteModule failed: InvalidOperationException", warn);
             Assert.DoesNotContain("SecretDiskErrorDetailsThatMustNotLeak", warn);
         }
+
+        [Fact]
+        public async Task New_chat_during_install_must_not_offer_prior_chats_module_for_removal() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld {
+                CatalogModules = {
+                    new CatalogModuleInfo("bh.community.pathing", "Pathing", "3.2.1", "Markers and trails.", new[] { "bh.blishhud" })
+                }
+            };
+            world.SettingsByNamespace["bh.community.pathing"] = FakeWorld.Ok("Pathing");
+
+            var installStarted = new TaskCompletionSource<bool>();
+            var allowInstallToFinish = new TaskCompletionSource<bool>();
+
+            world.AnswerInstallModule = async (ns, ct) => {
+                installStarted.SetResult(true);
+                await allowInstallToFinish.Task;
+                world.Modules.Add(new InstalledModuleInfo(ns, "Pathing", "3.2.1", "Markers", enabled: true));
+                return new ModuleInstallChange(true, true, "Pathing", ns, "3.2.1");
+            };
+
+            model.WillCallTool("submit_plan", "call_plan",
+                               Plan("Install Pathing.",
+                                    InstallAction("bh.community.pathing", "Markers on map")));
+
+            var chat = NewChat(model, world);
+            await chat.SendAsync("Setup");
+
+            model.WillReply("Continuation reply.");
+            Task applyTask = chat.ApplyAsync(new[] { 0 });
+
+            await installStarted.Task;
+
+            // Player starts a new chat while install is in flight
+            chat.StartNewChat();
+
+            // Allow the install to finish
+            allowInstallToFinish.SetResult(true);
+            await applyTask;
+
+            // Undo the install in the new chat
+            await chat.UndoAsync();
+
+            // The module was installed by the previous chat, so it must not be offered for removal in this chat
+            Assert.False(chat.CanRemoveModule("bh.community.pathing"));
+            ChatMessage undoReport = Assert.Single(chat.Messages, m => m.Author == ChatMessageAuthor.Report && m.Text.Contains("Undid"));
+            Assert.DoesNotContain(undoReport.RemovableModules, rm => rm.Namespace == "bh.community.pathing");
+        }
     }
 }
