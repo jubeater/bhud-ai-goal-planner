@@ -312,6 +312,34 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_file_arriving_while_disabled_never_runs_after_reopening() {
+            var model = new ScriptedChatClient();
+
+            var chat  = NewChannelChat(model, PlayerWorld());
+            var inbox = new FakeDevInbox();
+
+            DateTime now = new DateTime(2026, 10, 28, 12, 0, 0, DateTimeKind.Utc);
+            bool open    = false;
+
+            var channel = new DevChannel(chat, isOpen: () => open, logDebug: null, inbox: inbox,
+                                         utcNow: () => now);
+
+            Assert.Null(await channel.PollAsync());
+
+            now = now.AddMilliseconds(100);
+            inbox.AddFile("stale.json", "{ \"id\": \"stale\", \"op\": \"send\", \"text\": \"Do not replay\" }",
+                          changedUtc: now);
+
+            now = now.AddMilliseconds(100);
+            open = true;
+            Assert.Null(await channel.PollAsync());
+
+            Assert.Empty(model.Requests);
+            Assert.Empty(inbox.Responses);
+            Assert.Equal(new[] { "stale.json" }, inbox.Waiting);
+        }
+
+        [Fact]
         public async Task A_direct_request_with_a_gate_missing_answers_channel_off() {
             var model = new ScriptedChatClient();
 

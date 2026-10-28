@@ -46,11 +46,13 @@ namespace jubeater.aigoalplanner.Core
         private readonly SemaphoreSlim    _gate = new SemaphoreSlim(1, 1);
 
         /// <summary>
-        /// Files last seen no newer than this are stale: they were already waiting the last time a
-        /// gate was closed, or they predate this channel, so they are left alone and never run.
-        /// Re-saving a file counts as new and runs.
+        /// Files older than this never run: they were already waiting the last time a gate was
+        /// closed, or they predate this channel. Re-saving a file counts as new and runs.
         /// </summary>
         private DateTime _notBeforeUtc;
+
+        /// <summary>Whether the last poll saw the gate open, so reopening can retire the backlog.</summary>
+        private bool _wasOpen = true;
 
         /// <summary>
         /// Builds the channel. <paramref name="isOpen"/> says whether the Player turned the module
@@ -134,9 +136,17 @@ namespace jubeater.aigoalplanner.Core
         /// </summary>
         public async Task<string> PollAsync(CancellationToken cancellationToken = default(CancellationToken)) {
             if (!_isOpen()) {
+                _wasOpen      = false;
                 _notBeforeUtc = _utcNow();
 
                 return null;
+            }
+
+            if (!_wasOpen) {
+                // The gate just reopened: whatever is already waiting arrived while it was closed,
+                // so none of it runs. Only files written from now on do.
+                _wasOpen      = true;
+                _notBeforeUtc = _utcNow();
             }
 
             foreach (string fileName in _inbox.Waiting) {
