@@ -3,6 +3,7 @@ using jubeater.aigoalplanner.Core;
 
 namespace jubeater.aigoalplanner.Tests
 {
+#if DEBUG
     /// <summary>
     /// Tests the developer channel's request parsing: one operation per file, exactly the shapes
     /// the ticket allows, so anything else is rejected before it can reach the Chat.
@@ -128,5 +129,19 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Null(request);
             Assert.False(string.IsNullOrEmpty(error));
         }
+
+        [Theory]
+        [InlineData("a1", true)]
+        [InlineData("A-1_2.3", true)]
+        [InlineData("../a1", false)]
+        [InlineData("a/b", false)]
+        [InlineData("a b", false)]
+        [InlineData("..", false)]
+        [InlineData(".", false)]
+        [InlineData("", false)]
+        public void Only_a_name_that_cannot_escape_the_outbox_is_an_id(string name, bool valid) {
+            Assert.Equal(valid, DevRequest.IsValidId(name));
+        }
     }
+#endif
 }

@@ -3,6 +3,7 @@ using jubeater.aigoalplanner.Core;
 
 namespace jubeater.aigoalplanner.Tests
 {
+#if DEBUG
     /// <summary>
     /// Tests the developer channel's gates: it runs only in a Debug build (which is where this code
     /// exists at all), started with --debug, and with the setting on. With any gate missing nothing
@@ -55,4 +56,5 @@ namespace jubeater.aigoalplanner.Tests
             Assert.Contains("open", text);
         }
     }
+#endif
 }

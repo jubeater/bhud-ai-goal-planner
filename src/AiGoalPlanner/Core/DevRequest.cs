@@ -62,8 +62,7 @@ namespace jubeater.aigoalplanner.Core
         /// a missing field or an unknown operation is not a Request this channel accepts. The id names
         /// the response file, so it may only hold characters that cannot escape the outbox folder.
         /// </summary>
-        public static bool TryParse(string json, out DevRequest request, out string error) {
-            request = null;
+        public static bool TryParse(string json, out DevRequest request, out string error) {            request = null;
             error   = null;
 
             if (string.IsNullOrWhiteSpace(json)) {
@@ -122,26 +121,11 @@ namespace jubeater.aigoalplanner.Core
             }
         }
 
-        private static bool TryReadId(JObject obj, out string id, out string error) {
-            id    = null;
-            error = null;
-
-            JToken token = obj["id"];
-
-            if (token == null || token.Type != JTokenType.String || !IsFileName((string)token)) {
-                error = "missing_id";
-                return false;
-            }
-
-            id = (string)token;
-            return true;
-        }
-
         /// <summary>
-        /// Whether <paramref name="name"/> can name a response file without escaping the outbox
-        /// folder: letters, digits, dots, dashes and underscores, and never just dots.
+        /// Whether <paramref name="name"/> can name a request and its response file: letters, digits,
+        /// dots, dashes and underscores, and never just dots, so it cannot escape the outbox folder.
         /// </summary>
-        private static bool IsFileName(string name) {
+        public static bool IsValidId(string name) {
             if (string.IsNullOrWhiteSpace(name)) return false;
 
             foreach (char letter in name) {
@@ -151,6 +135,21 @@ namespace jubeater.aigoalplanner.Core
             }
 
             return name.Trim('.').Length > 0;
+        }
+
+        private static bool TryReadId(JObject obj, out string id, out string error) {
+            id    = null;
+            error = null;
+
+            JToken token = obj["id"];
+
+            if (token == null || token.Type != JTokenType.String || !IsValidId((string)token)) {
+                error = "missing_id";
+                return false;
+            }
+
+            id = (string)token;
+            return true;
         }
 
         private static bool TryReadOp(JObject obj, out DevRequestOp op, out string error) {
