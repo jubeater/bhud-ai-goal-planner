@@ -22,6 +22,7 @@ namespace jubeater.aigoalplanner.Core
             tools.Register(ToolAccess.ReadOnly, GetLocationTool.Create(world, logDebug), GetLocationTool.Progress);
             tools.Register(ToolAccess.ReadOnly, GetAccountAccessTool.Create(world, logDebug), GetAccountAccessTool.Progress);
             tools.Register(ToolAccess.ReadOnly, GetProgressTool.Create(world, logDebug), GetProgressTool.Progress);
+            tools.Register(ToolAccess.ReadOnly, FindMarkerCategoriesTool.Create(world, logDebug), FindMarkerCategoriesTool.Progress);
 
             return tools;
         }

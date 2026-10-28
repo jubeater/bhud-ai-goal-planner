@@ -1239,5 +1239,78 @@ namespace jubeater.aigoalplanner.Tests
 
             Assert.True(condition());
         }
+
+        [Fact]
+        public async Task Find_marker_categories_runs_and_informs_the_reply() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld();
+            world.Modules.Add(new InstalledModuleInfo("bh.community.pathing", "Pathing", "1.13.2", "", enabled: true));
+            world.MarkerCategoriesResult = new MarkerCategoriesResult(
+                MarkerCategoriesStatus.Ok, 1210, "Crystal Oasis", new[] {
+                    new MarkerCategoryMatch(
+                        "Tekkit's Guides",
+                        "Tekkit's Guides › Path of Fire › Routes - Hero Points Only",
+                        "tw_guides.tw_mc_pof.tw_mc_pof_trails_hp",
+                        shown: false,
+                        markerCount: 2,
+                        trailCount: 1)
+                });
+
+            model.WillCallTool("find_marker_categories", "call_1",
+                               new Dictionary<string, object> { ["search"] = "hero point routes" });
+            model.WillReply("In Pathing, turn on Tekkit's Guides › Path of Fire › Routes - Hero Points Only. It's off right now, and it has 3 routes on Crystal Oasis.");
+
+            var chat = NewChat(model, world);
+
+            await chat.SendAsync("Show me the hero point routes here");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              answer => Assert.Equal("In Pathing, turn on Tekkit's Guides › Path of Fire › Routes - Hero Points Only. It's off right now, and it has 3 routes on Crystal Oasis.", answer.Text));
+
+            Assert.Equal(1, world.MarkerCategoriesCalls);
+            AiChatMessage toolAnswer = model.Requests[1][3];
+            FunctionResultContent result = Assert.Single(toolAnswer.Contents.OfType<FunctionResultContent>());
+            Assert.Contains("Tekkit's Guides", (string)result.Result);
+            Assert.Contains("tw_guides.tw_mc_pof.tw_mc_pof_trails_hp", (string)result.Result);
+        }
+
+        [Fact]
+        public async Task Find_marker_categories_suggests_installing_pathing_when_no_pathing() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld {
+                MarkerCategoriesResult = MarkerCategoriesResult.NoPathing()
+            };
+
+            model.WillCallTool("find_marker_categories", "call_1",
+                               new Dictionary<string, object> { ["search"] = "routes" });
+            model.WillReply("Pathing is not installed. You can install it from the module catalog.");
+
+            var chat = NewChat(model, world);
+            await chat.SendAsync("Show me routes here");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              answer => Assert.Contains("install", answer.Text));
+        }
+
+        [Fact]
+        public async Task Find_marker_categories_suggests_installing_packs_when_no_packs() {
+            var model = new ScriptedChatClient();
+            var world = new FakeWorld {
+                MarkerCategoriesResult = MarkerCategoriesResult.NoPacks()
+            };
+
+            model.WillCallTool("find_marker_categories", "call_1",
+                               new Dictionary<string, object> { ["search"] = "routes" });
+            model.WillReply("No marker packs are installed. You can download Tekkit's Guides.");
+
+            var chat = NewChat(model, world);
+            await chat.SendAsync("Show me routes here");
+
+            Assert.Collection(chat.Messages,
+                              request => Assert.Equal(ChatMessageAuthor.Player, request.Author),
+                              answer => Assert.Contains("Tekkit", answer.Text));
+        }
     }
 }
