@@ -1,5 +1,6 @@
 using jubeater.aigoalplanner.Core;
 using Microsoft.Extensions.AI;
+using System.Globalization;
 using Xunit;
 
 namespace jubeater.aigoalplanner.Tests
@@ -107,6 +108,66 @@ namespace jubeater.aigoalplanner.Tests
                          new TokenUsage(1200, 900, 80).DescribeWithCost(0.0048m));
         }
 
+        [Fact]
+        public void The_budget_parses_as_a_whole_number_of_tokens() {
+            Assert.True(TokenBudget.TryParse("300000", out long budget));
+            Assert.Equal(300000, budget);
+
+            Assert.True(TokenBudget.TryParse("300,000", out budget));
+            Assert.Equal(300000, budget);
+
+            Assert.True(TokenBudget.TryParse("0", out budget));
+            Assert.Equal(0, budget);
+        }
+
+        [Fact]
+        public void The_budget_rejects_anything_that_is_not_a_whole_number() {
+            Assert.False(TokenBudget.TryParse(null, out _));
+            Assert.False(TokenBudget.TryParse(string.Empty, out _));
+            Assert.False(TokenBudget.TryParse("abc", out _));
+            Assert.False(TokenBudget.TryParse("-1", out _));
+            Assert.False(TokenBudget.TryParse("3.5", out _));
+            Assert.False(TokenBudget.TryParse("300.000", out _));
+        }
+
+        [Fact]
+        public void Prices_parse_with_the_invariant_decimal_separator_whatever_the_culture() {
+            CultureInfo current = CultureInfo.CurrentCulture;
+
+            try {
+                CultureInfo.CurrentCulture = new CultureInfo("de-DE");
+
+                Assert.True(TokenPrice.TryParse("0.27", "1.1", out TokenPrice price));
+                Assert.Equal(0.27m, price.InputPerMillion);
+                Assert.Equal(1.1m,  price.OutputPerMillion);
+
+                // Saving unchanged settings keeps the price: the displayed "0.27" is read back as
+                // 0.27, not 27.
+                Assert.True(TokenPrice.TryParse(0.27m.ToString(CultureInfo.InvariantCulture), string.Empty, out price));
+                Assert.Equal(0.27m, price.InputPerMillion);
+                Assert.Null(price.OutputPerMillion);
+            } finally {
+                CultureInfo.CurrentCulture = current;
+            }
+        }
+
+        [Fact]
+        public void Prices_reject_a_comma_decimal_separator_and_anything_negative() {
+            Assert.False(TokenPrice.TryParse("1,5", "15", out _));
+            Assert.False(TokenPrice.TryParse("3", "abc", out _));
+            Assert.False(TokenPrice.TryParse("-1", "2", out _));
+            Assert.False(TokenPrice.TryParse("3", "-2", out _));
+        }
+
+        [Fact]
+        public void Empty_price_fields_parse_as_no_price() {
+            Assert.True(TokenPrice.TryParse(string.Empty, string.Empty, out TokenPrice price));
+            Assert.True(price.IsEmpty);
+
+            Assert.True(TokenPrice.TryParse("3", string.Empty, out price));
+            Assert.Equal(3m, price.InputPerMillion);
+            Assert.Null(price.OutputPerMillion);
+        }
         [Fact]
         public void The_default_budget_is_about_300k() {
             Assert.Equal(300000, TokenBudget.Default);

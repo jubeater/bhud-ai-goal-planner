@@ -96,6 +96,16 @@ namespace jubeater.aigoalplanner
         private HttpClient           _httpClient;
 
         /// <summary>
+        /// What the Chat reads for its Token Budget and its prices: Blish HUD settings may only be
+        /// read on the game thread (ADR-0009), and the Chat reads these callbacks off the game
+        /// thread after every Provider round trip. So the Chat never reads the Settings: it reads
+        /// these snapshots, taken below and refreshed whenever a setting changes.
+        /// </summary>
+        private readonly object _tokenSnapshotsLock = new object();
+        private long            _tokenBudgetSnapshot   = TokenBudget.Default;
+        private string          _tokenEndpointSnapshot = string.Empty;
+
+        /// <summary>
         /// The module's own icon, loaded once from <c>ref/</c> and shared by the corner icon and the
         /// Chat window. Content loaded from <c>ref/</c> belongs to the module, so <see cref="Unload"/>
         /// disposes it after the controls that draw it are gone.
@@ -132,8 +142,8 @@ namespace jubeater.aigoalplanner
                 _plans = new Plans(_world, () => _autoApplySetting.Value, LogDebug);
 
                 _chat = new Chat(CreateChatClient, BuildSystemPrompt, BuildTools(), LogDebug, LogWarn, _plans,
-                    () => _tokenBudgetSetting.Value,
-                    () => _tokenPrices.GetPrice(_endpointSetting.Value));
+                    () => ReadTokenBudgetSnapshot(),
+                    () => _tokenPrices.GetPrice(ReadTokenEndpointSnapshot()));
             } catch (Exception exception) {
                 Logger.Error(exception, "AI Goal Planner failed to load its planning core. The Chat will open, but it cannot work this session. Check the Blish HUD log.");
 
@@ -222,6 +232,12 @@ namespace jubeater.aigoalplanner
                 () => "Remembers the prices per million tokens for each Provider, for the cost estimate.");
 
             _tokenPrices = TokenPrices.FromJson(_tokenPricesSetting.Value);
+
+            _tokenBudgetSnapshot   = _tokenBudgetSetting.Value;
+            _tokenEndpointSnapshot = _endpointSetting.Value ?? string.Empty;
+
+            _tokenBudgetSetting.SettingChanged += OnTokenSettingChanged;
+            _endpointSetting.SettingChanged    += OnTokenSettingChanged;
         }
 
 #if DEBUG
@@ -361,6 +377,9 @@ namespace jubeater.aigoalplanner
             _keyStore        = null;
             _tokenPrices     = null;
 
+            if (_tokenBudgetSetting != null) _tokenBudgetSetting.SettingChanged -= OnTokenSettingChanged;
+            if (_endpointSetting != null)    _endpointSetting.SettingChanged    -= OnTokenSettingChanged;
+
             if (_httpClient != null) {
                 _httpClient.Dispose();
                 _httpClient = null;
@@ -456,48 +475,18 @@ namespace jubeater.aigoalplanner
             // half-typed endpoint must not leave prices behind that nothing will ever read again.
             ProviderSettings.ParseEndpoint(endpoint);
 
-            if (!TryParseBudget(budgetText, out int budget)) {
+            if (!TokenBudget.TryParse(budgetText, out long parsedBudget) || parsedBudget > int.MaxValue) {
                 throw new ArgumentException("Token Budget must be a whole number of tokens, or 0 for no limit.");
             }
 
-            if (!TryParsePrice(inputPriceText, out decimal? inputPrice) || !TryParsePrice(outputPriceText, out decimal? outputPrice)) {
+            if (!TokenPrice.TryParse(inputPriceText, outputPriceText, out TokenPrice price)) {
                 throw new ArgumentException("Prices must be numbers 0 or more, or left empty.");
             }
 
-            _tokenBudgetSetting.Value = budget;
+            _tokenBudgetSetting.Value = (int)parsedBudget;
 
-            _tokenPrices.SetPrice(endpoint, new TokenPrice(inputPrice, outputPrice));
+            _tokenPrices.SetPrice(endpoint, price);
             _tokenPricesSetting.Value = _tokenPrices.ToJson();
-        }
-
-        private static bool TryParseBudget(string text, out int budget) {
-            string trimmed = (text ?? string.Empty).Trim();
-
-            return (int.TryParse(trimmed, NumberStyles.Integer | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out budget)
-                 || int.TryParse(trimmed, NumberStyles.Integer | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out budget))
-                 && budget >= 0;
-        }
-
-        private static bool TryParsePrice(string text, out decimal? price) {
-            string trimmed = (text ?? string.Empty).Trim();
-
-            if (trimmed.Length == 0) {
-                price = null;
-
-                return true;
-            }
-
-            if ((decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.CurrentCulture, out decimal parsed)
-              || decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.InvariantCulture, out parsed))
-              && parsed >= 0) {
-                price = parsed;
-
-                return true;
-            }
-
-            price = null;
-
-            return false;
         }
 
         private static string FormatPrice(decimal? price) {
@@ -510,6 +499,31 @@ namespace jubeater.aigoalplanner
         /// </summary>
         private string DescribeProviderKey(string endpoint) {
             return ProviderKeySummary.Describe(_keyStore.Load(endpoint));
+        }
+
+        /// <summary>
+        /// Refreshes the game-thread snapshots of the Token Budget and the endpoint, for the Chat
+        /// to read off the game thread. Settings change on the game thread — in this window or in
+        /// Blish HUD's own settings — so reading them here is safe; the Chat's own reads take the
+        /// snapshots under the same lock.
+        /// </summary>
+        private void OnTokenSettingChanged(object sender, EventArgs e) {
+            lock (_tokenSnapshotsLock) {
+                _tokenBudgetSnapshot   = _tokenBudgetSetting.Value;
+                _tokenEndpointSnapshot = _endpointSetting.Value ?? string.Empty;
+            }
+        }
+
+        private long ReadTokenBudgetSnapshot() {
+            lock (_tokenSnapshotsLock) {
+                return _tokenBudgetSnapshot;
+            }
+        }
+
+        private string ReadTokenEndpointSnapshot() {
+            lock (_tokenSnapshotsLock) {
+                return _tokenEndpointSnapshot;
+            }
         }
 
         private void NotifyProviderChanged() {

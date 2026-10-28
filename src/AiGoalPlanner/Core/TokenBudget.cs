@@ -23,6 +23,20 @@ namespace jubeater.aigoalplanner.Core
         }
 
         /// <summary>
+        /// Reads what the Player typed as a Token Budget: a whole number of tokens, or 0 for no
+        /// limit. Only the invariant culture is read, the same one the settings view writes, so a
+        /// decimal separator is never taken for a thousands separator whichever culture the
+        /// Player's machine runs.
+        /// </summary>
+        public static bool TryParse(string text, out long budget) {
+            string trimmed = (text ?? string.Empty).Trim();
+
+            return long.TryParse(trimmed, NumberStyles.Integer | NumberStyles.AllowThousands,
+                                 CultureInfo.InvariantCulture, out budget)
+                && budget >= 0;
+        }
+
+        /// <summary>
         /// The question the Chat shows once per Chat when the budget is reached. It names exact
         /// counts, so the Player sees how far past the budget this Chat has gone.
         /// </summary>
