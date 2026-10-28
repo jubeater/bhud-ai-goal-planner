@@ -31,7 +31,7 @@ namespace jubeater.aigoalplanner.World
         private readonly string                                         _markersDirectory;
         private readonly string                                         _cacheDirectory;
         private readonly Action<string>                                 _logWarn;
-        private readonly Func<string, Task<string>>                     _httpGet;
+        private readonly Func<string, CancellationToken, Task<string>> _httpGet;
         private readonly Func<string, string, CancellationToken, Task>  _downloadFileAsync;
 
         private readonly object                                         _lock = new object();
@@ -43,12 +43,20 @@ namespace jubeater.aigoalplanner.World
             string markersDirectory,
             string cacheDirectory,
             Action<string> logWarn = null,
-            Func<string, Task<string>> httpGet = null,
-            Func<string, string, CancellationToken, Task> downloadFileAsync = null) {
+            Func<string, CancellationToken, Task<string>> httpGetAsync = null,
+            Func<string, string, CancellationToken, Task> downloadFileAsync = null,
+            Func<string, Task<string>> httpGet = null) {
+
             _markersDirectory  = markersDirectory;
             _cacheDirectory    = cacheDirectory;
             _logWarn           = logWarn;
-            _httpGet           = httpGet ?? DefaultHttpGetAsync;
+            if (httpGetAsync != null) {
+                _httpGet = httpGetAsync;
+            } else if (httpGet != null) {
+                _httpGet = (url, ct) => httpGet(url);
+            } else {
+                _httpGet = DefaultHttpGetAsync;
+            }
             _downloadFileAsync = downloadFileAsync ?? DefaultDownloadFileAsync;
         }
 
@@ -208,10 +216,16 @@ namespace jubeater.aigoalplanner.World
                 }
 
                 if (File.Exists(destFile)) {
-                    File.Delete(destFile);
+                    TryDeleteFile(tempFile);
+                    return new MarkerPackChange(applied: true, changed: false, targetPack.Name, targetPack.FileName, targetPack.SizeMb);
                 }
 
-                File.Move(tempFile, destFile);
+                try {
+                    File.Move(tempFile, destFile);
+                } catch (IOException) when (File.Exists(destFile)) {
+                    TryDeleteFile(tempFile);
+                    return new MarkerPackChange(applied: true, changed: false, targetPack.Name, targetPack.FileName, targetPack.SizeMb);
+                }
 
                 return new MarkerPackChange(applied: true, changed: true, targetPack.Name, targetPack.FileName, targetPack.SizeMb);
             } catch (OperationCanceledException) {
@@ -257,7 +271,9 @@ namespace jubeater.aigoalplanner.World
 
             string json = null;
             try {
-                json = await _httpGet(PublicRepoUrl).ConfigureAwait(false);
+                json = await _httpGet(PublicRepoUrl, cancellationToken).ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+                throw;
             } catch (Exception ex) {
                 _logWarn?.Invoke("Failed to fetch official marker pack repository: " + ex.GetType().Name);
             }
@@ -344,10 +360,13 @@ namespace jubeater.aigoalplanner.World
             return list;
         }
 
-        private static async Task<string> DefaultHttpGetAsync(string url) {
+        private static async Task<string> DefaultHttpGetAsync(string url, CancellationToken cancellationToken) {
             using (var client = new HttpClient()) {
                 client.Timeout = TimeSpan.FromSeconds(15);
-                return await client.GetStringAsync(url).ConfigureAwait(false);
+                using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false)) {
+                    response.EnsureSuccessStatusCode();
+                    return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                }
             }
         }
 

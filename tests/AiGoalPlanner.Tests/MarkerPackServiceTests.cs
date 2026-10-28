@@ -224,5 +224,52 @@ namespace jubeater.aigoalplanner.Tests
             Assert.True(change.Changed);
             Assert.False(File.Exists(filePath));
         }
+
+        [Fact]
+        public async Task DownloadPackAsync_preserves_destination_file_that_appears_during_download() {
+            byte[] downloadedZip = CreateValidZipBytes();
+            string destFile = Path.Combine(_markersDir, "tw_ALL_IN_ONE.taco");
+
+            var service = new MarkerPackService(
+                _markersDir,
+                _cacheDir,
+                httpGet: url => Task.FromResult(SampleRepoJson),
+                downloadFileAsync: (url, dest, token) => {
+                    File.WriteAllBytes(dest, downloadedZip);
+                    // Player or Pathing places the file while download was running
+                    File.WriteAllText(destFile, "pre-existing content installed concurrently");
+                    return Task.CompletedTask;
+                });
+
+            MarkerPackChange change = await service.DownloadPackAsync("Tekkit's All-In-One");
+
+            Assert.True(change.Applied);
+            Assert.False(change.Changed);
+            Assert.Equal("pre-existing content installed concurrently", File.ReadAllText(destFile));
+            Assert.Empty(Directory.GetFiles(_cacheDir, "*.tmp"));
+        }
+
+        [Fact]
+        public async Task DownloadPackAsync_propagates_cancellation_during_repo_fetch() {
+            var httpStarted = new TaskCompletionSource<bool>();
+            var tcs = new TaskCompletionSource<string>();
+
+            var service = new MarkerPackService(
+                _markersDir,
+                _cacheDir,
+                httpGet: url => {
+                    httpStarted.TrySetResult(true);
+                    return tcs.Task;
+                });
+
+            using (var cts = new CancellationTokenSource()) {
+                Task<MarkerPackChange> task = service.DownloadPackAsync("Tekkit's All-In-One", cts.Token);
+                await httpStarted.Task;
+                tcs.SetCanceled();
+                cts.Cancel();
+
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+            }
+        }
     }
 }

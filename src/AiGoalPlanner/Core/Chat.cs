@@ -429,11 +429,17 @@ namespace jubeater.aigoalplanner.Core
 
 
 
+                bool hadAppliedBeforeReview = HasAppliedBeforeReview;
+
+                if (applied.Outcomes.Count > 0 || hadAppliedBeforeReview) {
+                    if (!TryAppendApplyOutcome(generation, applied)) return;
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (applied.Outcomes.Count == 0 && !HasAppliedBeforeReview) return;
+                if (applied.Outcomes.Count == 0 && !hadAppliedBeforeReview) return;
 
-                if (!TryAppendApplyOutcome(generation, applied)) return;
+
 
 
 

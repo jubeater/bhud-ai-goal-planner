@@ -15,8 +15,9 @@ namespace jubeater.aigoalplanner.Tests
     public class MarkerPackChatTests
     {
         private static Chat NewChat(ScriptedChatClient model, FakeWorld world, bool autoApply = false) {
-            var plans = new Plans(world, () => autoApply);
-            var tools = Lookups.For(world);
+            IBlishHudWorld target = new GameThreadWorld(world, new ImmediateGameThread());
+            var plans = new Plans(target, () => autoApply);
+            var tools = Lookups.For(target);
             plans.AddTo(tools);
 
             return new Chat(() => model, () => SystemPrompt.For("test-model", "https://provider.test/v1"),

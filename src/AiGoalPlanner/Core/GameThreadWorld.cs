@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -69,12 +70,37 @@ namespace jubeater.aigoalplanner.Core
             return ReadAsync(() => _world.ListMarkerPacksAsync(cancellationToken), cancellationToken);
         }
 
-        public Task<MarkerPackChange> DownloadMarkerPackAsync(string pack, CancellationToken cancellationToken) {
-            return ReadAsync(() => _world.DownloadMarkerPackAsync(pack, cancellationToken), cancellationToken);
+        public async Task<MarkerPackChange> DownloadMarkerPackAsync(string pack, CancellationToken cancellationToken) {
+            MarkerPackChange change = await _world.DownloadMarkerPackAsync(pack, cancellationToken).ConfigureAwait(false);
+            if (!change.Applied || !change.Changed) {
+                return change;
+            }
+
+            await RestartPathingIfEnabledAsync(cancellationToken).ConfigureAwait(false);
+            return change;
         }
 
-        public Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
-            return ReadAsync(() => _world.DeleteMarkerPackAsync(fileName, cancellationToken), cancellationToken);
+        public async Task<MarkerPackChange> DeleteMarkerPackAsync(string fileName, CancellationToken cancellationToken) {
+            MarkerPackChange change = await _world.DeleteMarkerPackAsync(fileName, cancellationToken).ConfigureAwait(false);
+            if (!change.Applied || !change.Changed) {
+                return change;
+            }
+
+            await RestartPathingIfEnabledAsync(cancellationToken).ConfigureAwait(false);
+            return change;
+        }
+
+        private async Task RestartPathingIfEnabledAsync(CancellationToken cancellationToken) {
+            IReadOnlyList<InstalledModuleInfo> modules = await ListInstalledModulesAsync(cancellationToken).ConfigureAwait(false);
+            InstalledModuleInfo pathing = modules?.FirstOrDefault(m =>
+                string.Equals(m.Namespace, "bh.community.pathing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Namespace, "bh.pathing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Name, "Pathing", StringComparison.OrdinalIgnoreCase));
+
+            if (pathing != null && pathing.Enabled && !string.IsNullOrEmpty(pathing.Namespace)) {
+                await SetModuleEnabledAsync(pathing.Namespace, false, cancellationToken).ConfigureAwait(false);
+                await SetModuleEnabledAsync(pathing.Namespace, true, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         /// <summary>

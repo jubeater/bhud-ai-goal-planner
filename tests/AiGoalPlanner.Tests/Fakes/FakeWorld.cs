@@ -181,7 +181,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             if (AnswerDownloadMarkerPack != null) return AnswerDownloadMarkerPack(pack, cancellationToken);
             DownloadedPacks.Add(pack);
             Writes.Add("download " + pack);
-            RestartPathingIfEnabled();
+
             MarkerPackInfo existing = MarkerPacks.FirstOrDefault(p => string.Equals(p.Name, pack, StringComparison.OrdinalIgnoreCase) || string.Equals(p.FileName, pack, StringComparison.OrdinalIgnoreCase));
             string packName = existing?.Name ?? pack;
             string fileName = existing?.FileName ?? (pack + ".taco");
@@ -197,7 +197,7 @@ namespace jubeater.aigoalplanner.Tests.Fakes
             DownloadedPacks.Remove(fileName);
             DownloadedPacks.Remove(packName);
             Writes.Add("delete " + fileName);
-            RestartPathingIfEnabled();
+
             return Task.FromResult(new MarkerPackChange(applied: true, changed: true, packName: fileName, fileName: fileName, sizeMb: 0));
         }
 

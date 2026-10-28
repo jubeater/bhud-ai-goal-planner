@@ -671,7 +671,7 @@ namespace jubeater.aigoalplanner.World
                 return change;
             }
 
-            await RestartPathingIfEnabledAsync(cancellationToken).ConfigureAwait(false);
+
 
             return change;
         }
@@ -686,7 +686,7 @@ namespace jubeater.aigoalplanner.World
                 return change;
             }
 
-            await RestartPathingIfEnabledAsync(cancellationToken).ConfigureAwait(false);
+
 
             return change;
         }
