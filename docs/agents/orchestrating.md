@@ -2,7 +2,7 @@
 
 You coordinate the other agents and don't write code. You're done with a ticket when its PR has a clean review of its latest commit and a passed in-game check, both as PR comments, and you've told the maintainer it's ready to merge. Or when you've stopped and asked the maintainer.
 
-Delegate with the `codexhost-delegation` skill: an independent session per task, with a short task name (`impl #32`, `review #32 r2`). Watch each session rather than polling, and read it before judging its work.
+Delegate each task to its own session of the agent that does it, with a short task name (`impl #32`, `review #32 r2`). Start sessions through the multi-agent tool the maintainer has set up, so each one stays visible to the maintainer and can take follow-ups. Watch each session rather than polling, and read it before judging its work.
 
 ## Steps
 

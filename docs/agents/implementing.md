@@ -4,7 +4,7 @@ You're done when the ticket's PR is open, every acceptance criterion the code ca
 
 ## Steps
 
-1. **Worktree:** create a git worktree on a new branch from `main`, next to the repo: `../AI_assistant-worktrees/<branch>`. Work only there. The main `AI_assistant` folder stays on `main`.
+1. **Worktree:** work in a git worktree on a new branch from `main`. If your session started in one, use it; otherwise create one next to the repo: `../AI_assistant-worktrees/<branch>`. Work only there. The main `AI_assistant` folder stays on `main`.
 2. **Implement:** run the `implement` skill on the ticket (`/implement #<n>`). It works test-first with `tdd`, reviews your work with `code-review`, and commits.
 3. **Push and open the PR:** write the body with the `pr` skill, name the ticket (`Closes #<n>`), and list the acceptance criteria that only an in-game check can confirm.
 4. **Review rounds:** for each review finding, write a failing test first, then fix it. Push each round as a new commit, so the reviewer can compare against the commit they reviewed.
