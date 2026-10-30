@@ -65,6 +65,33 @@ namespace jubeater.aigoalplanner.Tests
         }
 
         [Fact]
+        public async Task A_refusal_that_copies_a_Setting_value_past_200_chars_keeps_it_out_of_the_log() {
+            var inner = new ScriptedChatClient();
+            string start        = new string('s', 200);
+            string settingValue = "SETTING_VALUE_mu7H7s3cr3t";
+            inner.WillReply(start + settingValue);
+
+            var store = new ToolCallingCapabilityStore();
+            var toolCallingClient = new ToolCallingChatClient(inner, Endpoint, Model, store);
+
+            var loggedMessages = new List<string>();
+            var loggingClient = new ProbeLoggingChatClient(toolCallingClient, msg => loggedMessages.Add(msg), apiKey: string.Empty);
+
+            ProviderException exception = await Assert.ThrowsAsync<ProviderException>(
+                () => loggingClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Hello") }));
+
+            Assert.Equal(ProviderFailure.ToolCallingNotSupported, exception.Failure);
+
+            string logged = Assert.Single(loggedMessages);
+            const string prefix = "Provider refused tool-calling probe: ";
+            Assert.StartsWith(prefix, logged);
+            Assert.Contains(start, logged);
+            Assert.DoesNotContain(settingValue, logged);
+            Assert.True(logged.Length - prefix.Length <= 200,
+                        "The refusal log keeps only the first ~200 characters of the error text.");
+        }
+
+        [Fact]
         public async Task Successful_probe_does_not_log_warnings() {
             var inner = new ScriptedChatClient();
             inner.WillCallTool("test_tool");

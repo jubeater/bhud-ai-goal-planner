@@ -4,13 +4,87 @@ A [Blish HUD](https://blishhud.com/) module in which an AI sets up and configure
 modules to reach a goal you describe in chat. The design is tracked as GitHub issues on this repo;
 `GLOSSARY.md` and `docs/adr/` explain the terms and the decisions behind it.
 
+## For players: what this module is
+
+**What it does.** Open the Chat from the corner icon and describe a goal in plain words — or start
+from a one-click Preset (hero points, mastery points, XP). The AI looks at your real setup, asks the
+game and your modules what it needs through Lookups, and proposes a Plan. The Review under the
+conversation shows each Action with the value it would change and why; **Apply** carries out what you
+approved, **Undo** puts the last ten Applies back, and Auto-apply (off by default) may take
+Setting changes on its own.
+
+**Supported Providers, bring your own key.** The Chat talks to any Provider with an OpenAI-compatible
+Chat Completions API: Ollama Cloud, local Ollama, LM Studio, DeepSeek, OpenAI, OpenRouter or Claude —
+or a **Custom** endpoint of your own. You bring the key (a local Ollama needs none at all); it is
+encrypted with Windows DPAPI and kept in the module's data folder, never typed into a text box, never
+drawn on screen, and never logged. The model must support tool calling: on first use the module runs
+a quick test, and models that cannot call tools are refused with a clear Notice.
+
+**Tokens.** Tokens are the unit the module counts in, because prices differ by Provider. What each
+reply used sits under that reply in the Chat window — input, output, and the cached split when the
+Provider reports it — and the window's subtitle carries the whole Chat's total. One Chat may use
+300,000 tokens before the Chat asks whether to go on; the **Token Budget** in Provider settings changes
+the limit, and `0` means no limit. Optionally enter prices in $ per million tokens to see an estimated
+cost next to the counts.
+
+**Installs come from the Catalog only.** When no installed module covers your goal, the AI may propose
+installing one — but only from the official Blish HUD module catalog, and only as an Action you Review
+and Apply like any other. Preferring what you already have comes first, including enabling a disabled
+module. Removing a module the Plan installed asks for a second confirmation, and a removal cannot be
+undone.
+
+**Advisory only.** The module never sends input to the game and never automates play. It only proposes:
+nothing changes until you Apply it. See [What is sent to the Provider](#what-is-sent-to-the-provider)
+for exactly what the AI sees.
+
+## What is sent to the Provider
+
+Every Request goes to the endpoint you picked in Provider settings, and only there. Your API key
+travels in the Request's authorization header to that Provider — it is never part of the prompt, never
+drawn on screen, and never logged. Your Guild Wars 2 API token stays inside Blish HUD the same way:
+the module reads the game through it, but the token itself is never sent to the Provider.
+
+What the Provider sees for each Request:
+
+- The system prompt: which product the model is part of, that it only proposes changes through
+  `submit_plan`, which Lookups to run before answering, and that it replies in your language as plain
+  text — plus the Presets' hints, so a preset Request is answered the way its data file says.
+- Your messages in this Chat, and the AI's replies to them. A Preset button fills the text box with
+  its starter Request, so the Provider reads that as your message when you send it.
+- What happened to the last Plan, so the AI can carry on from the state it made: after an Apply,
+  which Actions were applied — their target modules and settings with the new values — and anything
+  that failed and why; when you dismiss a Plan, or a new Request sets the rest of one aside, that the
+  rest was dropped and what Auto-apply had already done of it.
+- The instruction that follows an Apply: look anything up you now need, and say what you suggest
+  next (with extra guidance when a marker pack was downloaded or a module installed).
+- The AI's tool requests, and each tool's answer:
+  - Installed modules: namespace, name, version, whether enabled, and short description
+    (`list_installed_modules`).
+  - One module's settings: key, label, description, type, current value, and allowed range or options
+    (`get_module_settings`). Settings whose name looks like a secret (token, password, API key and
+    the like) are removed before sending, and this module's own settings are never shared.
+  - Your location: active character name, current map and region (`get_location`).
+  - Owned content: the expansions and content your account owns (`get_account_access`).
+  - Your progress: mastery point totals and unfinished tracks, or hero-challenge progress for your
+    current character and map (`get_progress`).
+  - Marker packs and categories: pack names, categories, sizes, what is installed, and which
+    categories are shown in Pathing (`list_marker_packs`, `find_marker_categories`).
+  - Catalog modules: name, namespace, version and dependencies, and each candidate's description and
+    requested game-API permissions (`search_catalog`, `get_module_details`).
+- Nothing else. The Provider never sees your keys, your other modules' secrets, or anything outside
+  this list. The debug log carries even less: timings, finish reasons and counts, never a Setting's
+  value, your words, or anything a Provider sent back.
+
 **Status:** the Chat talks to a real Provider and answers from the Player's real setup: the AI can
-list the installed modules and read one module's settings, and it proposes changes as a Plan through
-`submit_plan`. The Review under the conversation shows each Action with the value it would change,
-why, and a badge when it is a Side Effect; **Apply** changes what the Player approved and enables or
-disables Modules, **Undo** puts the last ten Applies back, and Auto-apply (off by default) may take
-Setting changes on its own. A corner icon opens the Chat window and **Provider settings** stores the
-endpoint, the model and (optionally) the API key.
+list the installed modules and read one module's settings, check your location, Owned Content and
+progress, search marker packs and Pathing categories, and search the module catalog. It proposes
+changes as a Plan through `submit_plan`, including installs from the Catalog. The Review under the
+conversation shows each Action with the value it would change, why, and a badge when it is a Side
+Effect; **Apply** changes what the Player approved and enables or disables Modules, **Undo** puts the
+last ten Applies back, and Auto-apply (off by default) may take Setting changes on its own. Three
+Presets (hero points, mastery points, XP) start common goals in one click, and token counts with an
+optional budget sit under every reply. A corner icon opens the Chat window and **Provider settings**
+stores the endpoint, the model and (optionally) the API key.
 
 ## Build
 

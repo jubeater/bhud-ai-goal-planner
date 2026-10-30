@@ -18,6 +18,13 @@ namespace jubeater.aigoalplanner.Providers
         private readonly Action<string> _logWarn;
         private readonly string         _apiKey;
 
+        /// <summary>
+        /// How much of a Provider's refusal error the log keeps. Some servers copy part of the
+        /// Request into the error, which can hold the Player's messages or Setting values, so the
+        /// line keeps the start of the message — after key redaction — and drops the rest.
+        /// </summary>
+        internal const int MaxLoggedChars = 200;
+
         public ProbeLoggingChatClient(IChatClient inner, Action<string> logWarn, string apiKey = null) {
             _inner   = inner   ?? throw new ArgumentNullException(nameof(inner));
             _logWarn = logWarn ?? throw new ArgumentNullException(nameof(logWarn));
@@ -38,7 +45,11 @@ namespace jubeater.aigoalplanner.Providers
                     ? KeyRedaction.Redact(rawText, _apiKey)
                     : rawText;
 
-                _logWarn("Provider refused tool-calling probe: " + redacted);
+                string trimmed = redacted != null && redacted.Length > MaxLoggedChars
+                    ? redacted.Substring(0, MaxLoggedChars)
+                    : redacted;
+
+                _logWarn("Provider refused tool-calling probe: " + trimmed);
 
                 throw;
             }
