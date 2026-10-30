@@ -27,9 +27,9 @@ namespace jubeater.aigoalplanner.Tests
         // with the reason. Anything else in these files is still checked.
         private static readonly (string File, string Code, string Reason)[] KnownExceptions = {
             (Path.Combine("Providers", "ProbeLoggingChatClient.cs"), "InnerException.Message",
-             "logs a Provider's tool-calling refusal after key redaction; #13 trims it"),
+             "logs a Provider's tool-calling refusal after key redaction; #44 trims it to ~200 chars"),
             (Path.Combine("Providers", "ProbeLoggingChatClient.cs"), ": exception.Message",
-             "logs a Provider's tool-calling refusal after key redaction; #13 trims it"),
+             "logs a Provider's tool-calling refusal after key redaction; #44 trims it to ~200 chars"),
             (Path.Combine("Providers", "OpenAiCompatibleChatClient.cs"), "\"Error: \" + result.Exception.Message",
              "a failed Lookup's message goes to the model as the tool result, not to the log; #13 lists what is sent"),
             (Path.Combine("World", "Gw2ApiExceptionHelper.cs"), "ex.Message",
