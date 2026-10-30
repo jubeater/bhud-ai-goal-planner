@@ -48,8 +48,15 @@ What the Provider sees for each Request:
 
 - The system prompt: which product the model is part of, that it only proposes changes through
   `submit_plan`, which Lookups to run before answering, and that it replies in your language as plain
-  text.
-- Your messages in this Chat, and the AI's replies to them.
+  text — plus the Presets' hints, so a preset Request is answered the way its data file says.
+- Your messages in this Chat, and the AI's replies to them. A Preset button fills the text box with
+  its starter Request, so the Provider reads that as your message when you send it.
+- What happened to the last Plan, so the AI can carry on from the state it made: after an Apply,
+  which Actions were applied — their target modules and settings with the new values — and anything
+  that failed and why; when you dismiss a Plan, or a new Request sets the rest of one aside, that the
+  rest was dropped and what Auto-apply had already done of it.
+- The instruction that follows an Apply: look anything up you now need, and say what you suggest
+  next (with extra guidance when a marker pack was downloaded or a module installed).
 - The AI's tool requests, and each tool's answer:
   - Installed modules: namespace, name, version, whether enabled, and short description
     (`list_installed_modules`).
